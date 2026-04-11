@@ -2443,6 +2443,138 @@ async function executeStep7(state) {
 // ============================================================
 
 let webNavListener = null;
+const STEP8_CLICK_EFFECT_TIMEOUT_MS = 3500;
+const STEP8_CLICK_RETRY_DELAY_MS = 500;
+const STEP8_READY_WAIT_TIMEOUT_MS = 30000;
+const STEP8_STRATEGIES = [
+  { mode: 'content', strategy: 'requestSubmit', label: 'form.requestSubmit' },
+  { mode: 'debugger', label: 'debugger click' },
+  { mode: 'content', strategy: 'nativeClick', label: 'element.click' },
+  { mode: 'content', strategy: 'dispatchClick', label: 'dispatch click' },
+  { mode: 'debugger', label: 'debugger click retry' },
+];
+
+async function getStep8PageState(tabId, responseTimeoutMs = 1500) {
+  try {
+    const result = await sendTabMessageWithTimeout(tabId, 'signup-page', {
+      type: 'STEP8_GET_STATE',
+      source: 'background',
+      payload: {},
+    }, responseTimeoutMs);
+    if (result?.error) {
+      throw new Error(result.error);
+    }
+    return result;
+  } catch (err) {
+    if (isRetryableContentScriptTransportError(err)) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    throwIfStopped();
+    const pageState = await getStep8PageState(tabId);
+    if (pageState?.addPhonePage) {
+      throw new Error('步骤 8：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。');
+    }
+    if (pageState?.consentReady) {
+      return pageState;
+    }
+    await sleepWithStop(250);
+  }
+
+  throw new Error('步骤 8：长时间未进入 OAuth 同意页，无法定位“继续”按钮。');
+}
+
+async function prepareStep8DebuggerClick() {
+  const result = await sendToContentScriptResilient('signup-page', {
+    type: 'STEP8_FIND_AND_CLICK',
+    source: 'background',
+    payload: {},
+  }, {
+    timeoutMs: 15000,
+    retryDelayMs: 600,
+    logMessage: '步骤 8：认证页正在切换，等待 OAuth 同意页按钮重新就绪...',
+  });
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+
+  return result;
+}
+
+async function triggerStep8ContentStrategy(strategy) {
+  const result = await sendToContentScriptResilient('signup-page', {
+    type: 'STEP8_TRIGGER_CONTINUE',
+    source: 'background',
+    payload: {
+      strategy,
+      findTimeoutMs: 4000,
+      enabledTimeoutMs: 3000,
+    },
+  }, {
+    timeoutMs: 15000,
+    retryDelayMs: 600,
+    logMessage: '步骤 8：认证页正在切换，等待“继续”按钮重新就绪...',
+  });
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+
+  return result;
+}
+
+async function waitForStep8ClickEffect(tabId, baselineUrl, timeoutMs = STEP8_CLICK_EFFECT_TIMEOUT_MS) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    throwIfStopped();
+
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) {
+      throw new Error('步骤 8：认证页面标签页已关闭，无法继续自动授权。');
+    }
+
+    if (baselineUrl && typeof tab.url === 'string' && tab.url !== baselineUrl) {
+      return { progressed: true, reason: 'url_changed', url: tab.url };
+    }
+
+    const pageState = await getStep8PageState(tabId);
+    if (pageState?.addPhonePage) {
+      throw new Error('步骤 8：点击“继续”后页面跳到了手机号页面，当前流程无法继续自动授权。');
+    }
+    if (pageState === null) {
+      return { progressed: true, reason: 'page_reloading' };
+    }
+    if (pageState && !pageState.consentPage) {
+      return { progressed: true, reason: 'left_consent_page', url: pageState.url };
+    }
+
+    await sleepWithStop(200);
+  }
+
+  return { progressed: false, reason: 'no_effect' };
+}
+
+function getStep8EffectLabel(effect) {
+  switch (effect?.reason) {
+    case 'url_changed':
+      return `URL 已变化：${effect.url}`;
+    case 'page_reloading':
+      return '页面正在跳转或重载';
+    case 'left_consent_page':
+      return `页面已离开 OAuth 同意页：${effect.url || 'unknown'}`;
+    default:
+      return '页面仍停留在 OAuth 同意页';
+  }
+}
 
 async function executeStep8(state) {
   if (!state.oauthUrl) {
@@ -2451,7 +2583,6 @@ async function executeStep8(state) {
 
   await addLog('步骤 8：正在监听 localhost 回调地址...');
 
-  // 只在当前步骤内注册 webNavigation 监听
   return new Promise((resolve, reject) => {
     let resolved = false;
     let signupTabId = null;
@@ -2463,9 +2594,16 @@ async function executeStep8(state) {
       }
     };
 
-    const timeout = setTimeout(() => {
+    const failStep8 = (error) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
       cleanupListener();
-      reject(new Error('120 秒内未捕获到 localhost 回调跳转，步骤 8 的点击可能被拦截了。'));
+      reject(error);
+    };
+
+    const timeout = setTimeout(() => {
+      failStep8(new Error('120 秒内未捕获到 localhost 回调跳转，步骤 8 已持续重试点击“继续”但页面仍未完成授权。'));
     }, 120000);
 
     webNavListener = (details) => {
@@ -2487,40 +2625,61 @@ async function executeStep8(state) {
       }
     };
 
-
-    // 步骤 7 之后，认证页会进入 OAuth 同意页，出现“继续”按钮。
-    // 这里先在页面内定位按钮，再通过 debugger 输入事件发起点击。
     (async () => {
       try {
         signupTabId = await getTabId('signup-page');
         if (signupTabId) {
           await chrome.tabs.update(signupTabId, { active: true });
-          await addLog('步骤 8：已切回认证页，正在准备调试器点击...');
+          await addLog('步骤 8：已切回认证页，准备循环确认“继续”按钮直到页面真正跳转...');
         } else {
           signupTabId = await reuseOrCreateTab('signup-page', state.oauthUrl);
-          await addLog('步骤 8：已重新打开认证页，正在准备调试器点击...');
+          await addLog('步骤 8：已重新打开认证页，准备循环确认“继续”按钮直到页面真正跳转...');
         }
 
         chrome.webNavigation.onBeforeNavigate.addListener(webNavListener);
 
-        const clickResult = await sendToContentScript('signup-page', {
-          type: 'STEP8_FIND_AND_CLICK',
-          source: 'background',
-          payload: {},
-        });
+        let attempt = 0;
+        while (!resolved) {
+          const pageState = await waitForStep8Ready(signupTabId);
+          if (!pageState?.consentReady) {
+            await sleepWithStop(STEP8_CLICK_RETRY_DELAY_MS);
+            continue;
+          }
 
-        if (clickResult?.error) {
-          throw new Error(clickResult.error);
-        }
+          const strategy = STEP8_STRATEGIES[attempt % STEP8_STRATEGIES.length];
+          const round = attempt + 1;
+          attempt += 1;
 
-        if (!resolved) {
-          await clickWithDebugger(signupTabId, clickResult?.rect);
-          await addLog('步骤 8：已发送调试器点击，正在等待跳转...');
+          await addLog(`步骤 8：第 ${round} 次尝试点击“继续”（${strategy.label}）...`);
+
+          if (strategy.mode === 'debugger') {
+            const clickTarget = await prepareStep8DebuggerClick();
+            if (!resolved) {
+              await clickWithDebugger(signupTabId, clickTarget?.rect);
+            }
+          } else {
+            await triggerStep8ContentStrategy(strategy.strategy);
+          }
+
+          if (resolved) {
+            return;
+          }
+
+          const effect = await waitForStep8ClickEffect(signupTabId, pageState.url);
+          if (resolved) {
+            return;
+          }
+
+          if (effect.progressed) {
+            await addLog(`步骤 8：检测到本次点击已生效，${getStep8EffectLabel(effect)}，继续等待 localhost 回调...`, 'info');
+            break;
+          }
+
+          await addLog(`步骤 8：${strategy.label} 本次未触发页面离开同意页，准备继续重试。`, 'warn');
+          await sleepWithStop(STEP8_CLICK_RETRY_DELAY_MS);
         }
       } catch (err) {
-        clearTimeout(timeout);
-        cleanupListener();
-        reject(err);
+        failStep8(err);
       }
     })();
   });
