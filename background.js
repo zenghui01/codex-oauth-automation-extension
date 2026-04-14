@@ -1,6 +1,6 @@
 // background.js — Service Worker: orchestration, state, tab management, message routing
 
-importScripts('data/names.js', 'hotmail-utils.js', 'content/activation-utils.js');
+importScripts('data/names.js', 'hotmail-utils.js', 'microsoft-email.js', 'content/activation-utils.js');
 
 const {
   buildHotmailMailApiLatestUrl,
@@ -10,6 +10,7 @@ const {
   getHotmailMailApiRequestConfig,
   getHotmailVerificationPollConfig,
   getHotmailVerificationRequestTimestamp,
+  normalizeHotmailServiceMode,
   normalizeHotmailMailApiMessages,
   pickHotmailAccountForRun,
   pickVerificationMessage,
@@ -17,6 +18,10 @@ const {
   pickVerificationMessageWithTimeFallback,
   shouldClearHotmailCurrentSelection,
 } = self.HotmailUtils;
+const {
+  fetchMicrosoftMailboxMessages,
+  fetchMicrosoftVerificationCode,
+} = self.MultiPageMicrosoftEmail;
 const {
   isRecoverableStep9AuthFailure,
 } = self.MultiPageActivationUtils;
@@ -49,8 +54,36 @@ const DEFAULT_HOTMAIL_REMOTE_BASE_URL = '';
 const DEFAULT_HOTMAIL_LOCAL_BASE_URL = 'http://127.0.0.1:17373';
 const HOTMAIL_LOCAL_HELPER_TIMEOUT_MS = 45000;
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
+const MICROSOFT_TOKEN_DNR_RULE_ID = 1001;
 
 initializeSessionStorageAccess();
+setupDeclarativeNetRequestRules();
+
+function setupDeclarativeNetRequestRules() {
+  if (!chrome.declarativeNetRequest?.updateDynamicRules) {
+    return;
+  }
+
+  chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [MICROSOFT_TOKEN_DNR_RULE_ID],
+    addRules: [{
+      id: MICROSOFT_TOKEN_DNR_RULE_ID,
+      priority: 1,
+      action: {
+        type: 'modifyHeaders',
+        requestHeaders: [
+          { header: 'Origin', operation: 'remove' },
+        ],
+      },
+      condition: {
+        urlFilter: 'login.microsoftonline.com/*/oauth2/v2.0/token',
+        resourceTypes: ['xmlhttprequest'],
+      },
+    }],
+  }).catch((error) => {
+    console.warn(LOG_PREFIX, 'Failed to setup declarativeNetRequest rules:', error?.message || error);
+  });
+}
 
 // ============================================================
 // 状态管理（chrome.storage.session + chrome.storage.local）
@@ -272,10 +305,6 @@ function normalizeCloudflareDomains(values) {
   }
 
   return normalizedDomains;
-}
-
-function normalizeHotmailServiceMode(rawValue = '') {
-  return HOTMAIL_SERVICE_MODE_LOCAL;
 }
 
 function normalizeHotmailRemoteBaseUrl(rawValue = '') {
@@ -831,55 +860,37 @@ async function requestHotmailRemoteMailbox(account, mailbox = 'INBOX') {
     throw new Error(`Hotmail 账号 ${account.email || account.id} 缺少刷新令牌（refresh token）。`);
   }
 
-  const serviceSettings = getHotmailServiceSettings(await getState());
-  const url = buildHotmailMailApiLatestUrl({
-    apiUrl: buildHotmailRemoteEndpoint(serviceSettings.remoteBaseUrl, '/api/mail-new'),
-    clientId: account.clientId,
-    email: account.email,
-    refreshToken: account.refreshToken,
-    mailbox,
-    responseType: 'json',
-  });
   const { timeoutMs } = getHotmailMailApiRequestConfig();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
 
-  let response;
   try {
-    response = await fetch(url, { method: 'GET', signal: controller.signal });
+    const result = await fetchMicrosoftMailboxMessages({
+      clientId: account.clientId,
+      refreshToken: account.refreshToken,
+      top: 10,
+      signal: controller.signal,
+    });
+
+    return {
+      mailbox,
+      payload: {
+        source: 'microsoft-api',
+      },
+      messages: normalizeHotmailMailApiMessages(result.messages).map((message) => ({
+        ...message,
+        mailbox: 'INBOX',
+      })),
+      nextRefreshToken: result.nextRefreshToken,
+    };
   } catch (err) {
     if (err?.name === 'AbortError') {
-      throw new Error(`Hotmail API 请求超时（>${Math.round(timeoutMs / 1000)} 秒）：${mailbox}`);
+      throw new Error(`Hotmail API 对接请求超时（>${Math.round(timeoutMs / 1000)} 秒）：${mailbox}`);
     }
-    throw new Error(`Hotmail API 请求失败：${err.message}`);
+    throw new Error(`Hotmail API 对接请求失败：${err.message}`);
   } finally {
     clearTimeout(timeoutId);
   }
-
-  const text = await response.text();
-  let payload = {};
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    payload = { raw: text };
-  }
-
-  if (!response.ok) {
-    const errorText = payload?.message || payload?.error || payload?.msg || text || `HTTP ${response.status}`;
-    throw new Error(`Hotmail API 请求失败：${errorText}`);
-  }
-
-  if (payload && payload.success === false) {
-    const errorText = payload?.message || payload?.msg || payload?.error || '未知错误';
-    throw new Error(`Hotmail API 返回失败：${errorText}`);
-  }
-
-  return {
-    mailbox,
-    payload,
-    messages: normalizeHotmailMailApiMessages(payload?.data),
-    nextRefreshToken: String(payload?.new_refresh_token || payload?.newRefreshToken || '').trim(),
-  };
 }
 
 function applyHotmailApiResultToAccount(account, apiResult) {
@@ -903,30 +914,28 @@ function buildHotmailMailApiFailureAccount(account, errorMessage) {
 
 async function fetchHotmailMailboxMessagesFromRemoteService(account, mailboxes = HOTMAIL_MAILBOXES) {
   let workingAccount = normalizeHotmailAccount(account);
-  const mailboxResults = [];
+  const requestedMailboxes = Array.isArray(mailboxes) && mailboxes.length ? mailboxes : ['INBOX'];
 
   try {
-    for (const mailbox of mailboxes) {
-      const result = await requestHotmailRemoteMailbox(workingAccount, mailbox);
-      workingAccount = applyHotmailApiResultToAccount(workingAccount, result);
-      mailboxResults.push({
-        mailbox,
-        count: result.messages.length,
-        messages: result.messages.map((message) => ({ ...message, mailbox })),
-      });
-    }
+    const result = await requestHotmailRemoteMailbox(workingAccount, 'INBOX');
+    workingAccount = applyHotmailApiResultToAccount(workingAccount, result);
+    const inboxMessages = result.messages.map((message) => ({ ...message, mailbox: 'INBOX' }));
+    const mailboxResults = requestedMailboxes.map((mailbox) => ({
+      mailbox,
+      count: mailbox === 'INBOX' ? inboxMessages.length : 0,
+      messages: mailbox === 'INBOX' ? inboxMessages : [],
+    }));
+    const savedAccount = await upsertHotmailAccount(workingAccount);
+    return {
+      account: savedAccount,
+      mailboxResults,
+      messages: mailboxResults.flatMap((item) => item.messages),
+    };
   } catch (err) {
     const failedAccount = buildHotmailMailApiFailureAccount(workingAccount, err.message);
     await upsertHotmailAccount(failedAccount);
     throw err;
   }
-
-  const savedAccount = await upsertHotmailAccount(workingAccount);
-  return {
-    account: savedAccount,
-    mailboxResults,
-    messages: mailboxResults.flatMap((item) => item.messages),
-  };
 }
 
 async function requestHotmailLocalMessages(account, mailboxes = HOTMAIL_MAILBOXES) {
@@ -1195,76 +1204,33 @@ async function pollHotmailVerificationCode(step, state, pollPayload = {}) {
   if (serviceSettings.mode === HOTMAIL_SERVICE_MODE_LOCAL) {
     return pollHotmailVerificationCodeViaLocalHelper(step, account, pollPayload);
   }
-
-  const maxAttempts = Number(pollPayload.maxAttempts) || 5;
-  const intervalMs = Number(pollPayload.intervalMs) || 3000;
-  let lastError = null;
-
-  function summarizeMessagesForLog(messages) {
-    return (messages || [])
-      .slice()
-      .sort((left, right) => {
-        const leftTime = Date.parse(left.receivedDateTime || '') || 0;
-        const rightTime = Date.parse(right.receivedDateTime || '') || 0;
-        return rightTime - leftTime;
-      })
-      .slice(0, 3)
-      .map((message) => {
-        const receivedAt = message?.receivedDateTime || '未知时间';
-        const sender = message?.from?.emailAddress?.address || '未知发件人';
-        const subject = message?.subject || '（无主题）';
-        const preview = String(message?.bodyPreview || '').replace(/\s+/g, ' ').trim().slice(0, 80);
-        return `[${message.mailbox || 'INBOX'}] ${receivedAt} | ${sender} | ${subject} | ${preview}`;
-      })
-      .join(' || ');
+  try {
+    await addLog(`步骤 ${step}：正在通过 API对接 轮询 Hotmail 验证码...`, 'info');
+    const result = await fetchMicrosoftVerificationCode({
+      token: account.refreshToken,
+      clientId: account.clientId,
+      filterAfterTimestamp: pollPayload.filterAfterTimestamp || 0,
+      maxRetries: Number(pollPayload.maxAttempts) || 5,
+      retryDelayMs: Number(pollPayload.intervalMs) || 3000,
+      log: (message) => {
+        void addLog(`步骤 ${step}：${message}`, 'info');
+      },
+    });
+    account = await upsertHotmailAccount(applyHotmailApiResultToAccount(account, {
+      nextRefreshToken: result.nextRefreshToken,
+    }));
+    await addLog(`步骤 ${step}：已通过 API对接 找到验证码：${result.code}`, 'ok');
+    return {
+      ok: true,
+      code: result.code,
+      emailTimestamp: result.emailTimestamp || Date.now(),
+      mailId: result.messageId || '',
+    };
+  } catch (err) {
+    const failedAccount = buildHotmailMailApiFailureAccount(account, err.message);
+    await upsertHotmailAccount(failedAccount);
+    throw new Error(`步骤 ${step}：${err.message}`);
   }
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    throwIfStopped();
-    try {
-      await addLog(`步骤 ${step}：正在轮询 Hotmail 邮件（${attempt}/${maxAttempts}）...`, 'info');
-      const fetchResult = await fetchHotmailMailboxMessages(account, HOTMAIL_MAILBOXES);
-      account = fetchResult.account;
-      const matchResult = pickVerificationMessageWithTimeFallback(fetchResult.messages, {
-        afterTimestamp: pollPayload.filterAfterTimestamp || 0,
-        senderFilters: pollPayload.senderFilters || [],
-        subjectFilters: pollPayload.subjectFilters || [],
-        excludeCodes: pollPayload.excludeCodes || [],
-      });
-      const match = matchResult.match;
-
-      if (match?.code) {
-        const mailboxLabel = match.message?.mailbox || 'INBOX';
-        if (matchResult.usedRelaxedFilters) {
-          const fallbackLabel = matchResult.usedTimeFallback ? '宽松匹配 + 时间回退' : '宽松匹配';
-          await addLog(`步骤 ${step}：严格规则未命中，已改用 ${fallbackLabel} 并命中 Hotmail ${mailboxLabel} 验证码。`, 'warn');
-        }
-        await addLog(`步骤 ${step}：已在 Hotmail ${mailboxLabel} 中找到验证码：${match.code}`, 'ok');
-        return {
-          ok: true,
-          code: match.code,
-          emailTimestamp: match.receivedAt || Date.now(),
-          mailId: match.message?.id || '',
-        };
-      }
-
-      lastError = new Error(`步骤 ${step}：暂未在 Hotmail 收件箱中找到匹配验证码（${attempt}/${maxAttempts}）。`);
-      await addLog(lastError.message, attempt === maxAttempts ? 'warn' : 'info');
-      const mailSummary = summarizeMessagesForLog(fetchResult.messages);
-      if (mailSummary) {
-        await addLog(`步骤 ${step}：最近邮件样本：${mailSummary}`, 'info');
-      }
-    } catch (err) {
-      lastError = err;
-      await addLog(`步骤 ${step}：Hotmail 收件箱轮询失败：${err.message}`, 'warn');
-    }
-
-    if (attempt < maxAttempts) {
-      await sleepWithStop(intervalMs);
-    }
-  }
-
-  throw lastError || new Error(`步骤 ${step}：未在 Hotmail 收件箱中找到新的匹配验证码。`);
 }
 
 function generateRandomSuffix(length = 6) {
@@ -4730,7 +4696,7 @@ function getMailConfig(state) {
     return { provider: 'custom', label: '自定义邮箱' };
   }
   if (provider === HOTMAIL_PROVIDER) {
-    return { provider: HOTMAIL_PROVIDER, label: 'Hotmail（远程/本地）' };
+    return { provider: HOTMAIL_PROVIDER, label: 'Hotmail（API对接/本地助手）' };
   }
   if (provider === '163') {
     return { source: 'mail-163', url: 'https://mail.163.com/js6/main.jsp?df=mail163_letter#module=mbox.ListModule%7C%7B%22fid%22%3A1%2C%22order%22%3A%22date%22%2C%22desc%22%3Atrue%7D', label: '163 邮箱' };
