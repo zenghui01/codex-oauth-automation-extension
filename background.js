@@ -260,6 +260,7 @@ const DEFAULT_STATE = {
   email: null, // 运行时邮箱，由程序自动获取并写入，不能手动预填。
   password: null, // 运行时实际密码，由 customPassword 或程序自动生成后写入。
   accounts: [], // 已生成账号记录：{ email, password, createdAt }。
+  accountRunHistory: [], // 账号运行历史快照，实际持久化在 chrome.storage.local。
   manualAliasUsage: {},
   preservedAliases: {},
   lastEmailTimestamp: null, // 最近一次获取到邮箱数据的运行时时间戳。
@@ -859,12 +860,13 @@ async function getPersistedAliasState() {
 }
 
 async function getState() {
-  const [state, persistedSettings, persistedAliasState] = await Promise.all([
+  const [state, persistedSettings, persistedAliasState, accountRunHistory] = await Promise.all([
     chrome.storage.session.get(null),
     getPersistedSettings(),
     getPersistedAliasState(),
+    accountRunHistoryHelpers?.getPersistedAccountRunHistory?.() || [],
   ]);
-  return { ...DEFAULT_STATE, ...persistedSettings, ...persistedAliasState, ...state };
+  return { ...DEFAULT_STATE, ...persistedSettings, ...persistedAliasState, accountRunHistory, ...state };
 }
 
 async function initializeSessionStorageAccess() {
@@ -4412,8 +4414,8 @@ async function completeStepFromBackground(step, payload = {}) {
   await setStepStatus(step, 'completed');
   await addLog(`步骤 ${step} 已完成`, 'ok');
   await handleStepData(step, payload);
-  if (step === 9 && accountRunHistoryHelpers?.appendAccountRunRecord) {
-    await accountRunHistoryHelpers.appendAccountRunRecord('success', completionState);
+  if (step === 9) {
+    await appendAndBroadcastAccountRunRecord('success', completionState);
   }
   notifyStepComplete(step, payload);
 }
@@ -4428,7 +4430,7 @@ async function appendManualAccountRunRecordIfNeeded(status, stateOverride = null
     return null;
   }
 
-  return accountRunHistoryHelpers.appendAccountRunRecord(status, state, reason);
+  return appendAndBroadcastAccountRunRecord(status, state, reason);
 }
 
 async function finalizeDeferredStepExecutionError(step, error) {
@@ -4761,9 +4763,34 @@ const accountRunHistoryHelpers = self.MultiPageBackgroundAccountRunHistory?.crea
   HOTMAIL_SERVICE_MODE_LOCAL,
   normalizeHotmailLocalBaseUrl,
 });
+
+async function broadcastAccountRunHistoryUpdate() {
+  if (!accountRunHistoryHelpers?.getPersistedAccountRunHistory) {
+    return [];
+  }
+
+  const history = await accountRunHistoryHelpers.getPersistedAccountRunHistory();
+  broadcastDataUpdate({ accountRunHistory: history });
+  return history;
+}
+
+async function appendAndBroadcastAccountRunRecord(status, stateOverride = null, reason = '') {
+  if (!accountRunHistoryHelpers?.appendAccountRunRecord) {
+    return null;
+  }
+
+  const record = await accountRunHistoryHelpers.appendAccountRunRecord(status, stateOverride, reason);
+  if (!record) {
+    return null;
+  }
+
+  await broadcastAccountRunHistoryUpdate();
+  return record;
+}
+
 const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoRunController({
   addLog,
-  appendAccountRunRecord: (...args) => accountRunHistoryHelpers?.appendAccountRunRecord?.(...args),
+  appendAccountRunRecord: (...args) => appendAndBroadcastAccountRunRecord(...args),
   AUTO_RUN_MAX_RETRIES_PER_ROUND,
   AUTO_RUN_RETRY_DELAY_MS,
   AUTO_RUN_TIMER_KIND_BEFORE_RETRY,
@@ -5302,7 +5329,7 @@ const stepExecutorsByKey = {
 };
 const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter({
   addLog,
-  appendAccountRunRecord: (...args) => accountRunHistoryHelpers?.appendAccountRunRecord?.(...args),
+  appendAccountRunRecord: (...args) => appendAndBroadcastAccountRunRecord(...args),
   batchUpdateLuckmailPurchases,
   buildLocalhostCleanupPrefix,
   buildLuckmailSessionSettingsPayload,
