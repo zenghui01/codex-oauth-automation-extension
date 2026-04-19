@@ -1,7 +1,7 @@
 (function attachSidepanelContributionMode(globalScope) {
   const ACTIVE_STATUSES = new Set(['started', 'waiting', 'processing']);
   const FINAL_STATUSES = new Set(['auto_approved', 'auto_rejected', 'manual_review_required', 'expired', 'error']);
-  const DEFAULT_COPY = '当前账号将用于支持项目维护。扩展会自动申请贡献登录地址并持续跟踪授权状态；如检测到回调地址，会自动提交，无需手动复制。';
+  const DEFAULT_COPY = '当前账号将用于支持项目维护。扩展会自动申请贡献登录地址并持续跟踪授权状态；如检测到回调地址，会自动提交，并继续等待 CPA 最终确认。';
 
   function createContributionModeManager(context = {}) {
     const {
@@ -56,7 +56,6 @@
         case 'captured':
         case 'submitting':
         case 'submitted':
-        case 'not_required':
         case 'failed':
         case 'idle':
           return normalized;
@@ -137,10 +136,10 @@
         return '未生成登录地址';
       }
       if (status === 'waiting') {
-        return '等待授权完成';
+        return '等待提交回调';
       }
       if (status === 'processing' || status === 'auto_approved' || status === 'auto_rejected' || status === 'manual_review_required') {
-        return '授权已完成';
+        return status === 'processing' ? '已提交回调' : '授权已结束';
       }
       if (status === 'expired' || status === 'error') {
         return '授权失败';
@@ -160,8 +159,6 @@
           return '正在提交回调';
         case 'submitted':
           return '已提交回调';
-        case 'not_required':
-          return '当前流程无需手动回调';
         case 'failed':
           return '回调提交失败';
         case 'waiting':

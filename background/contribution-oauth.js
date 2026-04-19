@@ -4,7 +4,7 @@
   const API_BASE_URL = 'https://apikey.qzz.io/oauth/api';
   const ACTIVE_STATUSES = new Set(['started', 'waiting', 'processing']);
   const FINAL_STATUSES = new Set(['auto_approved', 'auto_rejected', 'manual_review_required', 'expired', 'error']);
-  const CALLBACK_FINAL_STATUSES = new Set(['submitted', 'not_required']);
+  const CALLBACK_FINAL_STATUSES = new Set(['submitted']);
   const CALLBACK_WAITING_STATUSES = new Set(['idle', 'waiting', 'captured', 'failed', 'submitting']);
 
   const RUNTIME_DEFAULTS = {
@@ -93,10 +93,6 @@
         case 'success':
         case 'done':
           return 'submitted';
-        case 'not_required':
-        case 'no_need':
-        case 'no_callback_required':
-          return 'not_required';
         case 'failed':
         case 'error':
           return 'failed';
@@ -114,13 +110,13 @@
         case 'started':
           return '已生成登录地址';
         case 'waiting':
-          return '等待授权完成';
+          return '等待提交回调';
         case 'processing':
-          return '已授权，正在自动审核';
+          return '已提交回调，等待 CPA 确认';
         case 'auto_approved':
-          return '贡献成功，已自动导入';
+          return '贡献成功，CPA 已确认';
         case 'auto_rejected':
-          return '贡献未通过自动审核';
+          return '贡献未通过确认';
         case 'manual_review_required':
           return '已提交，等待人工处理';
         case 'expired':
@@ -143,8 +139,6 @@
           return '正在提交回调';
         case 'submitted':
           return '已提交回调';
-        case 'not_required':
-          return '当前流程无需手动回调';
         case 'failed':
           return '回调提交失败';
         default:
@@ -294,22 +288,6 @@
       return `${label}：${details}`;
     }
 
-    function looksLikeNoNeedCallback(payload = {}) {
-      const combined = [
-        payload.message,
-        payload.detail,
-        payload.reason,
-        payload.error,
-      ]
-        .map((item) => normalizeString(item).toLowerCase())
-        .filter(Boolean)
-        .join(' ');
-
-      return Boolean(payload.callback_required === false
-        || payload.callbackRequired === false
-        || /无需手动|鏃犻渶鎵嬪姩|not required|already enabled/i.test(combined));
-    }
-
     function deriveCallbackState(payload = {}, state = {}) {
       const existingStatus = normalizeContributionCallbackStatus(state.contributionCallbackStatus);
       const callbackUrl = normalizeString(
@@ -334,14 +312,6 @@
         return {
           status: 'submitted',
           message: buildCallbackMessage('submitted', payload),
-          callbackUrl,
-        };
-      }
-
-      if (looksLikeNoNeedCallback(payload)) {
-        return {
-          status: 'not_required',
-          message: buildCallbackMessage('not_required', payload),
           callbackUrl,
         };
       }
@@ -387,8 +357,10 @@
       }
 
       const code = normalizeString(parsed.searchParams.get('code'));
+      const errorText = normalizeString(parsed.searchParams.get('error'))
+        || normalizeString(parsed.searchParams.get('error_description'));
       const authState = normalizeString(parsed.searchParams.get('state'));
-      if (!code || !authState) {
+      if ((!code && !errorText) || !authState) {
         return false;
       }
 
@@ -472,7 +444,7 @@
           },
         });
 
-        const nextStatus = looksLikeNoNeedCallback(payload) ? 'not_required' : 'submitted';
+        const nextStatus = 'submitted';
         await applyRuntimeUpdates({
           contributionCallbackUrl: normalizedUrl,
           contributionCallbackStatus: nextStatus,
@@ -485,20 +457,6 @@
 
         return await pollContributionStatus({ reason: options.reason || 'submit_callback' });
       } catch (error) {
-        if (looksLikeNoNeedCallback(error?.payload || {})) {
-          await applyRuntimeUpdates({
-            contributionCallbackUrl: normalizedUrl,
-            contributionCallbackStatus: 'not_required',
-            contributionCallbackMessage: buildCallbackMessage('not_required', error.payload || {}),
-          });
-
-          if (typeof closeLocalhostCallbackTabs === 'function') {
-            await closeLocalhostCallbackTabs(normalizedUrl).catch(() => {});
-          }
-
-          return pollContributionStatus({ reason: options.reason || 'submit_callback_not_required' }).catch(() => getState());
-        }
-
         await applyRuntimeUpdates({
           contributionCallbackUrl: normalizedUrl,
           contributionCallbackStatus: 'failed',

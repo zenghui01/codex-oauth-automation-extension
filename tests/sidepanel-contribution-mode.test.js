@@ -361,9 +361,9 @@ test('contribution mode manager enters mode, starts main auto flow, polls contri
             state: {
               ...latestState,
               contributionStatus: 'processing',
-              contributionStatusMessage: '已授权，正在自动审核',
-              contributionCallbackStatus: 'not_required',
-              contributionCallbackMessage: '当前流程无需手动回调',
+              contributionStatusMessage: '已提交回调，等待 CPA 确认',
+              contributionCallbackStatus: 'submitted',
+              contributionCallbackMessage: '已提交回调',
             },
           };
         }
@@ -408,9 +408,9 @@ test('contribution mode manager enters mode, starts main auto flow, polls contri
 
   await manager.pollOnce({ reason: 'test_poll' });
   assert.equal(statusState.contributionStatus, 'processing');
-  assert.equal(dom.contributionOauthStatus.textContent, '\u6388\u6743\u5df2\u5b8c\u6210');
-  assert.equal(dom.contributionCallbackStatus.textContent, '\u5f53\u524d\u6d41\u7a0b\u65e0\u9700\u624b\u52a8\u56de\u8c03');
-  assert.equal(dom.contributionModeSummary.textContent, '\u5df2\u6388\u6743\uff0c\u6b63\u5728\u81ea\u52a8\u5ba1\u6838');
+  assert.equal(dom.contributionOauthStatus.textContent, '\u5df2\u63d0\u4ea4\u56de\u8c03');
+  assert.equal(dom.contributionCallbackStatus.textContent, '\u5df2\u63d0\u4ea4\u56de\u8c03');
+  assert.equal(dom.contributionModeSummary.textContent, '\u5df2\u63d0\u4ea4\u56de\u8c03\uff0c\u7b49\u5f85 CPA \u786e\u8ba4');
 
   dom.btnOpenContributionUpload.listeners.click();
   assert.deepStrictEqual(openedUrls, ['https://apikey.qzz.io/']);

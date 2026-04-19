@@ -316,12 +316,13 @@ test('account run history snapshot sync is disabled in contribution mode', () =>
   );
 });
 
-test('contribution oauth manager starts session, opens auth url, polls real statuses, and treats callback submit no-op as success', async () => {
+test('contribution oauth manager starts session, opens auth url, submits callback, and continues polling final status', async () => {
   const source = fs.readFileSync('background/contribution-oauth.js', 'utf8');
   const globalScope = {};
   const fetchCalls = [];
   const tabCalls = [];
   const closeCallbackCalls = [];
+  let statusPollCount = 0;
   let currentState = {
     contributionMode: true,
     email: 'user@example.com',
@@ -345,26 +346,31 @@ test('contribution oauth manager starts session, opens auth url, polls real stat
         });
       }
       if (String(url).includes('/status?')) {
+        statusPollCount += 1;
+        if (statusPollCount === 1) {
+          return createMockResponse(true, 200, {
+            ok: true,
+            session_id: 'session-001',
+            status: 'waiting',
+            message: '等待提交回调。',
+          });
+        }
         return createMockResponse(true, 200, {
           ok: true,
           session_id: 'session-001',
-          status: 'waiting',
-          message: '等待 OAuth 回调完成',
+          status: 'processing',
+          message: '回调地址已提交给 CPA，正在等待结果确认。',
         });
       }
       if (String(url).endsWith('/submit-callback')) {
-        return createMockResponse(false, 400, {
-          ok: false,
-          message: '当前已启用自动回调转发，无需手动粘贴回调 URL。',
-          callback_url_received: true,
+        return createMockResponse(true, 200, {
+          ok: true,
+          session_id: 'session-001',
+          status: 'processing',
+          message: '回调地址已提交给 CPA，正在等待结果确认。',
         });
       }
-      return createMockResponse(true, 200, {
-        ok: true,
-        session_id: 'session-001',
-        status: 'processing',
-        message: '授权已完成，正在自动审核并导入。',
-      });
+      return createMockResponse(true, 200, { ok: true });
     }
   );
 
@@ -414,11 +420,43 @@ test('contribution oauth manager starts session, opens auth url, polls real stat
   );
 
   assert.equal(callbackState.contributionCallbackUrl, 'http://localhost:1455/auth/callback?code=abc123&state=oauth-state-001');
-  assert.equal(callbackState.contributionCallbackStatus, 'not_required');
+  assert.equal(callbackState.contributionCallbackStatus, 'submitted');
+  assert.equal(callbackState.contributionStatus, 'processing');
   assert.equal(closeCallbackCalls[0], 'http://localhost:1455/auth/callback?code=abc123&state=oauth-state-001');
   assert.ok(fetchCalls.some((call) => String(call.url).endsWith('/submit-callback')));
   assert.ok(broadcasts.some((item) => item.contributionCallbackStatus === 'captured'));
-  assert.ok(broadcasts.some((item) => item.contributionCallbackStatus === 'not_required'));
+  assert.ok(broadcasts.some((item) => item.contributionCallbackStatus === 'submitted'));
+});
+
+test('contribution oauth manager accepts localhost callback urls that contain error and state', async () => {
+  const source = fs.readFileSync('background/contribution-oauth.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', 'fetch', `${source}; return self.MultiPageBackgroundContributionOAuth;`)(
+    globalScope,
+    async () => createMockResponse(true, 200, { ok: true })
+  );
+
+  const manager = api.createContributionOAuthManager({
+    chrome: {
+      tabs: {
+        onUpdated: { addListener() {} },
+      },
+      webNavigation: {
+        onCommitted: { addListener() {} },
+        onHistoryStateUpdated: { addListener() {} },
+      },
+    },
+    getState: async () => ({}),
+    setState: async () => ({}),
+  });
+
+  assert.equal(
+    manager.isContributionCallbackUrl(
+      'http://localhost:1455/auth/callback?error=access_denied&state=oauth-state-001',
+      { contributionAuthState: 'oauth-state-001' }
+    ),
+    true
+  );
 });
 
 test('refreshOAuthUrlBeforeStep6 uses contribution oauth session instead of panel bridge in contribution mode', async () => {
