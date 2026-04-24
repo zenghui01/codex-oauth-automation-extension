@@ -23,7 +23,7 @@ test('update card highlights exporting config before upgrade', () => {
   const html = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
   const css = fs.readFileSync('sidepanel/sidepanel.css', 'utf8');
 
-  assert.match(html, /<p class="update-card-reminder">请更新前导出配置<\/p>/);
+  assert.match(html, /<p class="update-card-reminder">一定请先导出配置，再执行更新<\/p>/);
   assert.match(css, /\.update-card-reminder\s*\{/);
   assert.match(css, /font-weight:\s*700;/);
   assert.match(css, /color:\s*var\(--orange\);/);
