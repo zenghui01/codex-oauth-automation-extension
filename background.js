@@ -6924,6 +6924,7 @@ const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?
   chrome,
   completeStepFromBackground,
   ensureContentScriptReadyOnTabUntilStopped,
+  fetch: typeof fetch === 'function' ? fetch.bind(globalThis) : null,
   generateRandomName,
   getAddressSeedForCountry: self.MultiPageAddressSources?.getAddressSeedForCountry,
   getTabId,

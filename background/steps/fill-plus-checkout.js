@@ -5,6 +5,13 @@
   const PLUS_CHECKOUT_INJECT_FILES = ['content/utils.js', 'content/plus-checkout.js'];
   const PLUS_CHECKOUT_URL_PATTERN = /^https:\/\/chatgpt\.com\/checkout(?:\/|$)/i;
   const PLUS_CHECKOUT_FRAME_READY_DELAY_MS = 500;
+  const MEIGUODIZHI_ADDRESS_ENDPOINT = 'https://www.meiguodizhi.com/api/v1/dz';
+  const MEIGUODIZHI_PATH_BY_COUNTRY = {
+    AU: '/au-address',
+    DE: '/de-address',
+    FR: '/fr-address',
+    US: '/',
+  };
 
   function createPlusCheckoutBillingExecutor(deps = {}) {
     const {
@@ -12,6 +19,7 @@
       chrome,
       completeStepFromBackground,
       ensureContentScriptReadyOnTabUntilStopped,
+      fetch: fetchImpl = null,
       generateRandomName,
       getAddressSeedForCountry,
       getTabId,
@@ -24,6 +32,97 @@
 
     function isPlusCheckoutUrl(url = '') {
       return PLUS_CHECKOUT_URL_PATTERN.test(String(url || ''));
+    }
+
+    function normalizeText(value = '') {
+      return String(value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function hasCompleteAddressFallback(seed) {
+      const fallback = seed?.fallback || {};
+      return Boolean(
+        normalizeText(fallback.address1)
+        && normalizeText(fallback.city)
+        && normalizeText(fallback.postalCode)
+      );
+    }
+
+    function buildDirectAddressSeed(countryCode, apiAddress, fallbackSeed) {
+      const address1 = normalizeText(apiAddress?.Address);
+      const city = normalizeText(apiAddress?.City);
+      const region = normalizeText(apiAddress?.State || apiAddress?.State_Full);
+      const postalCode = normalizeText(apiAddress?.Zip_Code);
+      if (!address1 || !city || !postalCode) {
+        return null;
+      }
+      return {
+        ...(fallbackSeed || {}),
+        countryCode,
+        query: [address1, city].filter(Boolean).join(', '),
+        source: 'meiguodizhi',
+        skipAutocomplete: true,
+        fallback: {
+          ...(fallbackSeed?.fallback || {}),
+          address1,
+          city,
+          region,
+          postalCode,
+        },
+      };
+    }
+
+    async function fetchMeiguodizhiAddressSeed(countryCode, fallbackSeed) {
+      if (typeof fetchImpl !== 'function') {
+        return null;
+      }
+      const path = MEIGUODIZHI_PATH_BY_COUNTRY[countryCode] || MEIGUODIZHI_PATH_BY_COUNTRY.DE;
+      const city = normalizeText(fallbackSeed?.fallback?.city || fallbackSeed?.query || '');
+      const response = await fetchImpl(MEIGUODIZHI_ADDRESS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          city,
+          path,
+          method: 'refresh',
+        }),
+      });
+      if (!response?.ok) {
+        throw new Error(`HTTP ${response?.status || 0}`);
+      }
+      const data = await response.json();
+      if (data?.status !== 'ok') {
+        throw new Error(data?.message || data?.status || 'unknown response');
+      }
+      return buildDirectAddressSeed(countryCode, data.address || {}, fallbackSeed);
+    }
+
+    async function resolveBillingAddressSeed(state = {}, countryOverride = '') {
+      const requestedCountry = normalizeText(countryOverride || state.plusCheckoutCountry || 'DE');
+      const fallbackSeed = getAddressSeedForCountry(requestedCountry, {
+        fallbackCountry: 'DE',
+      });
+      if (!fallbackSeed) {
+        throw new Error('步骤 7：未找到可用的本地账单地址种子。');
+      }
+
+      const countryCode = fallbackSeed.countryCode || 'DE';
+      try {
+        const remoteSeed = await fetchMeiguodizhiAddressSeed(countryCode, fallbackSeed);
+        if (hasCompleteAddressFallback(remoteSeed)) {
+          await addLog(
+            `步骤 7：已从 meiguodizhi 接口获取账单地址（${remoteSeed.fallback.city} / ${remoteSeed.fallback.postalCode}），将跳过 Google 地址推荐。`,
+            'info'
+          );
+          return remoteSeed;
+        }
+        await addLog('步骤 7：meiguodizhi 接口返回的地址字段不完整，回退到本地地址种子。', 'warn');
+      } catch (error) {
+        await addLog(`步骤 7：meiguodizhi 地址接口不可用，回退到本地地址种子：${error?.message || String(error || '')}`, 'warn');
+      }
+
+      return fallbackSeed;
     }
 
     async function getAlivePlusCheckoutTabId(tabId) {
@@ -241,6 +340,7 @@
           return {
             frameId: picked.frame.frameId,
             frameUrl: picked.frame.url || '',
+            countryText: picked.result?.countryText || '',
             ready: picked.frame.ready !== false,
             inspections,
           };
@@ -312,12 +412,6 @@
 
       const randomName = generateRandomName();
       const fullName = [randomName.firstName, randomName.lastName].filter(Boolean).join(' ');
-      const addressSeed = getAddressSeedForCountry(state.plusCheckoutCountry || 'DE', {
-        fallbackCountry: 'DE',
-      });
-      if (!addressSeed) {
-        throw new Error('步骤 7：未找到可用的本地账单地址种子。');
-      }
 
       await addLog('步骤 7：正在切换 PayPal 付款方式...', 'info');
       const paymentResult = await sendFrameMessage(tabId, paymentFrame.frameId, {
@@ -337,10 +431,15 @@
         await addLog(`步骤 7：账单地址位于 checkout iframe（frameId=${billingFrame.frameId}），将改为在该 frame 内填写。`, 'info');
       }
 
+      const addressSeed = await resolveBillingAddressSeed(state, billingFrame.countryText);
+      if (!addressSeed) {
+        throw new Error('步骤 7：未找到可用的本地账单地址种子。');
+      }
+
       await addLog(`步骤 7：正在填写账单地址（${addressSeed.countryCode} / ${addressSeed.query}）...`, 'info');
       const autocompleteFrame = await resolveOptionalFrameByUrl(tabId, isAutocompleteFrameUrl);
       let result = null;
-      if (autocompleteFrame?.frame && autocompleteFrame.frame.frameId !== billingFrame.frameId) {
+      if (!addressSeed.skipAutocomplete && autocompleteFrame?.frame && autocompleteFrame.frame.frameId !== billingFrame.frameId) {
         if (!autocompleteFrame.ready) {
           throw new Error('步骤 7：发现 Google 地址推荐 iframe，但无法注入账单脚本。请提供该 iframe 的控制台结构。');
         }

@@ -22,6 +22,20 @@ function createAddressSeed() {
   };
 }
 
+function createAuAddressSeed() {
+  return {
+    countryCode: 'AU',
+    query: 'Sydney NSW',
+    suggestionIndex: 1,
+    fallback: {
+      address1: 'George Street',
+      city: 'Sydney',
+      region: 'New South Wales',
+      postalCode: '2000',
+    },
+  };
+}
+
 function createSuccessfulBillingResult() {
   return {
     countryText: 'Germany',
@@ -33,7 +47,13 @@ function createSuccessfulBillingResult() {
   };
 }
 
-function createExecutorHarness({ frames, stateByFrame, readyByFrame = {} }) {
+function createExecutorHarness({
+  frames,
+  stateByFrame,
+  readyByFrame = {},
+  fetchImpl = null,
+  getAddressSeedForCountry = () => createAddressSeed(),
+}) {
   const api = loadPlusCheckoutBillingModule();
   const events = {
     completed: [],
@@ -96,8 +116,9 @@ function createExecutorHarness({ frames, stateByFrame, readyByFrame = {} }) {
     },
     completeStepFromBackground: async (step, payload) => events.completed.push({ step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId) => events.ensuredTabs.push({ source, tabId }),
+    fetch: fetchImpl,
     generateRandomName: () => ({ firstName: 'Ada', lastName: 'Lovelace' }),
-    getAddressSeedForCountry: () => createAddressSeed(),
+    getAddressSeedForCountry,
     getTabId: async () => null,
     isTabAlive: async () => false,
     setState: async (updates) => events.states.push(updates),
@@ -219,6 +240,118 @@ test('Plus checkout billing uses the autocomplete iframe for address suggestions
   assert.equal(combinedFillMessage, undefined);
   assert.equal(events.logs.some((entry) => /Google 地址推荐/.test(entry.message)), true);
   assert.equal(events.completed[0].step, 7);
+});
+
+test('Plus checkout billing skips Google autocomplete when meiguodizhi returns a complete address', async () => {
+  const fetchRequests = [];
+  const { events, executor } = createExecutorHarness({
+    frames: [
+      { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+      { frameId: 7, url: 'https://js.stripe.com/v3/elements-inner-payment.html' },
+      { frameId: 8, url: 'https://js.stripe.com/v3/elements-inner-address.html' },
+      { frameId: 9, url: 'https://js.stripe.com/v3/elements-inner-autocompl.html' },
+    ],
+    stateByFrame: {
+      0: { hasPayPal: false, paypalCandidates: [], hasSubscribeButton: true },
+      7: { hasPayPal: true, paypalCandidates: [{ tag: 'button', text: 'PayPal' }] },
+      8: { hasPayPal: false, paypalCandidates: [], billingFieldsVisible: true },
+      9: { hasPayPal: false, paypalCandidates: [] },
+    },
+    fetchImpl: async (url, init) => {
+      fetchRequests.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'ok',
+          address: {
+            Address: 'Rosa-Luxemburg-Strasse 40',
+            City: 'Berlin',
+            State: 'Berlin',
+            Zip_Code: '69081',
+          },
+        }),
+      };
+    },
+  });
+
+  await executor.executePlusCheckoutBilling({});
+
+  const fillQueryMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_ADDRESS_QUERY');
+  const suggestionMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_ADDRESS_SUGGESTION');
+  const ensureAddressMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_ENSURE_BILLING_ADDRESS');
+  const combinedFillMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+  assert.equal(fillQueryMessage, undefined);
+  assert.equal(suggestionMessage, undefined);
+  assert.equal(ensureAddressMessage, undefined);
+  assert.equal(combinedFillMessage.frameId, 8);
+  assert.equal(combinedFillMessage.message.payload.addressSeed.skipAutocomplete, true);
+  assert.equal(combinedFillMessage.message.payload.addressSeed.source, 'meiguodizhi');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.address1, 'Rosa-Luxemburg-Strasse 40');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.city, 'Berlin');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.postalCode, '69081');
+  assert.equal(fetchRequests.length, 1);
+  assert.equal(fetchRequests[0].url, 'https://www.meiguodizhi.com/api/v1/dz');
+  assert.deepEqual(JSON.parse(fetchRequests[0].init.body), {
+    city: 'Berlin',
+    path: '/de-address',
+    method: 'refresh',
+  });
+  assert.equal(events.completed[0].step, 7);
+});
+
+test('Plus checkout billing uses the detected checkout country before choosing an address seed', async () => {
+  const requestedCountries = [];
+  const fetchRequests = [];
+  const { events, executor } = createExecutorHarness({
+    frames: [
+      { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+      { frameId: 7, url: 'https://js.stripe.com/v3/elements-inner-payment.html' },
+      { frameId: 8, url: 'https://js.stripe.com/v3/elements-inner-address.html' },
+    ],
+    stateByFrame: {
+      0: { hasPayPal: false, paypalCandidates: [], hasSubscribeButton: true },
+      7: { hasPayPal: true, paypalCandidates: [{ tag: 'button', text: 'PayPal' }] },
+      8: {
+        hasPayPal: false,
+        paypalCandidates: [],
+        billingFieldsVisible: true,
+        countryText: 'Australia',
+      },
+    },
+    getAddressSeedForCountry: (countryValue) => {
+      requestedCountries.push(countryValue);
+      return /australia|au/i.test(String(countryValue || '')) ? createAuAddressSeed() : createAddressSeed();
+    },
+    fetchImpl: async (url, init) => {
+      fetchRequests.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'ok',
+          address: {
+            Address: '98 Ocean Street',
+            City: 'Sydney South',
+            State: 'New South Wales',
+            Zip_Code: '2000',
+          },
+        }),
+      };
+    },
+  });
+
+  await executor.executePlusCheckoutBilling({ plusCheckoutCountry: 'DE' });
+
+  const combinedFillMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+  assert.equal(requestedCountries[0], 'Australia');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.countryCode, 'AU');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.region, 'New South Wales');
+  assert.deepEqual(JSON.parse(fetchRequests[0].init.body), {
+    city: 'Sydney',
+    path: '/au-address',
+    method: 'refresh',
+  });
 });
 
 test('Plus checkout billing reports when the payment iframe exists but cannot receive the content script', async () => {

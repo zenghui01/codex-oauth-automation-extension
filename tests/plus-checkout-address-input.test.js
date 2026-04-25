@@ -199,3 +199,57 @@ return { isPayPalPaymentMethodActive };
   paypalButton.getAttribute = (key) => (key === 'aria-selected' ? 'true' : (paypalButton.id && key === 'id' ? paypalButton.id : ''));
   assert.equal(api.isPayPalPaymentMethodActive(), true);
 });
+
+test('selectRegionDropdown opens the state dropdown and clicks the matching option', async () => {
+  const bundle = [
+    'function throwIfStopped() {}',
+    'function sleep() { return Promise.resolve(); }',
+    extractFunction('isVisibleElement'),
+    extractFunction('normalizeText'),
+    extractFunction('getActionText'),
+    extractFunction('getRegionCandidates'),
+    extractFunction('matchesRegionOption'),
+    extractFunction('getRegionDropdownValue'),
+    extractFunction('getVisibleRegionOptions'),
+    extractFunction('selectRegionDropdown'),
+  ].join('\n');
+
+  const state = { opened: false };
+  const clicks = [];
+  const stateDropdown = createElement({
+    tagName: 'DIV',
+    text: 'State New South Wales',
+    attrs: {
+      role: 'combobox',
+      'aria-haspopup': 'listbox',
+    },
+  });
+  const options = [
+    createElement({ tagName: 'DIV', text: 'New South Wales', attrs: { role: 'option' } }),
+    createElement({ tagName: 'DIV', text: 'Western Australia', attrs: { role: 'option' } }),
+  ];
+  const documentMock = {
+    querySelectorAll: (selector) => {
+      if (!state.opened) return [];
+      if (selector === '[role="listbox"] [role="option"]' || selector === '[role="option"]') return options;
+      if (selector === 'li') return [];
+      return [];
+    },
+  };
+  const windowMock = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+
+  const api = new Function('window', 'document', 'Event', 'clicks', 'stateDropdown', 'state', `
+function simulateClick(el) {
+  clicks.push(el);
+  if (el === stateDropdown) state.opened = true;
+}
+${bundle}
+return { selectRegionDropdown };
+`)(windowMock, documentMock, Event, clicks, stateDropdown, state);
+
+  await api.selectRegionDropdown(stateDropdown, 'Western Australia');
+
+  assert.deepEqual(clicks, [stateDropdown, options[1]]);
+});

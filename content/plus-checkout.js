@@ -651,6 +651,140 @@ async function fillAddressQuery(seed = {}) {
   };
 }
 
+function getRegionCandidates(value) {
+  const raw = normalizeText(value);
+  if (!raw) return [];
+  const aliases = {
+    act: 'Australian Capital Territory',
+    nsw: 'New South Wales',
+    nt: 'Northern Territory',
+    qld: 'Queensland',
+    sa: 'South Australia',
+    tas: 'Tasmania',
+    vic: 'Victoria',
+    wa: 'Western Australia',
+  };
+  const compact = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const candidates = [raw];
+  if (aliases[compact]) {
+    candidates.push(aliases[compact]);
+  }
+  for (const [abbr, name] of Object.entries(aliases)) {
+    const compactName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (compact === compactName) {
+      candidates.push(abbr.toUpperCase());
+    }
+  }
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+function matchesRegionOption(text, desiredValue) {
+  const normalizedText = normalizeText(text).toLowerCase();
+  const compactText = normalizedText.replace(/[^a-z0-9]/g, '');
+  if (!compactText) return false;
+  return getRegionCandidates(desiredValue).some((candidate) => {
+    const normalizedCandidate = normalizeText(candidate).toLowerCase();
+    const compactCandidate = normalizedCandidate.replace(/[^a-z0-9]/g, '');
+    if (!compactCandidate) return false;
+    return normalizedText === normalizedCandidate
+      || compactText === compactCandidate
+      || (compactCandidate.length > 3 && compactText.includes(compactCandidate));
+  });
+}
+
+function findRegionDropdown() {
+  const controls = getVisibleControls('select, button, [role="button"], [role="combobox"], [aria-haspopup="listbox"]');
+  return controls.find((control) => {
+    if (!isEnabledControl(control) || isDocumentLevelContainer(control)) return false;
+    const text = getFieldText(control);
+    if (/country/i.test(text) || /\u56fd\u5bb6|\u5730\u533a/.test(text)) return false;
+    return /state|province|county/i.test(text)
+      || /(?:^|\s)region(?:\s|$)/i.test(text)
+      || /\u5dde|\u7701/.test(text);
+  }) || null;
+}
+
+function getRegionDropdownValue(control) {
+  if (!control) return '';
+  if (String(control.tagName || '').toUpperCase() === 'SELECT') {
+    const selected = control.selectedOptions?.[0];
+    return normalizeText(selected?.textContent || control.value || '');
+  }
+  return normalizeText(
+    control.getAttribute?.('aria-valuetext')
+    || control.getAttribute?.('aria-label')
+    || control.getAttribute?.('data-value')
+    || control.textContent
+    || ''
+  );
+}
+
+function getVisibleRegionOptions() {
+  const selectors = [
+    '[role="listbox"] [role="option"]',
+    '[role="option"]',
+    'li',
+  ];
+  const seen = new Set();
+  const options = [];
+  for (const selector of selectors) {
+    for (const option of Array.from(document.querySelectorAll(selector))) {
+      if (!isVisibleElement(option)) continue;
+      const text = normalizeText(getActionText(option) || option.textContent || '');
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      options.push(option);
+    }
+  }
+  return options;
+}
+
+async function selectRegionDropdown(regionDropdown, value) {
+  if (!regionDropdown || !value) return false;
+  if (matchesRegionOption(getRegionDropdownValue(regionDropdown), value)) {
+    return false;
+  }
+
+  if (String(regionDropdown.tagName || '').toUpperCase() === 'SELECT') {
+    const option = Array.from(regionDropdown.options || []).find((item) => (
+      matchesRegionOption(item.textContent || '', value)
+      || matchesRegionOption(item.value || '', value)
+    ));
+    if (!option) {
+      throw new Error(`Plus Checkout: state dropdown option "${value}" was not found.`);
+    }
+    regionDropdown.value = option.value;
+    option.selected = true;
+    regionDropdown.dispatchEvent(new Event('input', { bubbles: true }));
+    regionDropdown.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+
+  simulateClick(regionDropdown);
+  await sleep(250);
+  const startedAt = Date.now();
+  let option = null;
+  while (Date.now() - startedAt < 2500) {
+    throwIfStopped();
+    option = getVisibleRegionOptions().find((item) => (
+      matchesRegionOption(getActionText(item) || item.textContent || '', value)
+    ));
+    if (option) break;
+    await sleep(100);
+  }
+  if (!option) {
+    const visibleOptions = getVisibleRegionOptions()
+      .map((item) => normalizeText(getActionText(item) || item.textContent || ''))
+      .filter(Boolean)
+      .slice(0, 12)
+      .join(' | ');
+    throw new Error(`Plus Checkout: state dropdown option "${value}" was not found. Visible options: ${visibleOptions || 'none'}.`);
+  }
+  simulateClick(option);
+  await sleep(500);
+  return true;
+}
+
 function getStructuredAddressFields() {
   const address1 = findInputByFieldText([
     /address\s*(?:line)?\s*1|street/i,
@@ -697,7 +831,7 @@ async function ensureStructuredAddress(seed) {
 
   fillIfEmpty(fields.address1, fallback.address1);
   fillIfEmpty(fields.city, fallback.city);
-  fillIfEmpty(fields.region, fallback.region);
+  await selectRegionDropdown(findRegionDropdown(), fallback.region);
   fillIfEmpty(fields.postalCode, fallback.postalCode);
   await sleep(500);
 
@@ -713,7 +847,7 @@ async function ensureStructuredAddress(seed) {
   return {
     address1: latest.address1?.value || '',
     city: latest.city?.value || '',
-    region: latest.region?.value || '',
+    region: getRegionDropdownValue(findRegionDropdown()) || latest.region?.value || '',
     postalCode: latest.postalCode?.value || '',
   };
 }
@@ -759,7 +893,10 @@ async function fillPlusBillingAddress(payload = {}) {
       postalCode: '10117',
     },
   };
-  const selected = await selectAddressSuggestion(seed);
+  let selected = { selectedText: '' };
+  if (!seed.skipAutocomplete) {
+    selected = await selectAddressSuggestion(seed);
+  }
   const structuredAddress = await ensureStructuredAddress(seed);
 
   return {
@@ -828,7 +965,7 @@ function inspectPlusCheckoutState() {
     addressFieldValues: {
       address1: structuredAddress.address1?.value || '',
       city: structuredAddress.city?.value || '',
-      region: structuredAddress.region?.value || '',
+      region: getRegionDropdownValue(findRegionDropdown()) || structuredAddress.region?.value || '',
       postalCode: structuredAddress.postalCode?.value || '',
     },
   };
