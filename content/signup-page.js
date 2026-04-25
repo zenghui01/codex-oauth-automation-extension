@@ -291,11 +291,99 @@ async function handle405ResendError(step, remainingTimeout = 30000) {
 // ============================================================
 
 const SIGNUP_ENTRY_TRIGGER_PATTERN = /免费注册|立即注册|注册|sign\s*up|register|create\s*account|create\s+account/i;
-const SIGNUP_EMAIL_INPUT_SELECTOR = 'input[type="email"], input[name="email"], input[name="username"], input[id*="email"], input[placeholder*="email" i]';
+const SIGNUP_EMAIL_INPUT_SELECTOR = [
+  'input[type="email"]',
+  'input[autocomplete="email"]',
+  'input[autocomplete="username"]',
+  'input[name="email"]',
+  'input[name="username"]',
+  'input[id*="email"]',
+  'input[placeholder*="email" i]',
+  'input[placeholder*="电子邮件"]',
+  'input[placeholder*="邮箱"]',
+  'input[aria-label*="email" i]',
+  'input[aria-label*="电子邮件"]',
+  'input[aria-label*="邮箱"]',
+].join(', ');
+const SIGNUP_PHONE_INPUT_SELECTOR = [
+  'input[type="tel"]:not([maxlength="6"])',
+  'input[name*="phone" i]',
+  'input[id*="phone" i]',
+  'input[autocomplete="tel"]',
+  'input[placeholder*="手机"]',
+  'input[aria-label*="手机"]',
+].join(', ');
+const SIGNUP_SWITCH_TO_EMAIL_PATTERN = new RegExp([
+  String.raw`\u7ee7\u7eed\u4f7f\u7528(?:\u7535\u5b50\u90ae\u4ef6\u5730\u5740|\u90ae\u7bb1)\u767b\u5f55`,
+  String.raw`\u6539\u7528(?:\u7535\u5b50\u90ae\u4ef6\u5730\u5740|\u90ae\u7bb1)\u767b\u5f55`,
+  String.raw`continue\s+using\s+(?:an?\s+)?email(?:\s+address)?(?:\s+(?:to\s+)?(?:log\s*in|sign\s*in|sign\s*up))?`,
+  String.raw`continue\s+with\s+email(?:\s+address)?`,
+  String.raw`use\s+(?:an?\s+)?email(?:\s+address)?(?:\s+instead)?`,
+  String.raw`sign\s*(?:in|up)\s+with\s+email`,
+].join('|'), 'i');
+const SIGNUP_SWITCH_ACTION_PATTERN = /\u7ee7\u7eed\u4f7f\u7528|\u6539\u7528|continue|use|sign\s*(?:in|up)/i;
+const SIGNUP_EMAIL_ACTION_PATTERN = /\u7535\u5b50\u90ae\u4ef6|\u90ae\u7bb1|email/i;
+const SIGNUP_WORK_EMAIL_PATTERN = /\u5de5\u4f5c|business|work\s+email/i;
 
 function getSignupEmailInput() {
   const input = document.querySelector(SIGNUP_EMAIL_INPUT_SELECTOR);
-  return input && isVisibleElement(input) ? input : null;
+  if (input && isVisibleElement(input)) {
+    return input;
+  }
+
+  const fallback = Array.from(document.querySelectorAll('input')).find((el) => {
+    if (!isVisibleElement(el)) return false;
+    const type = String(el.getAttribute?.('type') || '').trim().toLowerCase();
+    const name = String(el.getAttribute?.('name') || '').trim().toLowerCase();
+    const id = String(el.getAttribute?.('id') || '').trim().toLowerCase();
+    const placeholder = String(el.getAttribute?.('placeholder') || '').trim();
+    const ariaLabel = String(el.getAttribute?.('aria-label') || '').trim();
+    const autocomplete = String(el.getAttribute?.('autocomplete') || '').trim().toLowerCase();
+    const combinedText = `${placeholder} ${ariaLabel}`;
+    return type === 'email'
+      || autocomplete === 'email'
+      || autocomplete === 'username'
+      || /email|username/i.test(`${name} ${id}`)
+      || /email|电子邮件|邮箱/i.test(combinedText);
+  });
+
+  return fallback || null;
+}
+
+function getSignupPhoneInput() {
+  const input = document.querySelector(SIGNUP_PHONE_INPUT_SELECTOR);
+  if (input && isVisibleElement(input)) {
+    return input;
+  }
+
+  const fallback = Array.from(document.querySelectorAll('input')).find((el) => {
+    if (!isVisibleElement(el)) return false;
+    const type = String(el.getAttribute?.('type') || '').trim().toLowerCase();
+    const name = String(el.getAttribute?.('name') || '').trim().toLowerCase();
+    const id = String(el.getAttribute?.('id') || '').trim().toLowerCase();
+    const placeholder = String(el.getAttribute?.('placeholder') || '').trim();
+    const ariaLabel = String(el.getAttribute?.('aria-label') || '').trim();
+    const autocomplete = String(el.getAttribute?.('autocomplete') || '').trim().toLowerCase();
+    const combinedText = `${placeholder} ${ariaLabel}`;
+    return type === 'tel'
+      || autocomplete === 'tel'
+      || /phone|tel/i.test(`${name} ${id}`)
+      || /手机|电话|手机号/.test(combinedText);
+  });
+
+  return fallback || null;
+}
+
+function findSignupUseEmailTrigger() {
+  const candidates = document.querySelectorAll('button, a, [role="button"], [role="link"]');
+  return Array.from(candidates).find((el) => {
+    if (!isVisibleElement(el) || !isActionEnabled(el)) return false;
+    const text = getActionText(el);
+    if (!text) return false;
+    if (SIGNUP_WORK_EMAIL_PATTERN.test(text)) return false;
+    return SIGNUP_SWITCH_TO_EMAIL_PATTERN.test(text)
+      || (SIGNUP_SWITCH_ACTION_PATTERN.test(text) && SIGNUP_EMAIL_ACTION_PATTERN.test(text));
+  }) || null;
 }
 
 function getSignupEmailContinueButton({ allowDisabled = false } = {}) {
@@ -351,6 +439,16 @@ function inspectSignupEntryState() {
     };
   }
 
+  const phoneInput = getSignupPhoneInput();
+  if (phoneInput) {
+    return {
+      state: 'phone_entry',
+      phoneInput,
+      switchToEmailTrigger: findSignupUseEmailTrigger(),
+      url: location.href,
+    };
+  }
+
   const signupTrigger = findSignupEntryTrigger();
   if (signupTrigger) {
     return {
@@ -371,6 +469,7 @@ function getSignupEntryStateSummary(snapshot = inspectSignupEntryState()) {
     state: snapshot?.state || 'unknown',
     url: snapshot?.url || location.href,
     hasEmailInput: Boolean(snapshot?.emailInput || getSignupEmailInput()),
+    hasPhoneInput: Boolean(snapshot?.phoneInput || getSignupPhoneInput()),
     hasPasswordInput: Boolean(snapshot?.passwordInput || getSignupPasswordInput()),
   };
 
@@ -390,6 +489,14 @@ function getSignupEntryStateSummary(snapshot = inspectSignupEntryState()) {
       tag: (snapshot.continueButton.tagName || '').toLowerCase(),
       text: getActionText(snapshot.continueButton).slice(0, 80),
       enabled: isActionEnabled(snapshot.continueButton),
+    };
+  }
+
+  if (snapshot?.switchToEmailTrigger) {
+    summary.switchToEmailTrigger = {
+      tag: (snapshot.switchToEmailTrigger.tagName || '').toLowerCase(),
+      text: getActionText(snapshot.switchToEmailTrigger).slice(0, 80),
+      enabled: isActionEnabled(snapshot.switchToEmailTrigger),
     };
   }
 
@@ -522,7 +629,9 @@ function getSignupEntryDiagnostics() {
       devicePixelRatio: Number(view?.devicePixelRatio) || 0,
     },
     hasEmailInput: Boolean(getSignupEmailInput()),
+    hasPhoneInput: Boolean(getSignupPhoneInput()),
     hasPasswordInput: Boolean(getSignupPasswordInput()),
+    hasSwitchToEmailAction: Boolean(findSignupUseEmailTrigger()),
     bodyContainsSignupText: SIGNUP_ENTRY_TRIGGER_PATTERN.test(getPageTextSnapshot()),
     signupLikeActionCounts: {
       total: signupLikeActions.length,
@@ -653,6 +762,8 @@ async function waitForSignupEntryState(options = {}) {
   let clickAttempts = 0;
   let lastState = '';
   let slowSnapshotLogged = false;
+  let lastSwitchToEmailAt = 0;
+  let loggedMissingSwitchToEmail = false;
 
   while (Date.now() - start < timeout) {
     throwIfStopped();
@@ -665,6 +776,34 @@ async function waitForSignupEntryState(options = {}) {
 
     if (snapshot.state === 'password_page' || snapshot.state === 'email_entry') {
       return snapshot;
+    }
+
+    if (snapshot.state === 'phone_entry') {
+      if (!autoOpenEntry) {
+        return snapshot;
+      }
+
+      if (snapshot.switchToEmailTrigger && Date.now() - lastSwitchToEmailAt >= 1500) {
+        lastSwitchToEmailAt = Date.now();
+        loggedMissingSwitchToEmail = false;
+        if (logDiagnostics) {
+          log(`步骤 ${step}：检测到手机号输入模式，准备点击切换邮箱入口："${getActionText(snapshot.switchToEmailTrigger).slice(0, 80)}"`);
+        }
+        log('步骤 2：检测到手机号输入模式，正在切换到邮箱输入模式...');
+        await humanPause(350, 900);
+        simulateClick(snapshot.switchToEmailTrigger);
+      } else if (!snapshot.switchToEmailTrigger && !loggedMissingSwitchToEmail) {
+        loggedMissingSwitchToEmail = true;
+        log('步骤 2：检测到手机号输入模式，但暂未识别到“改用邮箱/继续使用电子邮件地址登录”按钮，继续等待界面稳定...', 'warn');
+      }
+
+      if (logDiagnostics && !slowSnapshotLogged && Date.now() - start >= 5000) {
+        slowSnapshotLogged = true;
+        log(`步骤 ${step}：等待手机号入口切换超过 5 秒，页面诊断快照：${JSON.stringify(getSignupEntryDiagnostics())}`, 'warn');
+      }
+
+      await sleep(250);
+      continue;
     }
 
     if (snapshot.state === 'entry_home') {
@@ -701,7 +840,7 @@ async function waitForSignupEntryState(options = {}) {
 
 async function ensureSignupEntryReady(timeout = 15000) {
   const snapshot = await waitForSignupEntryState({ timeout, autoOpenEntry: false });
-  if (snapshot.state === 'entry_home' || snapshot.state === 'email_entry' || snapshot.state === 'password_page') {
+  if (snapshot.state === 'entry_home' || snapshot.state === 'phone_entry' || snapshot.state === 'email_entry' || snapshot.state === 'password_page') {
     return {
       ready: true,
       state: snapshot.state,
