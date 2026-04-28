@@ -747,7 +747,7 @@ const MAIL_PROVIDER_LOGIN_CONFIGS = {
 const IP_PROXY_SERVICE_LOGIN_CONFIGS = {
   '711proxy': {
     label: '711Proxy',
-    url: 'https://www.711proxy.com/',
+    url: 'https://www.711proxy.com/signup?code=AD2497',
     buttonLabel: '登录',
   },
 };
