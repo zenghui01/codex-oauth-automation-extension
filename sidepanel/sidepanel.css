@@ -812,6 +812,10 @@ header {
   white-space: nowrap;
 }
 
+#btn-toggle-cloudflare-temp-email-section {
+  white-space: nowrap;
+}
+
 .ip-proxy-fold {
   width: 100%;
   border: none;

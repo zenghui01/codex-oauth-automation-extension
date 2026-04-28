@@ -187,6 +187,8 @@ const selectTempEmailDomain = document.getElementById('select-temp-email-domain'
 const inputTempEmailDomain = document.getElementById('input-temp-email-domain');
 const btnTempEmailDomainMode = document.getElementById('btn-temp-email-domain-mode');
 const cloudflareTempEmailSection = document.getElementById('cloudflare-temp-email-section');
+const btnToggleCloudflareTempEmailSection = document.getElementById('btn-toggle-cloudflare-temp-email-section');
+const cloudflareTempEmailSectionBody = document.getElementById('cloudflare-temp-email-section-body');
 const btnCloudflareTempEmailUsageGuide = document.getElementById('btn-cloudflare-temp-email-usage-guide');
 const btnCloudflareTempEmailGithub = document.getElementById('btn-cloudflare-temp-email-github');
 const hotmailSection = document.getElementById('hotmail-section');
@@ -372,6 +374,7 @@ const AUTO_RUN_PLUS_RISK_WARNING_MAX_SAFE_RUNS = 3;
 const PLUS_CONTRIBUTION_PROMPT_THRESHOLD = 5;
 const PLUS_CONTRIBUTION_ACCOUNT_CREDIT = 5;
 const PLUS_CONTRIBUTION_DONATION_CREDIT = 20;
+const CLOUDFLARE_TEMP_EMAIL_SECTION_EXPANDED_STORAGE_KEY = 'multipage-cloudflare-temp-email-section-expanded';
 const HOTMAIL_SERVICE_MODE_REMOTE = 'remote';
 const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
 const HOTMAIL_SECTION_EXPANDED_STORAGE_KEY = 'multipage-hotmail-section-expanded';
@@ -652,6 +655,7 @@ let settingsAutoSaveTimer = null;
 let settingsSaveRevision = 0;
 let cloudflareDomainEditMode = false;
 let cloudflareTempEmailDomainEditMode = false;
+let cloudflareTempEmailSectionExpanded = false;
 let hotmailSectionExpanded = false;
 let modalChoiceResolver = null;
 let currentModalActions = [];
@@ -2490,6 +2494,61 @@ function setHotmailServiceMode(mode) {
   });
 }
 
+function readCloudflareTempEmailSectionExpanded() {
+  try {
+    return localStorage.getItem(CLOUDFLARE_TEMP_EMAIL_SECTION_EXPANDED_STORAGE_KEY) === '1';
+  } catch (err) {
+    return false;
+  }
+}
+
+function persistCloudflareTempEmailSectionExpanded(expanded) {
+  try {
+    if (expanded) {
+      localStorage.setItem(CLOUDFLARE_TEMP_EMAIL_SECTION_EXPANDED_STORAGE_KEY, '1');
+    } else {
+      localStorage.removeItem(CLOUDFLARE_TEMP_EMAIL_SECTION_EXPANDED_STORAGE_KEY);
+    }
+  } catch (err) {
+    // Keep the current session state even if storage is unavailable.
+  }
+}
+
+function isCloudflareTempEmailSectionVisible() {
+  return Boolean(cloudflareTempEmailSection && cloudflareTempEmailSection.style.display !== 'none');
+}
+
+function updateCloudflareTempEmailSectionExpandedUI() {
+  const expanded = isCloudflareTempEmailSectionVisible() && cloudflareTempEmailSectionExpanded;
+  if (cloudflareTempEmailSectionBody) {
+    cloudflareTempEmailSectionBody.hidden = !expanded;
+  }
+  if (btnToggleCloudflareTempEmailSection) {
+    btnToggleCloudflareTempEmailSection.textContent = expanded ? '收起设置' : '展开设置';
+    btnToggleCloudflareTempEmailSection.title = expanded
+      ? '收起 Cloudflare Temp Email 设置'
+      : '展开 Cloudflare Temp Email 设置';
+    btnToggleCloudflareTempEmailSection.setAttribute('aria-expanded', String(expanded));
+  }
+}
+
+function setCloudflareTempEmailSectionExpanded(expanded, options = {}) {
+  const { persist = true } = options;
+  cloudflareTempEmailSectionExpanded = Boolean(expanded);
+  updateCloudflareTempEmailSectionExpandedUI();
+  if (persist) {
+    persistCloudflareTempEmailSectionExpanded(cloudflareTempEmailSectionExpanded);
+  }
+}
+
+function toggleCloudflareTempEmailSectionExpanded() {
+  setCloudflareTempEmailSectionExpanded(!cloudflareTempEmailSectionExpanded);
+}
+
+function initCloudflareTempEmailSectionExpandedState() {
+  setCloudflareTempEmailSectionExpanded(readCloudflareTempEmailSectionExpanded(), { persist: false });
+}
+
 function readHotmailSectionExpanded() {
   try {
     return localStorage.getItem(HOTMAIL_SECTION_EXPANDED_STORAGE_KEY) === '1';
@@ -4031,6 +4090,9 @@ function updateMailProviderUI() {
   if (cloudflareTempEmailSection) {
     cloudflareTempEmailSection.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   }
+  if (typeof updateCloudflareTempEmailSectionExpandedUI === 'function') {
+    updateCloudflareTempEmailSectionExpandedUI();
+  }
   if (icloudSection) {
     const showIcloudSection = (useEmailGenerator && useIcloud) || useIcloudProvider;
     icloudSection.style.display = showIcloudSection ? '' : 'none';
@@ -5272,6 +5334,10 @@ btnToggleIpProxySection?.addEventListener('click', () => {
   if (typeof toggleIpProxySectionExpanded === 'function') {
     toggleIpProxySectionExpanded();
   }
+});
+
+btnToggleCloudflareTempEmailSection?.addEventListener('click', () => {
+  toggleCloudflareTempEmailSectionExpanded();
 });
 
 btnToggleHotmailSection?.addEventListener('click', () => {
@@ -7109,6 +7175,7 @@ bindPasswordVisibilityToggles();
 initTheme();
 initHotmailListExpandedState();
 initMail2925ListExpandedState();
+initCloudflareTempEmailSectionExpandedState();
 initHotmailSectionExpandedState();
 if (typeof initIpProxySectionExpandedState === 'function') {
   initIpProxySectionExpandedState();
