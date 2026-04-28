@@ -261,25 +261,25 @@ test('phone verification helper uses HeroSMS getStatusV2 after acquiring a numbe
       },
     },
     {
-      currentPhoneActivation: {
-        activationId: '654321',
-        phoneNumber: '447911123456',
-        provider: 'hero-sms',
-        serviceCode: 'dr',
-        countryId: 16,
-        successfulUses: 1,
-        maxUses: 3,
-        statusAction: 'getStatusV2',
-      },
-    },
-    {
       reusablePhoneActivation: {
         activationId: '654321',
         phoneNumber: '447911123456',
         provider: 'hero-sms',
         serviceCode: 'dr',
         countryId: 16,
-        successfulUses: 1,
+        successfulUses: 0,
+        maxUses: 3,
+        statusAction: 'getStatusV2',
+      },
+    },
+    {
+      pendingPhoneActivationConfirmation: {
+        activationId: '654321',
+        phoneNumber: '447911123456',
+        provider: 'hero-sms',
+        serviceCode: 'dr',
+        countryId: 16,
+        successfulUses: 0,
         maxUses: 3,
         statusAction: 'getStatusV2',
       },
@@ -414,24 +414,24 @@ test('phone verification helper completes add-phone flow, clears current activat
       },
     },
     {
-      currentPhoneActivation: {
-        activationId: '123456',
-        phoneNumber: '66959916439',
-        provider: 'hero-sms',
-        serviceCode: 'dr',
-        countryId: 52,
-        successfulUses: 1,
-        maxUses: 3,
-      },
-    },
-    {
       reusablePhoneActivation: {
         activationId: '123456',
         phoneNumber: '66959916439',
         provider: 'hero-sms',
         serviceCode: 'dr',
         countryId: 52,
-        successfulUses: 1,
+        successfulUses: 0,
+        maxUses: 3,
+      },
+    },
+    {
+      pendingPhoneActivationConfirmation: {
+        activationId: '123456',
+        phoneNumber: '66959916439',
+        provider: 'hero-sms',
+        serviceCode: 'dr',
+        countryId: 52,
+        successfulUses: 0,
         maxUses: 3,
       },
     },
@@ -519,6 +519,7 @@ test('phone verification helper still succeeds when HeroSMS setStatus(3) fails a
   });
   assert.deepStrictEqual(currentState.currentPhoneActivation, null);
   assert.deepStrictEqual(currentState.reusablePhoneActivation, null);
+  assert.deepStrictEqual(currentState.pendingPhoneActivationConfirmation, null);
   const actions = requests.map((url) => url.searchParams.get('action'));
   assert.deepStrictEqual(actions, ['getNumber', 'getStatus', 'setStatus']);
 });
@@ -843,12 +844,21 @@ test('phone verification helper replaces the number when code submission returns
     provider: 'hero-sms',
     serviceCode: 'dr',
     countryId: 52,
-    successfulUses: 1,
+    successfulUses: 0,
+    maxUses: 3,
+  });
+  assert.deepStrictEqual(currentState.pendingPhoneActivationConfirmation, {
+    activationId: '222222',
+    phoneNumber: '66950000002',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 52,
+    successfulUses: 0,
     maxUses: 3,
   });
 });
 
-test('phone verification helper reuses the same number up to three successful registrations', async () => {
+test('phone verification helper defers maxUses accounting for reused activations until the full flow succeeds', async () => {
   const requests = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
@@ -934,10 +944,27 @@ test('phone verification helper reuses the same number up to three successful re
   });
   assert.equal(requests[0].searchParams.get('action'), 'reactivate');
   assert.equal(requests[0].searchParams.get('id'), '123456');
-  assert.deepStrictEqual(currentState.reusablePhoneActivation, null);
+  assert.deepStrictEqual(currentState.reusablePhoneActivation, {
+    activationId: '222333',
+    phoneNumber: '66959916439',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 52,
+    successfulUses: 2,
+    maxUses: 3,
+  });
+  assert.deepStrictEqual(currentState.pendingPhoneActivationConfirmation, {
+    activationId: '222333',
+    phoneNumber: '66959916439',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 52,
+    successfulUses: 2,
+    maxUses: 3,
+  });
 });
 
-test('phone verification helper keeps maxUses behavior for reused V2 activations', async () => {
+test('phone verification helper defers maxUses accounting for reused V2 activations until the full flow succeeds', async () => {
   const requests = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
@@ -1026,5 +1053,131 @@ test('phone verification helper keeps maxUses behavior for reused V2 activations
   });
   const actions = requests.map((url) => url.searchParams.get('action'));
   assert.deepStrictEqual(actions, ['reactivate', 'getStatusV2', 'setStatus']);
-  assert.deepStrictEqual(currentState.reusablePhoneActivation, null);
+  assert.deepStrictEqual(currentState.reusablePhoneActivation, {
+    activationId: '222333',
+    phoneNumber: '447911123456',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 16,
+    successfulUses: 2,
+    maxUses: 3,
+    statusAction: 'getStatusV2',
+  });
+  assert.deepStrictEqual(currentState.pendingPhoneActivationConfirmation, {
+    activationId: '222333',
+    phoneNumber: '447911123456',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 16,
+    successfulUses: 2,
+    maxUses: 3,
+    statusAction: 'getStatusV2',
+  });
+});
+
+test('phone verification helper finalizes pending phone activation confirmation after the full flow succeeds', async () => {
+  let currentState = {
+    reusablePhoneActivation: {
+      activationId: '123456',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    pendingPhoneActivationConfirmation: {
+      activationId: '123456',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const committedActivation = await helpers.finalizePendingPhoneActivationConfirmation();
+
+  assert.deepStrictEqual(committedActivation, {
+    activationId: '123456',
+    phoneNumber: '66959916439',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 52,
+    successfulUses: 1,
+    maxUses: 3,
+  });
+  assert.deepStrictEqual(currentState.reusablePhoneActivation, {
+    activationId: '123456',
+    phoneNumber: '66959916439',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 52,
+    successfulUses: 1,
+    maxUses: 3,
+  });
+  assert.equal(currentState.pendingPhoneActivationConfirmation, null);
+});
+
+test('phone verification helper clears reusable activation when final success exhausts maxUses', async () => {
+  let currentState = {
+    reusablePhoneActivation: {
+      activationId: '222333',
+      phoneNumber: '447911123456',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 16,
+      successfulUses: 2,
+      maxUses: 3,
+      statusAction: 'getStatusV2',
+    },
+    pendingPhoneActivationConfirmation: {
+      activationId: '222333',
+      phoneNumber: '447911123456',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 16,
+      successfulUses: 2,
+      maxUses: 3,
+      statusAction: 'getStatusV2',
+    },
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const committedActivation = await helpers.finalizePendingPhoneActivationConfirmation();
+
+  assert.deepStrictEqual(committedActivation, {
+    activationId: '222333',
+    phoneNumber: '447911123456',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 16,
+    successfulUses: 3,
+    maxUses: 3,
+    statusAction: 'getStatusV2',
+  });
+  assert.equal(currentState.reusablePhoneActivation, null);
+  assert.equal(currentState.pendingPhoneActivationConfirmation, null);
 });

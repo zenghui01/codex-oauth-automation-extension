@@ -560,6 +560,7 @@ const DEFAULT_STATE = {
   currentLuckmailMailCursor: null,
   currentPhoneActivation: null,
   reusablePhoneActivation: null,
+  pendingPhoneActivationConfirmation: null,
   autoRunning: false, // 当前是否处于自动运行中。
   autoRunPhase: 'idle', // 当前自动运行阶段。
   autoRunCurrentRun: 0, // 自动运行当前执行到第几轮。
@@ -5031,6 +5032,13 @@ async function finalizeIcloudAliasAfterSuccessfulFlow(state) {
   }
 }
 
+async function finalizePhoneActivationAfterSuccessfulFlow(state) {
+  if (typeof phoneVerificationHelpers?.finalizePendingPhoneActivationConfirmation !== 'function') {
+    return null;
+  }
+  return phoneVerificationHelpers.finalizePendingPhoneActivationConfirmation(state);
+}
+
 // ============================================================
 // Tab Registry
 // ============================================================
@@ -5766,6 +5774,7 @@ function getDownstreamStateResets(step, state = {}) {
       loginVerificationRequestedAt: null,
       oauthFlowDeadlineAt: null,
       oauthFlowDeadlineSourceUrl: null,
+      pendingPhoneActivationConfirmation: null,
       lastSignupCode: null,
       lastLoginCode: null,
       localhostUrl: null,
@@ -5780,6 +5789,7 @@ function getDownstreamStateResets(step, state = {}) {
       loginVerificationRequestedAt: null,
       oauthFlowDeadlineAt: null,
       oauthFlowDeadlineSourceUrl: null,
+      pendingPhoneActivationConfirmation: null,
       lastSignupCode: null,
       lastLoginCode: null,
       localhostUrl: null,
@@ -5793,6 +5803,7 @@ function getDownstreamStateResets(step, state = {}) {
       loginVerificationRequestedAt: null,
       oauthFlowDeadlineAt: null,
       oauthFlowDeadlineSourceUrl: null,
+      pendingPhoneActivationConfirmation: null,
       lastSignupCode: null,
       lastLoginCode: null,
       localhostUrl: null,
@@ -5815,11 +5826,13 @@ function getDownstreamStateResets(step, state = {}) {
       loginVerificationRequestedAt: null,
       oauthFlowDeadlineAt: null,
       oauthFlowDeadlineSourceUrl: null,
+      pendingPhoneActivationConfirmation: null,
       localhostUrl: null,
     };
   }
   if (step === 9) {
     return {
+      pendingPhoneActivationConfirmation: null,
       plusReturnUrl: '',
       localhostUrl: null,
     };
@@ -5830,11 +5843,13 @@ function getDownstreamStateResets(step, state = {}) {
       loginVerificationRequestedAt: null,
       oauthFlowDeadlineAt: null,
       oauthFlowDeadlineSourceUrl: null,
+      pendingPhoneActivationConfirmation: null,
       localhostUrl: null,
     };
   }
   if (stepKey === 'confirm-oauth') {
     return {
+      pendingPhoneActivationConfirmation: null,
       localhostUrl: null,
     };
   }
@@ -6676,6 +6691,7 @@ async function handleStepData(step, payload) {
           excludeLocalhostCallbacks: true,
         });
       }
+      await finalizePhoneActivationAfterSuccessfulFlow(latestState);
       await finalizeIcloudAliasAfterSuccessfulFlow(latestState);
       const shouldClearCustomPoolEmail = String(latestState?.emailGenerator || '').trim().toLowerCase() === (
         typeof CUSTOM_EMAIL_POOL_GENERATOR === 'string'
@@ -8528,6 +8544,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   executeStepViaCompletionSignal,
   exportSettingsBundle,
   fetchGeneratedEmail,
+  finalizePhoneActivationAfterSuccessfulFlow,
   finalizeStep3Completion: async () => {
     const currentState = await getState();
     const signupTabId = await getTabId('signup-page');

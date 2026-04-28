@@ -21,6 +21,7 @@
 
     const PHONE_ACTIVATION_STATE_KEY = 'currentPhoneActivation';
     const REUSABLE_PHONE_ACTIVATION_STATE_KEY = 'reusablePhoneActivation';
+    const PENDING_PHONE_ACTIVATION_CONFIRMATION_STATE_KEY = 'pendingPhoneActivationConfirmation';
     const DEFAULT_PHONE_POLL_INTERVAL_MS = 5000;
     const DEFAULT_PHONE_POLL_TIMEOUT_MS = 180000;
     const DEFAULT_PHONE_REQUEST_TIMEOUT_MS = 20000;
@@ -634,18 +635,16 @@
       await persistReusableActivation(null);
     }
 
-    async function incrementCurrentActivationUseCount(activation) {
+    function incrementActivationUseCount(activation) {
       const normalizedActivation = normalizeActivation(activation);
       if (!normalizedActivation) {
         return null;
       }
 
-      const nextActivation = {
+      return {
         ...normalizedActivation,
         successfulUses: Math.min(normalizedActivation.successfulUses + 1, normalizedActivation.maxUses),
       };
-      await persistCurrentActivation(nextActivation);
-      return nextActivation;
     }
 
     async function acquirePhoneActivation(state = {}) {
@@ -692,6 +691,35 @@
       }
 
       await persistReusableActivation(normalizedActivation);
+    }
+
+    async function persistPendingPhoneActivationConfirmation(activation) {
+      await setState({
+        [PENDING_PHONE_ACTIVATION_CONFIRMATION_STATE_KEY]: activation || null,
+      });
+    }
+
+    async function clearPendingPhoneActivationConfirmation() {
+      await persistPendingPhoneActivationConfirmation(null);
+    }
+
+    async function finalizePendingPhoneActivationConfirmation(stateOverride = null) {
+      const state = stateOverride || await getState();
+      const pendingActivation = normalizeActivation(state[PENDING_PHONE_ACTIVATION_CONFIRMATION_STATE_KEY]);
+      if (!pendingActivation) {
+        return null;
+      }
+
+      const committedActivation = incrementActivationUseCount(pendingActivation);
+      if (!committedActivation) {
+        await clearPendingPhoneActivationConfirmation();
+        await clearReusableActivation();
+        return null;
+      }
+
+      await syncReusableActivationAfterUse(committedActivation);
+      await clearPendingPhoneActivationConfirmation();
+      return committedActivation;
     }
 
     async function waitForPhoneCodeOrRotateNumber(tabId, state, activation) {
@@ -781,6 +809,9 @@
           }
 
           if (pageState?.addPhonePage) {
+            if (normalizeActivation(state[PENDING_PHONE_ACTIVATION_CONFIRMATION_STATE_KEY])) {
+              await clearPendingPhoneActivationConfirmation();
+            }
             if (activation) {
               await cancelPhoneActivation(state, activation);
               await clearCurrentActivation();
@@ -871,12 +902,13 @@
               continue;
             }
 
-            activation = await incrementCurrentActivationUseCount(activation);
             try {
               await completePhoneActivation(state, activation);
-              await syncReusableActivationAfterUse(activation);
+              await persistReusableActivation(activation);
+              await persistPendingPhoneActivationConfirmation(activation);
             } catch (activationStatusError) {
               await clearReusableActivation();
+              await clearPendingPhoneActivationConfirmation();
               await addLog(
                 `Step 9: phone verification succeeded, but HeroSMS setStatus(3) failed. The next flow will request a new number. ${activationStatusError.message}`,
                 'warn'
@@ -903,6 +935,7 @@
 
     return {
       completePhoneVerificationFlow,
+      finalizePendingPhoneActivationConfirmation,
       normalizeActivation,
       pollPhoneActivationCode,
       reactivatePhoneActivation,
