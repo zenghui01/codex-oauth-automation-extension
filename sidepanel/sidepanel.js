@@ -97,6 +97,7 @@ const rowSub2ApiDefaultProxy = document.getElementById('row-sub2api-default-prox
 const inputSub2ApiDefaultProxy = document.getElementById('input-sub2api-default-proxy');
 const rowIpProxyEnabled = document.getElementById('row-ip-proxy-enabled');
 const inputIpProxyEnabled = document.getElementById('input-ip-proxy-enabled');
+const btnToggleIpProxySection = document.getElementById('btn-toggle-ip-proxy-section');
 const ipProxyEnabledStatus = document.getElementById('ip-proxy-enabled-status');
 const ipProxyEnabledStatusDot = document.getElementById('ip-proxy-enabled-status-dot');
 const ipProxyEnabledStatusText = document.getElementById('ip-proxy-enabled-status-text');
@@ -5210,6 +5211,12 @@ btnToggleIpProxyPassword?.addEventListener('click', () => {
   syncIpProxyPasswordToggleLabel();
 });
 
+btnToggleIpProxySection?.addEventListener('click', () => {
+  if (typeof toggleIpProxySectionExpanded === 'function') {
+    toggleIpProxySectionExpanded();
+  }
+});
+
 btnMailLogin?.addEventListener('click', async () => {
   const config = getMailProviderLoginConfig();
   const loginUrl = getMailProviderLoginUrl();
@@ -7033,6 +7040,9 @@ bindPasswordVisibilityToggles();
 initTheme();
 initHotmailListExpandedState();
 initMail2925ListExpandedState();
+if (typeof initIpProxySectionExpandedState === 'function') {
+  initIpProxySectionExpandedState();
+}
 updateSaveButtonState();
 updateConfigMenuControls();
 setLocalCpaStep9Mode(DEFAULT_LOCAL_CPA_STEP9_MODE);

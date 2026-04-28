@@ -7,6 +7,7 @@ const {
 } = require('../mail-provider-utils');
 
 const sidepanelSource = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
+const ipProxyPanelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
 
 function extractFunction(name) {
   const markers = [`async function ${name}(`, `function ${name}(`];
@@ -74,12 +75,25 @@ test('sidepanel renders IP proxy as a standalone card after sms verification wit
   const cloudflareSectionIndex = html.indexOf('id="cloudflare-temp-email-section"');
 
   assert.match(html, /id="ip-proxy-section" class="data-card ip-proxy-card"/);
+  assert.match(html, /id="btn-toggle-ip-proxy-section"/);
+  assert.match(html, /aria-controls="row-ip-proxy-fold"/);
+  assert.match(html, />展开设置<\/button>/);
   assert.ok(phoneToggleIndex >= 0);
   assert.ok(ipProxySectionIndex > phoneToggleIndex);
   assert.ok(ipProxyToggleIndex > phoneToggleIndex);
   assert.ok(cloudflareSectionIndex > ipProxySectionIndex);
   assert.doesNotMatch(html, /id="ip-proxy-enabled-status"/);
   assert.doesNotMatch(html, /id="row-ip-proxy-runtime-status"/);
+});
+
+test('IP proxy standalone card supports persisted collapse control', () => {
+  assert.match(ipProxyPanelSource, /IP_PROXY_SECTION_EXPANDED_STORAGE_KEY = 'multipage-ip-proxy-section-expanded'/);
+  assert.match(ipProxyPanelSource, /let ipProxySectionExpanded = false/);
+  assert.match(ipProxyPanelSource, /const showSettings = enabled && ipProxySectionExpanded/);
+  assert.match(ipProxyPanelSource, /rowIpProxyFold\.style\.display = showSettings \? '' : 'none'/);
+  assert.match(ipProxyPanelSource, /btnToggleIpProxySection\.setAttribute\('aria-expanded', String\(showSettings\)\)/);
+  assert.match(sidepanelSource, /btnToggleIpProxySection\?\.addEventListener\('click', \(\) => \{\s*if \(typeof toggleIpProxySectionExpanded === 'function'\)/);
+  assert.match(sidepanelSource, /initIpProxySectionExpandedState\(\)/);
 });
 
 test('updatePhoneVerificationSettingsUI toggles HeroSMS rows from the sms switch', () => {

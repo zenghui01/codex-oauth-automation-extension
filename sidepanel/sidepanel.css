@@ -791,6 +791,11 @@ header {
 
 .ip-proxy-header-actions {
   flex: 0 0 auto;
+  align-items: center;
+}
+
+#btn-toggle-ip-proxy-section {
+  white-space: nowrap;
 }
 
 .ip-proxy-fold {
