@@ -573,6 +573,8 @@ test('resetState preserves LuckMail session config, used map, and preserve tag c
     "  luckmailPreserveTagName: '保留',",
     "  currentLuckmailPurchase: { token: 'stale' },",
     "  currentLuckmailMailCursor: { messageId: 'stale' },",
+    '  currentPhoneActivation: null,',
+    '  reusablePhoneActivation: null,',
     '  email: null,',
     '};',
     'const CONTRIBUTION_RUNTIME_DEFAULTS = {',
@@ -618,6 +620,7 @@ test('resetState preserves LuckMail session config, used map, and preserve tag c
     "          accounts: [{ email: 'saved@example.com' }],",
     "          tabRegistry: { foo: { tabId: 1 } },",
     "          sourceLastUrls: { foo: 'https://example.com' },",
+    "          reusablePhoneActivation: { activationId: 'rx-001', phoneNumber: '66951112222', provider: 'hero-sms', serviceCode: 'dr', countryId: 52, successfulUses: 1, maxUses: 3 },",
     "          luckmailApiKey: 'sk-session',",
     "          luckmailBaseUrl: 'https://demo.example.com/',",
     "          luckmailEmailType: 'ms_imap',",
@@ -659,6 +662,16 @@ test('resetState preserves LuckMail session config, used map, and preserve tag c
   assert.equal(snapshot.storedPayload.luckmailPreserveTagName, '保留');
   assert.equal(snapshot.storedPayload.currentLuckmailPurchase, null);
   assert.equal(snapshot.storedPayload.currentLuckmailMailCursor, null);
+  assert.deepStrictEqual(snapshot.storedPayload.reusablePhoneActivation, {
+    activationId: 'rx-001',
+    phoneNumber: '66951112222',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 52,
+    successfulUses: 1,
+    maxUses: 3,
+  });
+  assert.equal(snapshot.storedPayload.currentPhoneActivation, null);
 });
 
 test('handleStepData step 10 marks current LuckMail purchase as used and clears runtime state', async () => {

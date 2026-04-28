@@ -222,6 +222,28 @@
       return Math.min(20, Math.max(0, Math.floor(numeric)));
     }
 
+    function getVerificationRequestedAtStateKey(step) {
+      if (Number(step) === 4) return 'signupVerificationRequestedAt';
+      if (Number(step) === 8) return 'loginVerificationRequestedAt';
+      return '';
+    }
+
+    function resolveInitialVerificationRequestedAt(step, state = {}, fallback = 0) {
+      const stateKey = getVerificationRequestedAtStateKey(step);
+      const candidateValues = [
+        fallback,
+        stateKey ? state?.[stateKey] : 0,
+      ];
+
+      for (const value of candidateValues) {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric) && numeric > 0) {
+          return Math.floor(numeric);
+        }
+      }
+      return 0;
+    }
+
     function getLegacyVerificationResendCountDefault(step, options = {}) {
       const requestFreshCodeFirst = Boolean(options.requestFreshCodeFirst);
       const legacyMaxRounds = Math.max(1, Math.floor(Number(VERIFICATION_POLL_MAX_ROUNDS) || 1));
@@ -919,10 +941,14 @@
         : getConfiguredVerificationResendCount(step, state, { requestFreshCodeFirst });
       const maxSubmitAttempts = mail.provider === LUCKMAIL_PROVIDER ? 3 : 15;
       const resendIntervalMs = Math.max(0, Number(options.resendIntervalMs) || 0);
-      let lastResendAt = Number(options.lastResendAt) || 0;
       const externalOnResendRequestedAt = typeof options.onResendRequestedAt === 'function'
         ? options.onResendRequestedAt
         : null;
+      let lastResendAt = resolveInitialVerificationRequestedAt(
+        step,
+        state,
+        Number(options.lastResendAt) || 0
+      );
 
       const updateFilterAfterTimestampForVerificationStep = async (requestedAt) => {
         if (externalOnResendRequestedAt) {
