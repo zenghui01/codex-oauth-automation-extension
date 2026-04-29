@@ -187,13 +187,9 @@ const selectTempEmailDomain = document.getElementById('select-temp-email-domain'
 const inputTempEmailDomain = document.getElementById('input-temp-email-domain');
 const btnTempEmailDomainMode = document.getElementById('btn-temp-email-domain-mode');
 const cloudflareTempEmailSection = document.getElementById('cloudflare-temp-email-section');
-const btnToggleCloudflareTempEmailSection = document.getElementById('btn-toggle-cloudflare-temp-email-section');
-const cloudflareTempEmailSectionBody = document.getElementById('cloudflare-temp-email-section-body');
 const btnCloudflareTempEmailUsageGuide = document.getElementById('btn-cloudflare-temp-email-usage-guide');
 const btnCloudflareTempEmailGithub = document.getElementById('btn-cloudflare-temp-email-github');
 const hotmailSection = document.getElementById('hotmail-section');
-const btnToggleHotmailSection = document.getElementById('btn-toggle-hotmail-section');
-const hotmailSectionBody = document.getElementById('hotmail-section-body');
 const mail2925Section = document.getElementById('mail2925-section');
 const luckmailSection = document.getElementById('luckmail-section');
 const icloudSection = document.getElementById('icloud-section');
@@ -293,15 +289,48 @@ const inputAutoDelayMinutes = document.getElementById('input-auto-delay-minutes'
 const inputAutoStepDelaySeconds = document.getElementById('input-auto-step-delay-seconds');
 const inputVerificationResendCount = document.getElementById('input-verification-resend-count');
 const rowPhoneVerificationEnabled = document.getElementById('row-phone-verification-enabled');
+const btnTogglePhoneVerificationSection = document.getElementById('btn-toggle-phone-verification-section');
+const rowPhoneVerificationFold = document.getElementById('row-phone-verification-fold');
 const inputPhoneVerificationEnabled = document.getElementById('input-phone-verification-enabled');
 const rowHeroSmsPlatform = document.getElementById('row-hero-sms-platform');
 const rowHeroSmsCountry = document.getElementById('row-hero-sms-country');
-const rowHeroSmsMaxPrice = document.getElementById('row-hero-sms-max-price');
+const rowHeroSmsCountryFallback = document.getElementById('row-hero-sms-country-fallback');
+const rowHeroSmsAcquirePriority = document.getElementById('row-hero-sms-acquire-priority');
 const rowHeroSmsApiKey = document.getElementById('row-hero-sms-api-key');
+const rowHeroSmsMaxPrice = document.getElementById('row-hero-sms-max-price');
+const rowHeroSmsRuntimePair = document.getElementById('row-hero-sms-runtime-pair');
+const rowHeroSmsCurrentNumber = document.getElementById('row-hero-sms-current-number');
+const rowHeroSmsPriceTiers = document.getElementById('row-hero-sms-price-tiers');
+const rowHeroSmsCurrentCode = document.getElementById('row-hero-sms-current-code');
+const rowPhoneCodeSettingsGroup = document.getElementById('row-phone-code-settings-group');
+const rowPhoneVerificationResendCount = document.getElementById('row-phone-verification-resend-count');
+const rowPhoneReplacementLimit = document.getElementById('row-phone-replacement-limit');
+const rowPhoneCodeWaitSeconds = document.getElementById('row-phone-code-wait-seconds');
+const rowPhoneCodeTimeoutWindows = document.getElementById('row-phone-code-timeout-windows');
+const rowPhoneCodePollIntervalSeconds = document.getElementById('row-phone-code-poll-interval-seconds');
+const rowPhoneCodePollMaxRounds = document.getElementById('row-phone-code-poll-max-rounds');
 const inputHeroSmsApiKey = document.getElementById('input-hero-sms-api-key');
+const btnToggleHeroSmsApiKey = document.getElementById('btn-toggle-hero-sms-api-key');
 const inputHeroSmsMaxPrice = document.getElementById('input-hero-sms-max-price');
+const inputPhoneReplacementLimit = document.getElementById('input-phone-replacement-limit');
+const inputPhoneCodeWaitSeconds = document.getElementById('input-phone-code-wait-seconds');
+const inputPhoneCodeTimeoutWindows = document.getElementById('input-phone-code-timeout-windows');
+const inputPhoneCodePollIntervalSeconds = document.getElementById('input-phone-code-poll-interval-seconds');
+const inputPhoneCodePollMaxRounds = document.getElementById('input-phone-code-poll-max-rounds');
+const inputHeroSmsReuseEnabled = document.getElementById('input-hero-sms-reuse-enabled');
 const selectHeroSmsCountry = document.getElementById('select-hero-sms-country');
+const selectHeroSmsCountryFallback = document.getElementById('select-hero-sms-country-fallback');
+const selectHeroSmsAcquirePriority = document.getElementById('select-hero-sms-acquire-priority');
+const heroSmsCountryMenuShell = document.getElementById('hero-sms-country-menu-shell');
+const btnHeroSmsCountryMenu = document.getElementById('btn-hero-sms-country-menu');
+const heroSmsCountryMenu = document.getElementById('hero-sms-country-menu');
+const btnHeroSmsCountryClear = document.getElementById('btn-hero-sms-country-clear');
+const btnHeroSmsPricePreview = document.getElementById('btn-hero-sms-price-preview');
 const displayHeroSmsPlatform = document.getElementById('display-hero-sms-platform');
+const displayHeroSmsCurrentNumber = document.getElementById('display-hero-sms-current-number');
+const displayHeroSmsPriceTiers = document.getElementById('display-hero-sms-price-tiers');
+const displayHeroSmsCurrentCode = document.getElementById('display-hero-sms-current-code');
+const displayHeroSmsCountryFallbackOrder = document.getElementById('display-hero-sms-country-fallback-order');
 const rowAccountRunHistoryHelperBaseUrl = document.getElementById('row-account-run-history-helper-base-url');
 const inputAccountRunHistoryHelperBaseUrl = document.getElementById('input-account-run-history-helper-base-url');
 const autoStartModal = document.getElementById('auto-start-modal');
@@ -326,6 +355,9 @@ const btnAutoStartContinue = document.getElementById('btn-auto-start-continue');
 const autoHintText = document.querySelector('.auto-hint');
 const stepsList = document.querySelector('.steps-list');
 let currentPlusModeEnabled = false;
+let heroSmsCountrySelectionOrder = [];
+let heroSmsCountryMenuSearchKeyword = '';
+const heroSmsCountrySearchTextById = new Map();
 let stepDefinitions = getStepDefinitionsForMode(false);
 let STEP_IDS = stepDefinitions.map((step) => Number(step.id)).filter(Number.isFinite);
 let STEP_DEFAULT_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
@@ -342,6 +374,72 @@ const AUTO_STEP_DELAY_MAX_SECONDS = 600;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
+const PHONE_REPLACEMENT_LIMIT_MIN = 1;
+const PHONE_REPLACEMENT_LIMIT_MAX = 20;
+const DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT = 3;
+const PHONE_CODE_WAIT_SECONDS_MIN = 15;
+const PHONE_CODE_WAIT_SECONDS_MAX = 300;
+const DEFAULT_PHONE_CODE_WAIT_SECONDS = 60;
+const PHONE_CODE_TIMEOUT_WINDOWS_MIN = 1;
+const PHONE_CODE_TIMEOUT_WINDOWS_MAX = 10;
+const DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS = 2;
+const PHONE_CODE_POLL_INTERVAL_SECONDS_MIN = 1;
+const PHONE_CODE_POLL_INTERVAL_SECONDS_MAX = 30;
+const DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS = 5;
+const PHONE_CODE_POLL_MAX_ROUNDS_MIN = 1;
+const PHONE_CODE_POLL_MAX_ROUNDS_MAX = 120;
+const DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS = 4;
+const HERO_SMS_COUNTRY_SELECTION_MAX = 3;
+const DEFAULT_HERO_SMS_REUSE_ENABLED = true;
+const HERO_SMS_ACQUIRE_PRIORITY_COUNTRY = 'country';
+const HERO_SMS_ACQUIRE_PRIORITY_PRICE = 'price';
+const DEFAULT_HERO_SMS_ACQUIRE_PRIORITY = HERO_SMS_ACQUIRE_PRIORITY_COUNTRY;
+const HERO_SMS_FALLBACK_COUNTRY_ITEMS = Object.freeze([
+  { id: 52, chn: '泰国', eng: 'Thailand' },
+  { id: 187, chn: '美国（物理)', eng: 'USA' },
+  { id: 16, chn: '英国', eng: 'United Kingdom' },
+  { id: 151, chn: '日本', eng: 'Japan' },
+  { id: 43, chn: '德国', eng: 'Germany' },
+  { id: 73, chn: '法国', eng: 'France' },
+]);
+const HERO_SMS_COUNTRY_CODE_ALIAS_OVERRIDES = Object.freeze({
+  'bahamas': ['BS'],
+  'bolivia': ['BO'],
+  'czech republic': ['CZ'],
+  'democratic republic of the congo': ['CD'],
+  'laos': ['LA'],
+  'moldova': ['MD'],
+  'north korea': ['KP'],
+  'south korea': ['KR'],
+  'russia': ['RU'],
+  'russian federation': ['RU'],
+  'syria': ['SY'],
+  'taiwan': ['TW'],
+  'tanzania': ['TZ'],
+  'united kingdom': ['GB', 'UK'],
+  'united states': ['US', 'USA'],
+  'venezuela': ['VE'],
+  'vietnam': ['VN'],
+});
+const HERO_SMS_COUNTRY_ISO_CODE_BY_NAME = (() => {
+  const lookup = new Map();
+  if (typeof Intl === 'undefined' || typeof Intl.DisplayNames !== 'function') {
+    return lookup;
+  }
+  const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
+  for (let first = 65; first <= 90; first += 1) {
+    for (let second = 65; second <= 90; second += 1) {
+      const code = String.fromCharCode(first) + String.fromCharCode(second);
+      const name = displayNames.of(code);
+      const key = normalizeHeroSmsCountryAliasKey(name);
+      if (!key || lookup.has(key)) {
+        continue;
+      }
+      lookup.set(key, code);
+    }
+  }
+  return lookup;
+})();
 const DEFAULT_LOCAL_CPA_STEP9_MODE = 'submit';
 const DEFAULT_CPA_CALLBACK_MODE = 'step8';
 const MAIL_2925_MODE_PROVIDE = 'provide';
@@ -352,6 +450,7 @@ const AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-skip-fai
 const AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-fallback-risk-prompt-dismissed';
 const AUTO_RUN_PLUS_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-plus-risk-prompt-dismissed';
 const PLUS_CONTRIBUTION_PROMPT_LEDGER_STORAGE_KEY = 'multipage-plus-contribution-prompt-ledger';
+const PHONE_VERIFICATION_SECTION_EXPANDED_STORAGE_KEY = 'multipage-phone-verification-section-expanded';
 
 function getStepDefinitionsForMode(plusModeEnabled = false) {
   return (window.MultiPageStepDefinitions?.getSteps?.({ plusModeEnabled }) || [])
@@ -376,10 +475,8 @@ const AUTO_RUN_PLUS_RISK_WARNING_MAX_SAFE_RUNS = 3;
 const PLUS_CONTRIBUTION_PROMPT_THRESHOLD = 5;
 const PLUS_CONTRIBUTION_ACCOUNT_CREDIT = 5;
 const PLUS_CONTRIBUTION_DONATION_CREDIT = 20;
-const CLOUDFLARE_TEMP_EMAIL_SECTION_EXPANDED_STORAGE_KEY = 'multipage-cloudflare-temp-email-section-expanded';
 const HOTMAIL_SERVICE_MODE_REMOTE = 'remote';
 const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
-const HOTMAIL_SECTION_EXPANDED_STORAGE_KEY = 'multipage-hotmail-section-expanded';
 const ICLOUD_PROVIDER = 'icloud';
 const GMAIL_PROVIDER = 'gmail';
 const GMAIL_ALIAS_GENERATOR = 'gmail-alias';
@@ -657,8 +754,6 @@ let settingsAutoSaveTimer = null;
 let settingsSaveRevision = 0;
 let cloudflareDomainEditMode = false;
 let cloudflareTempEmailDomainEditMode = false;
-let cloudflareTempEmailSectionExpanded = false;
-let hotmailSectionExpanded = false;
 let modalChoiceResolver = null;
 let currentModalActions = [];
 let modalResultBuilder = null;
@@ -668,6 +763,44 @@ let configActionInFlight = false;
 let currentReleaseSnapshot = null;
 let currentContributionContentSnapshot = null;
 let contributionContentSnapshotRequestInFlight = null;
+let phoneVerificationSectionExpanded = true;
+
+function readPhoneVerificationSectionExpanded() {
+  try {
+    return globalThis.localStorage?.getItem(PHONE_VERIFICATION_SECTION_EXPANDED_STORAGE_KEY) !== '0';
+  } catch (err) {
+    return true;
+  }
+}
+
+function persistPhoneVerificationSectionExpanded(expanded) {
+  try {
+    globalThis.localStorage?.setItem(
+      PHONE_VERIFICATION_SECTION_EXPANDED_STORAGE_KEY,
+      expanded ? '1' : '0'
+    );
+  } catch (err) {
+    // Ignore storage errors; in-memory state is sufficient for current session.
+  }
+}
+
+function setPhoneVerificationSectionExpanded(expanded) {
+  phoneVerificationSectionExpanded = Boolean(expanded);
+  persistPhoneVerificationSectionExpanded(phoneVerificationSectionExpanded);
+  updatePhoneVerificationSettingsUI();
+}
+
+function togglePhoneVerificationSectionExpanded() {
+  if (!inputPhoneVerificationEnabled?.checked) {
+    return;
+  }
+  setPhoneVerificationSectionExpanded(!phoneVerificationSectionExpanded);
+}
+
+function initPhoneVerificationSectionExpandedState() {
+  phoneVerificationSectionExpanded = readPhoneVerificationSectionExpanded();
+  updatePhoneVerificationSettingsUI();
+}
 
 const EYE_OPEN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_CLOSED_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19C5 19 1 12 1 12a21.77 21.77 0 0 1 5.06-6.94"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 5c7 0 11 7 11 7a21.86 21.86 0 0 1-2.16 3.19"/><path d="M1 1l22 22"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>';
@@ -2230,15 +2363,77 @@ function collectSettingsPayload() {
   const heroSmsApiKeyValue = typeof inputHeroSmsApiKey !== 'undefined' && inputHeroSmsApiKey
     ? (inputHeroSmsApiKey.value || '')
     : '';
+  const defaultHeroSmsReuseEnabled = typeof DEFAULT_HERO_SMS_REUSE_ENABLED !== 'undefined'
+    ? DEFAULT_HERO_SMS_REUSE_ENABLED
+    : true;
+  const defaultPhoneCodeWaitSeconds = typeof DEFAULT_PHONE_CODE_WAIT_SECONDS !== 'undefined'
+    ? DEFAULT_PHONE_CODE_WAIT_SECONDS
+    : 60;
+  const defaultPhoneCodeTimeoutWindows = typeof DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS !== 'undefined'
+    ? DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS
+    : 2;
+  const defaultPhoneCodePollIntervalSeconds = typeof DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS !== 'undefined'
+    ? DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS
+    : 5;
+  const defaultPhoneCodePollMaxRounds = typeof DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS !== 'undefined'
+    ? DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS
+    : 12;
+  const heroSmsReuseEnabledValue = typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled
+    ? normalizeHeroSmsReuseEnabledValue(inputHeroSmsReuseEnabled.checked)
+    : defaultHeroSmsReuseEnabled;
+  const normalizeHeroSmsAcquirePriorityValue = typeof normalizeHeroSmsAcquirePriority === 'function'
+    ? normalizeHeroSmsAcquirePriority
+    : (value) => (String(value || '').trim().toLowerCase() === 'price' ? 'price' : 'country');
+  const heroSmsAcquirePriorityValue = typeof selectHeroSmsAcquirePriority !== 'undefined' && selectHeroSmsAcquirePriority
+    ? normalizeHeroSmsAcquirePriorityValue(selectHeroSmsAcquirePriority.value)
+    : normalizeHeroSmsAcquirePriorityValue(
+      typeof DEFAULT_HERO_SMS_ACQUIRE_PRIORITY !== 'undefined'
+        ? DEFAULT_HERO_SMS_ACQUIRE_PRIORITY
+        : 'country'
+    );
   const heroSmsMaxPriceValue = typeof inputHeroSmsMaxPrice !== 'undefined' && inputHeroSmsMaxPrice
     ? normalizeHeroSmsMaxPriceValue(inputHeroSmsMaxPrice.value)
     : '';
+  const phoneVerificationReplacementLimitValue = typeof inputPhoneReplacementLimit !== 'undefined' && inputPhoneReplacementLimit
+    ? normalizePhoneVerificationReplacementLimit(
+      inputPhoneReplacementLimit.value,
+      latestState?.phoneVerificationReplacementLimit
+    )
+    : DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT;
+  const phoneCodeWaitSecondsValue = typeof inputPhoneCodeWaitSeconds !== 'undefined' && inputPhoneCodeWaitSeconds
+    ? normalizePhoneCodeWaitSecondsValue(
+      inputPhoneCodeWaitSeconds.value,
+      latestState?.phoneCodeWaitSeconds
+    )
+    : defaultPhoneCodeWaitSeconds;
+  const phoneCodeTimeoutWindowsValue = typeof inputPhoneCodeTimeoutWindows !== 'undefined' && inputPhoneCodeTimeoutWindows
+    ? normalizePhoneCodeTimeoutWindowsValue(
+      inputPhoneCodeTimeoutWindows.value,
+      latestState?.phoneCodeTimeoutWindows
+    )
+    : defaultPhoneCodeTimeoutWindows;
+  const phoneCodePollIntervalSecondsValue = typeof inputPhoneCodePollIntervalSeconds !== 'undefined' && inputPhoneCodePollIntervalSeconds
+    ? normalizePhoneCodePollIntervalSecondsValue(
+      inputPhoneCodePollIntervalSeconds.value,
+      latestState?.phoneCodePollIntervalSeconds
+    )
+    : defaultPhoneCodePollIntervalSeconds;
+  const phoneCodePollMaxRoundsValue = typeof inputPhoneCodePollMaxRounds !== 'undefined' && inputPhoneCodePollMaxRounds
+    ? normalizePhoneCodePollMaxRoundsValue(
+      inputPhoneCodePollMaxRounds.value,
+      latestState?.phoneCodePollMaxRounds
+    )
+    : defaultPhoneCodePollMaxRounds;
   const heroSmsCountry = typeof getSelectedHeroSmsCountryOption === 'function'
     ? getSelectedHeroSmsCountryOption()
     : {
       id: typeof DEFAULT_HERO_SMS_COUNTRY_ID !== 'undefined' ? DEFAULT_HERO_SMS_COUNTRY_ID : 52,
       label: typeof DEFAULT_HERO_SMS_COUNTRY_LABEL !== 'undefined' ? DEFAULT_HERO_SMS_COUNTRY_LABEL : 'Thailand',
     };
+  const heroSmsCountryFallback = typeof syncHeroSmsFallbackSelectionOrderFromSelect === 'function'
+    ? syncHeroSmsFallbackSelectionOrderFromSelect()
+      .filter((country) => Number(country.id) !== Number(heroSmsCountry.id))
+    : [];
   const payPalAccounts = typeof getPayPalAccounts === 'function'
     ? getPayPalAccounts(latestState)
     : (Array.isArray(latestState?.paypalAccounts) ? latestState.paypalAccounts : []);
@@ -2336,9 +2531,17 @@ function collectSettingsPayload() {
       DEFAULT_VERIFICATION_RESEND_COUNT
     ),
     heroSmsApiKey: heroSmsApiKeyValue,
+    heroSmsReuseEnabled: heroSmsReuseEnabledValue,
+    heroSmsAcquirePriority: heroSmsAcquirePriorityValue,
     heroSmsMaxPrice: heroSmsMaxPriceValue,
+    phoneVerificationReplacementLimit: phoneVerificationReplacementLimitValue,
+    phoneCodeWaitSeconds: phoneCodeWaitSecondsValue,
+    phoneCodeTimeoutWindows: phoneCodeTimeoutWindowsValue,
+    phoneCodePollIntervalSeconds: phoneCodePollIntervalSecondsValue,
+    phoneCodePollMaxRounds: phoneCodePollMaxRoundsValue,
     heroSmsCountryId: heroSmsCountry.id,
     heroSmsCountryLabel: heroSmsCountry.label,
+    heroSmsCountryFallback,
   };
 }
 
@@ -2395,77 +2598,885 @@ function normalizeHeroSmsCountryLabel(value = '') {
   return String(value || '').trim() || DEFAULT_HERO_SMS_COUNTRY_LABEL;
 }
 
-function normalizeHeroSmsMaxPriceValue(value, fallback = '') {
-  const trimmed = String(value ?? '').trim();
-  if (!trimmed) {
-    return String(fallback || '').trim();
+function normalizeHeroSmsMaxPriceValue(value = '') {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return '';
   }
-  const numeric = Number(trimmed);
+  const numeric = Number(rawValue);
   if (!Number.isFinite(numeric) || numeric <= 0) {
-    return String(fallback || '').trim();
+    return '';
   }
-  return String(numeric);
+  return String(Math.round(numeric * 10000) / 10000);
+}
+
+function normalizePhoneVerificationReplacementLimit(value, fallback = DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(
+      PHONE_REPLACEMENT_LIMIT_MIN,
+      Math.min(PHONE_REPLACEMENT_LIMIT_MAX, Number(fallback) || DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT)
+    );
+  }
+  return Math.max(PHONE_REPLACEMENT_LIMIT_MIN, Math.min(PHONE_REPLACEMENT_LIMIT_MAX, parsed));
+}
+
+function normalizePhoneCodeWaitSecondsValue(value, fallback = DEFAULT_PHONE_CODE_WAIT_SECONDS) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(
+      PHONE_CODE_WAIT_SECONDS_MIN,
+      Math.min(PHONE_CODE_WAIT_SECONDS_MAX, Number(fallback) || DEFAULT_PHONE_CODE_WAIT_SECONDS)
+    );
+  }
+  return Math.max(PHONE_CODE_WAIT_SECONDS_MIN, Math.min(PHONE_CODE_WAIT_SECONDS_MAX, parsed));
+}
+
+function normalizePhoneCodeTimeoutWindowsValue(value, fallback = DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(
+      PHONE_CODE_TIMEOUT_WINDOWS_MIN,
+      Math.min(PHONE_CODE_TIMEOUT_WINDOWS_MAX, Number(fallback) || DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS)
+    );
+  }
+  return Math.max(PHONE_CODE_TIMEOUT_WINDOWS_MIN, Math.min(PHONE_CODE_TIMEOUT_WINDOWS_MAX, parsed));
+}
+
+function normalizePhoneCodePollIntervalSecondsValue(value, fallback = DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(
+      PHONE_CODE_POLL_INTERVAL_SECONDS_MIN,
+      Math.min(PHONE_CODE_POLL_INTERVAL_SECONDS_MAX, Number(fallback) || DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS)
+    );
+  }
+  return Math.max(PHONE_CODE_POLL_INTERVAL_SECONDS_MIN, Math.min(PHONE_CODE_POLL_INTERVAL_SECONDS_MAX, parsed));
+}
+
+function normalizePhoneCodePollMaxRoundsValue(value, fallback = DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(
+      PHONE_CODE_POLL_MAX_ROUNDS_MIN,
+      Math.min(PHONE_CODE_POLL_MAX_ROUNDS_MAX, Number(fallback) || DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS)
+    );
+  }
+  return Math.max(PHONE_CODE_POLL_MAX_ROUNDS_MIN, Math.min(PHONE_CODE_POLL_MAX_ROUNDS_MAX, parsed));
+}
+
+function normalizeHeroSmsReuseEnabledValue(value) {
+  if (value === undefined || value === null) {
+    return DEFAULT_HERO_SMS_REUSE_ENABLED;
+  }
+  return Boolean(value);
+}
+
+function normalizeHeroSmsAcquirePriority(value = '') {
+  return String(value || '').trim().toLowerCase() === HERO_SMS_ACQUIRE_PRIORITY_PRICE
+    ? HERO_SMS_ACQUIRE_PRIORITY_PRICE
+    : HERO_SMS_ACQUIRE_PRIORITY_COUNTRY;
+}
+
+function normalizeHeroSmsCountryFallbackList(value = []) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || '')
+      .split(/[\r\n,，;；]+/)
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+  const seen = new Set();
+  const normalized = [];
+
+  source.forEach((entry) => {
+    let id = 0;
+    let label = '';
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      const parsedId = Math.floor(Number(entry.id ?? entry.countryId));
+      id = Number.isFinite(parsedId) && parsedId > 0 ? parsedId : 0;
+      label = normalizeHeroSmsCountryLabel(entry.label ?? entry.countryLabel);
+    } else {
+      const text = String(entry || '').trim();
+      const structured = text.match(/^(\d+)\s*(?:[:|/-]\s*(.+))?$/);
+      if (structured) {
+        const parsedId = Math.floor(Number(structured[1]));
+        id = Number.isFinite(parsedId) && parsedId > 0 ? parsedId : 0;
+        label = normalizeHeroSmsCountryLabel(structured[2]);
+      } else {
+        const parsedId = Math.floor(Number(text));
+        id = Number.isFinite(parsedId) && parsedId > 0 ? parsedId : 0;
+      }
+    }
+
+    if (!id || seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    normalized.push({
+      id,
+      label: label || `Country #${id}`,
+    });
+  });
+
+  return normalized;
+}
+
+function collectHeroSmsCountrySearchTokens(value, tokens, depth = 0) {
+  if (depth > 2 || value === null || value === undefined) {
+    return;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    if (normalized) {
+      tokens.add(normalized);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectHeroSmsCountrySearchTokens(entry, tokens, depth + 1));
+    return;
+  }
+  if (typeof value === 'object') {
+    Object.values(value).forEach((entry) => collectHeroSmsCountrySearchTokens(entry, tokens, depth + 1));
+  }
+}
+
+function normalizeHeroSmsCountryAliasKey(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[’'`]/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/\(.*?\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function collectHeroSmsCountryCodeAliases(country = {}, label = '') {
+  const aliases = new Set();
+  const candidateLabels = [
+    String(label || '').trim(),
+    String(country?.eng || '').trim(),
+    String(country?.name || '').trim(),
+    String(country?.country || '').trim(),
+  ].filter(Boolean);
+  candidateLabels.forEach((candidate) => {
+    const normalized = normalizeHeroSmsCountryAliasKey(candidate);
+    if (!normalized) {
+      return;
+    }
+    const code = HERO_SMS_COUNTRY_ISO_CODE_BY_NAME.get(normalized);
+    if (code) {
+      aliases.add(code);
+    }
+    const overrideAliases = HERO_SMS_COUNTRY_CODE_ALIAS_OVERRIDES[normalized];
+    if (Array.isArray(overrideAliases)) {
+      overrideAliases.forEach((entry) => {
+        const token = String(entry || '').trim().toUpperCase();
+        if (token) {
+          aliases.add(token);
+        }
+      });
+    }
+  });
+  return Array.from(aliases);
+}
+
+function buildHeroSmsCountrySearchText(country = {}, label = '', id = '') {
+  const tokens = new Set();
+  collectHeroSmsCountrySearchTokens(country, tokens, 0);
+  if (label) {
+    tokens.add(String(label).trim());
+  }
+  if (id) {
+    tokens.add(String(id).trim());
+  }
+  collectHeroSmsCountryCodeAliases(country, label).forEach((alias) => tokens.add(alias));
+  return Array.from(tokens).join(' ');
+}
+
+function buildHeroSmsCountryDisplayLabel(country = {}) {
+  const english = String(country?.eng || '').trim();
+  const chinese = String(country?.chn || '').trim();
+  if (chinese && english) {
+    if (chinese.toLowerCase() === english.toLowerCase()) {
+      return english;
+    }
+    return `${chinese} (${english})`;
+  }
+  return chinese || english;
+}
+
+function normalizeHeroSmsFetchErrorMessage(error) {
+  const message = String(error?.message || error || '').trim();
+  if (!message) {
+    return '未知网络错误';
+  }
+  if (/aborted|abort|timed out|timeout/i.test(message)) {
+    return '请求超时，请稍后重试';
+  }
+  if (/failed to fetch|networkerror|network request failed/i.test(message)) {
+    return '网络不可用或被拦截';
+  }
+  return message;
+}
+
+function normalizeHeroSmsPriceForPreview(value) {
+  const price = Number(value);
+  if (!Number.isFinite(price) || price < 0) {
+    return null;
+  }
+  return price;
+}
+
+function formatHeroSmsPriceForPreview(value) {
+  const price = Number(value);
+  if (!Number.isFinite(price) || price < 0) {
+    return '';
+  }
+  const rounded = Math.round(price * 10000) / 10000;
+  return rounded.toFixed(4).replace(/\.?0+$/, '');
+}
+
+function isHeroSmsPreviewEmptyPayload(payload) {
+  if (payload === undefined || payload === null) {
+    return true;
+  }
+  if (typeof payload === 'string') {
+    return !payload.trim();
+  }
+  if (Array.isArray(payload)) {
+    return payload.length === 0;
+  }
+  if (typeof payload === 'object') {
+    return Object.keys(payload).length === 0;
+  }
+  return false;
+}
+
+function collectHeroSmsPriceEntriesForPreview(payload, entries = []) {
+  if (Array.isArray(payload)) {
+    payload.forEach((entry) => collectHeroSmsPriceEntriesForPreview(entry, entries));
+    return entries;
+  }
+  if (!payload || typeof payload !== 'object') {
+    return entries;
+  }
+
+  const cost = normalizeHeroSmsPriceForPreview(payload.cost);
+  if (cost !== null) {
+    const count = Number(payload.count);
+    const physicalCount = Number(payload.physicalCount);
+    const hasCount = Number.isFinite(count);
+    const hasPhysicalCount = Number.isFinite(physicalCount);
+    const stockCount = Math.max(hasCount ? count : 0, hasPhysicalCount ? physicalCount : 0);
+    const hasStockField = hasCount || hasPhysicalCount;
+    entries.push({
+      cost,
+      hasStockField,
+      stockCount: Number.isFinite(stockCount) ? stockCount : 0,
+      inStock: !hasStockField || stockCount > 0,
+    });
+  }
+
+  Object.values(payload).forEach((entry) => collectHeroSmsPriceEntriesForPreview(entry, entries));
+  return entries;
+}
+
+function collectHeroSmsPriceCandidatesForPreview(payload, candidates = []) {
+  collectHeroSmsPriceEntriesForPreview(payload, [])
+    .filter((entry) => entry.inStock)
+    .forEach((entry) => {
+      candidates.push(entry.cost);
+    });
+  return candidates;
+}
+
+function describeHeroSmsPreviewPayload(payload) {
+  if (payload === undefined || payload === null) {
+    return '';
+  }
+  if (typeof payload === 'string') {
+    return payload.trim();
+  }
+  if (typeof payload === 'number' || typeof payload === 'boolean') {
+    return String(payload);
+  }
+  if (typeof payload === 'object') {
+    const directMessage = String(
+      payload.message
+      || payload.msg
+      || payload.error
+      || payload.title
+      || payload.statusText
+      || ''
+    ).trim();
+    if (directMessage) {
+      const extra = String(payload?.info?.text || payload?.info?.description || '').trim();
+      return extra ? `${directMessage}: ${extra}` : directMessage;
+    }
+    try {
+      return JSON.stringify(payload);
+    } catch {
+      return '[object]';
+    }
+  }
+  return String(payload);
+}
+
+function summarizeHeroSmsPreviewError(payload, responseStatus = 0) {
+  if (isHeroSmsPreviewEmptyPayload(payload)) {
+    return '未返回有效价格';
+  }
+  const text = describeHeroSmsPreviewPayload(payload);
+  if (text === '{}' || text === '[]') {
+    return '未返回有效价格';
+  }
+  if (/UNPROCESSABLE_ENTITY/i.test(text) && /api_key/i.test(text) && /REQUIRED/i.test(text)) {
+    return '请先填写接码 API Key';
+  }
+  if (/BAD_KEY|WRONG_KEY|INVALID_KEY/i.test(text)) {
+    return 'API Key 无效';
+  }
+  if (/NO_BALANCE|NOT_ENOUGH_BALANCE/i.test(text)) {
+    return '余额不足';
+  }
+  if (/BANNED|ACCOUNT_BANNED/i.test(text)) {
+    return '账号已被封禁';
+  }
+  if (/WRONG_SERVICE|SERVICE_NOT_FOUND/i.test(text)) {
+    return '服务代码无效';
+  }
+  if (/WRONG_COUNTRY|COUNTRY_NOT_FOUND/i.test(text)) {
+    return '国家参数无效';
+  }
+  if (/NO_NUMBERS/i.test(text)) {
+    return '暂无可用号源';
+  }
+  if (responseStatus && responseStatus >= 400) {
+    return `HTTP ${responseStatus}`;
+  }
+  return text || '未知错误';
 }
 
 function getSelectedHeroSmsCountryOption() {
-  if (!selectHeroSmsCountry) {
-    return {
-      id: DEFAULT_HERO_SMS_COUNTRY_ID,
-      label: DEFAULT_HERO_SMS_COUNTRY_LABEL,
-    };
+  const selectedCountries = syncHeroSmsFallbackSelectionOrderFromSelect({
+    enforceMax: true,
+    ensureDefault: true,
+    showLimitToast: false,
+  });
+  if (selectedCountries.length) {
+    return selectedCountries[0];
   }
-
-  const option = selectHeroSmsCountry.options[selectHeroSmsCountry.selectedIndex];
   return {
-    id: normalizeHeroSmsCountryId(selectHeroSmsCountry.value),
-    label: normalizeHeroSmsCountryLabel(option?.textContent),
+    id: DEFAULT_HERO_SMS_COUNTRY_ID,
+    label: DEFAULT_HERO_SMS_COUNTRY_LABEL,
   };
 }
 
-function updateHeroSmsPlatformDisplay(label = '') {
+function updateHeroSmsPlatformDisplay() {
   if (!displayHeroSmsPlatform) {
     return;
   }
-  const countryLabel = normalizeHeroSmsCountryLabel(label);
-  displayHeroSmsPlatform.textContent = `HeroSMS / OpenAI / ${countryLabel}`;
+  displayHeroSmsPlatform.textContent = 'HeroSMS / OpenAI';
 }
 
-async function loadHeroSmsCountries() {
-  if (!selectHeroSmsCountry) {
+function getHeroSmsCountryLabelById(id) {
+  const targetId = String(id || '').trim();
+  const countrySelect = selectHeroSmsCountry || selectHeroSmsCountryFallback;
+  if (!targetId || !countrySelect) {
+    return '';
+  }
+  const matched = Array.from(countrySelect.options).find((option) => option.value === targetId);
+  return normalizeHeroSmsCountryLabel(matched?.textContent || '', `Country #${targetId}`);
+}
+
+function renderHeroSmsCountryFallbackOrder(countries = []) {
+  if (!displayHeroSmsCountryFallbackOrder) {
+    return;
+  }
+  const normalized = normalizeHeroSmsCountryFallbackList(countries);
+  if (!normalized.length) {
+    displayHeroSmsCountryFallbackOrder.textContent = '未设置';
+    return;
+  }
+  displayHeroSmsCountryFallbackOrder.textContent = normalized
+    .map((country) => `${country.label}(${country.id})`)
+    .join(' -> ');
+}
+
+function setHeroSmsCountryMenuOpen(open) {
+  const nextOpen = Boolean(open);
+  if (btnHeroSmsCountryMenu) {
+    btnHeroSmsCountryMenu.setAttribute('aria-expanded', String(nextOpen));
+  }
+  if (heroSmsCountryMenu) {
+    heroSmsCountryMenu.hidden = !nextOpen;
+    if (nextOpen) {
+      const searchInput = heroSmsCountryMenu.querySelector('.hero-sms-country-menu-search-input');
+      if (searchInput) {
+        // Always reset previous keyword on open to avoid accidental "empty list" state.
+        heroSmsCountryMenuSearchKeyword = '';
+        searchInput.value = '';
+        applyHeroSmsCountryMenuFilter('');
+        setTimeout(() => {
+          searchInput.focus();
+          searchInput.select();
+        }, 0);
+      }
+    }
+  }
+}
+
+function applyHeroSmsCountryMenuFilter(keyword = '') {
+  if (!heroSmsCountryMenu) {
+    return;
+  }
+  const normalizedKeyword = String(keyword || '').trim().toLowerCase();
+  const items = Array.from(heroSmsCountryMenu.querySelectorAll('.hero-sms-country-menu-item'));
+  let visibleCount = 0;
+  items.forEach((item) => {
+    const haystack = String(item.dataset.searchText || '').toLowerCase();
+    const visible = !normalizedKeyword || haystack.includes(normalizedKeyword);
+    item.hidden = !visible;
+    if (visible) {
+      visibleCount += 1;
+    }
+  });
+
+  let empty = heroSmsCountryMenu.querySelector('.hero-sms-country-menu-empty');
+  if (visibleCount === 0) {
+    if (!empty) {
+      empty = document.createElement('span');
+      empty.className = 'data-value hero-sms-country-menu-empty';
+      empty.textContent = '没有匹配国家';
+      heroSmsCountryMenu.appendChild(empty);
+    }
+  } else if (empty) {
+    empty.remove();
+  }
+}
+
+function updateHeroSmsCountryMenuSummary(selectedCountries = []) {
+  if (!btnHeroSmsCountryMenu) {
+    return;
+  }
+  const normalized = normalizeHeroSmsCountryFallbackList(selectedCountries);
+  if (!normalized.length) {
+    btnHeroSmsCountryMenu.textContent = `${DEFAULT_HERO_SMS_COUNTRY_LABEL} (1/${HERO_SMS_COUNTRY_SELECTION_MAX})`;
+    return;
+  }
+  const labels = normalized.map((country) => country.label);
+  btnHeroSmsCountryMenu.textContent = `${labels.join(' / ')} (${normalized.length}/${HERO_SMS_COUNTRY_SELECTION_MAX})`;
+}
+
+function renderHeroSmsCountryChoiceButtons() {
+  if (!heroSmsCountryMenu || !selectHeroSmsCountry) {
+    return;
+  }
+  const options = Array.from(selectHeroSmsCountry.options || []);
+  const selectedOrder = [...heroSmsCountrySelectionOrder];
+  const selectedSet = new Set(selectedOrder.map((id) => String(id)));
+
+  heroSmsCountryMenu.innerHTML = '';
+  const searchWrap = document.createElement('div');
+  searchWrap.className = 'hero-sms-country-menu-search';
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.className = 'data-input mono hero-sms-country-menu-search-input';
+  searchInput.placeholder = '搜索国家（中/英/代码/ID）';
+  searchInput.value = heroSmsCountryMenuSearchKeyword;
+  searchInput.addEventListener('input', () => {
+    heroSmsCountryMenuSearchKeyword = String(searchInput.value || '').trim();
+    applyHeroSmsCountryMenuFilter(heroSmsCountryMenuSearchKeyword);
+  });
+  searchWrap.appendChild(searchInput);
+  heroSmsCountryMenu.appendChild(searchWrap);
+
+  if (!options.length) {
+    const empty = document.createElement('span');
+    empty.className = 'data-value hero-sms-country-menu-empty';
+    empty.textContent = '暂无国家选项';
+    heroSmsCountryMenu.appendChild(empty);
+    updateHeroSmsCountryMenuSummary([]);
     return;
   }
 
-  const previousValue = selectHeroSmsCountry.value || String(DEFAULT_HERO_SMS_COUNTRY_ID);
+  options.forEach((option) => {
+    const countryId = String(option.value || '').trim();
+    if (!countryId) {
+      return;
+    }
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'header-dropdown-item hero-sms-country-menu-item';
+    const active = selectedSet.has(countryId);
+    const orderIndex = active
+      ? selectedOrder.findIndex((id) => String(id) === countryId) + 1
+      : 0;
+    const label = String(option.textContent || '').trim() || `Country #${countryId}`;
+    item.classList.toggle('is-active', active);
+    const labelText = document.createElement('span');
+    labelText.className = 'hero-sms-country-menu-item-label';
+    labelText.textContent = label;
+    const badge = document.createElement('span');
+    badge.className = 'hero-sms-country-menu-item-badge';
+    badge.textContent = active ? `✓ ${orderIndex}` : '';
+    item.appendChild(labelText);
+    item.appendChild(badge);
+    item.dataset.searchText = `${label} ${countryId} ${heroSmsCountrySearchTextById.get(countryId) || ''}`;
+    item.addEventListener('click', () => {
+      option.selected = !option.selected;
+      const selectedCountries = syncHeroSmsFallbackSelectionOrderFromSelect({
+        enforceMax: true,
+        ensureDefault: true,
+        showLimitToast: true,
+      });
+      updateHeroSmsPlatformDisplay(selectedCountries[0]?.label || DEFAULT_HERO_SMS_COUNTRY_LABEL);
+      markSettingsDirty(true);
+      saveSettings({ silent: true }).catch(() => { });
+    });
+    heroSmsCountryMenu.appendChild(item);
+  });
+
+  applyHeroSmsCountryMenuFilter(heroSmsCountryMenuSearchKeyword);
+
+  updateHeroSmsCountryMenuSummary(
+    selectedOrder.map((id) => ({
+      id,
+      label: getHeroSmsCountryLabelById(id),
+    }))
+  );
+}
+
+function syncHeroSmsFallbackSelectionOrderFromSelect(options = {}) {
+  const countrySelect = selectHeroSmsCountry || selectHeroSmsCountryFallback;
+  const selectionLimit = Math.max(1, Math.floor(Number(options.maxSelection) || HERO_SMS_COUNTRY_SELECTION_MAX));
+  const enforceMax = options.enforceMax !== false;
+  const ensureDefault = options.ensureDefault !== false;
+  const showLimitToast = Boolean(options.showLimitToast);
+
+  if (!countrySelect) {
+    const defaultCountry = {
+      id: normalizeHeroSmsCountryId(DEFAULT_HERO_SMS_COUNTRY_ID),
+      label: DEFAULT_HERO_SMS_COUNTRY_LABEL,
+    };
+    heroSmsCountrySelectionOrder = [defaultCountry.id];
+    renderHeroSmsCountryFallbackOrder([defaultCountry]);
+    return [defaultCountry];
+  }
+
+  const selectedIds = Array.from(countrySelect.options)
+    .filter((option) => option.selected)
+    .map((option) => {
+      const parsedId = Math.floor(Number(option.value));
+      return Number.isFinite(parsedId) && parsedId > 0 ? parsedId : 0;
+    })
+    .filter((id) => id > 0);
+  if (!selectedIds.length && !countrySelect.multiple) {
+    const fallbackId = Math.floor(Number(countrySelect.value));
+    if (Number.isFinite(fallbackId) && fallbackId > 0) {
+      selectedIds.push(fallbackId);
+    }
+  }
+
+  const selectedSet = new Set(selectedIds);
+  let nextOrder = heroSmsCountrySelectionOrder.filter((id) => selectedSet.has(id));
+  selectedIds.forEach((id) => {
+    if (!nextOrder.includes(id)) {
+      nextOrder.push(id);
+    }
+  });
+
+  if (ensureDefault && !nextOrder.length) {
+    const defaultId = normalizeHeroSmsCountryId(countrySelect.value || DEFAULT_HERO_SMS_COUNTRY_ID);
+    nextOrder = [defaultId];
+  }
+
+  if (enforceMax && nextOrder.length > selectionLimit) {
+    const droppedCount = nextOrder.length - selectionLimit;
+    nextOrder = nextOrder.slice(0, selectionLimit);
+    if (showLimitToast && droppedCount > 0 && typeof showToast === 'function') {
+      showToast(`接码国家最多选择 ${selectionLimit} 个，已保留前 ${selectionLimit} 个。`, 'warn', 2200);
+    }
+  }
+
+  const nextOrderSet = new Set(nextOrder.map((id) => String(id)));
+  Array.from(countrySelect.options).forEach((option) => {
+    option.selected = nextOrderSet.has(String(option.value));
+  });
+
+  heroSmsCountrySelectionOrder = nextOrder;
+  const selectedCountries = heroSmsCountrySelectionOrder.map((id) => ({
+    id,
+    label: getHeroSmsCountryLabelById(id),
+  }));
+  renderHeroSmsCountryFallbackOrder(selectedCountries);
+  renderHeroSmsCountryChoiceButtons();
+  return selectedCountries;
+}
+
+function applyHeroSmsFallbackSelection(countries = [], options = {}) {
+  const includePrimary = Boolean(options.includePrimary);
+  const sourceCountries = includePrimary
+    ? countries
+    : [
+      getSelectedHeroSmsCountryOption(),
+      ...normalizeHeroSmsCountryFallbackList(countries),
+    ];
+  const normalized = normalizeHeroSmsCountryFallbackList(sourceCountries)
+    .slice(0, HERO_SMS_COUNTRY_SELECTION_MAX);
+  const selectedIds = normalized
+    .map((entry) => Number(entry.id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+
+  const countrySelect = selectHeroSmsCountry || selectHeroSmsCountryFallback;
+  if (countrySelect) {
+    const selectedSet = new Set(selectedIds.map((id) => String(id)));
+    Array.from(countrySelect.options).forEach((option) => {
+      option.selected = selectedSet.has(String(option.value));
+    });
+  }
+  heroSmsCountrySelectionOrder = [...selectedIds];
+  return syncHeroSmsFallbackSelectionOrderFromSelect({
+    enforceMax: true,
+    ensureDefault: true,
+    showLimitToast: false,
+  });
+}
+
+function updateHeroSmsRuntimeDisplay(state = {}) {
+  if (displayHeroSmsCurrentNumber) {
+    const activation = state?.currentPhoneActivation || null;
+    const phoneNumber = String(activation?.phoneNumber || '').trim();
+    const activationId = String(activation?.activationId || '').trim();
+    const countryLabel = normalizeHeroSmsCountryLabel(
+      activation?.countryLabel || getHeroSmsCountryLabelById(activation?.countryId || '')
+    );
+    displayHeroSmsCurrentNumber.textContent = phoneNumber
+      ? `${phoneNumber}${activationId ? ` (#${activationId})` : ''}${countryLabel ? ` / ${countryLabel}` : ''}`
+      : '未分配';
+  }
+  if (displayHeroSmsCurrentCode) {
+    const code = String(state?.currentPhoneVerificationCode || '').trim();
+    displayHeroSmsCurrentCode.textContent = code || '未获取';
+  }
+}
+
+async function loadHeroSmsCountries() {
+  const countrySelect = selectHeroSmsCountry || selectHeroSmsCountryFallback;
+  if (!countrySelect) {
+    return;
+  }
+
+  const previousSelectionOrder = [...heroSmsCountrySelectionOrder];
+  const previousSelectedIds = previousSelectionOrder.length
+    ? previousSelectionOrder
+    : Array.from(countrySelect.options)
+        .filter((option) => option.selected)
+        .map((option) => {
+          const parsedId = Math.floor(Number(option.value));
+          return Number.isFinite(parsedId) && parsedId > 0 ? parsedId : 0;
+        })
+        .filter((id) => id > 0);
+
+  const applyOptions = (optionItems = [], selectEl) => {
+    if (!selectEl) {
+      return;
+    }
+    selectEl.innerHTML = '';
+    optionItems.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = String(entry.id);
+      option.textContent = entry.label;
+      selectEl.appendChild(option);
+    });
+  };
+
   try {
-    const response = await fetch('https://hero-sms.com/stubs/handler_api.php?action=getCountries');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const response = await fetch('https://hero-sms.com/stubs/handler_api.php?action=getCountries', {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    clearTimeout(timeoutId);
     const payload = await response.json();
     const countries = Array.isArray(payload?.value) ? payload.value : (Array.isArray(payload) ? payload : []);
     if (!countries.length) {
       throw new Error('empty country list');
     }
-
-    const optionsHtml = countries
-      .filter((item) => Number(item?.id) > 0 && String(item?.eng || '').trim())
+    const optionItems = countries
+      .filter((item) => Number(item?.id) > 0 && (String(item?.eng || '').trim() || String(item?.chn || '').trim()))
       .sort((left, right) => String(left.eng || '').localeCompare(String(right.eng || '')))
       .map((item) => {
         const id = normalizeHeroSmsCountryId(item.id);
-        const label = String(item.eng || '').trim();
-        return `<option value="${id}">${label}</option>`;
-      })
-      .join('');
+        const label = buildHeroSmsCountryDisplayLabel(item);
+        return {
+          id,
+          label: String(label || '').trim() || `Country #${id}`,
+          searchText: buildHeroSmsCountrySearchText(item, label, String(id)),
+        };
+      });
 
-    if (optionsHtml) {
-      selectHeroSmsCountry.innerHTML = optionsHtml;
+    if (!optionItems.length) {
+      throw new Error('empty country list');
     }
+
+    heroSmsCountrySearchTextById.clear();
+    optionItems.forEach((entry) => {
+      heroSmsCountrySearchTextById.set(String(entry.id), entry.searchText);
+    });
+
+    applyOptions(optionItems, selectHeroSmsCountry);
+    applyOptions(optionItems, selectHeroSmsCountryFallback);
   } catch (error) {
     console.warn('Failed to load HeroSMS countries:', error);
-    selectHeroSmsCountry.innerHTML = `<option value="${DEFAULT_HERO_SMS_COUNTRY_ID}">${DEFAULT_HERO_SMS_COUNTRY_LABEL}</option>`;
+    const fallbackItems = HERO_SMS_FALLBACK_COUNTRY_ITEMS
+      .map((item) => {
+        const id = normalizeHeroSmsCountryId(item.id);
+        const label = buildHeroSmsCountryDisplayLabel(item);
+        return {
+          id,
+          label: String(label || '').trim() || `Country #${id}`,
+          searchText: buildHeroSmsCountrySearchText(item, label, String(id)),
+        };
+      })
+      .filter((item) => item.id > 0);
+    if (!fallbackItems.some((item) => item.id === DEFAULT_HERO_SMS_COUNTRY_ID)) {
+      fallbackItems.unshift({
+        id: DEFAULT_HERO_SMS_COUNTRY_ID,
+        label: DEFAULT_HERO_SMS_COUNTRY_LABEL,
+        searchText: `${DEFAULT_HERO_SMS_COUNTRY_LABEL} ${DEFAULT_HERO_SMS_COUNTRY_ID}`,
+      });
+    }
+    applyOptions(fallbackItems, selectHeroSmsCountry);
+    applyOptions(fallbackItems, selectHeroSmsCountryFallback);
+    heroSmsCountrySearchTextById.clear();
+    fallbackItems.forEach((entry) => {
+      heroSmsCountrySearchTextById.set(String(entry.id), entry.searchText);
+    });
+    if (typeof showToast === 'function') {
+      showToast(`国家列表加载失败：${normalizeHeroSmsFetchErrorMessage(error)}（已切换为内置国家列表）`, 'warn', 2800);
+    }
+  }
+  const availableIds = new Set(Array.from(countrySelect.options).map((option) => String(option.value)));
+  const normalizedSelectedIds = previousSelectedIds
+    .map((id) => String(id))
+    .filter((id) => availableIds.has(id))
+    .map((id) => Number(id));
+  heroSmsCountrySelectionOrder = normalizedSelectedIds;
+  const selectedSet = new Set(normalizedSelectedIds.map((id) => String(id)));
+  Array.from(countrySelect.options).forEach((option) => {
+    option.selected = selectedSet.has(String(option.value));
+  });
+  const selectedCountries = syncHeroSmsFallbackSelectionOrderFromSelect({
+    enforceMax: true,
+    ensureDefault: true,
+    showLimitToast: false,
+  });
+  updateHeroSmsPlatformDisplay(
+    selectedCountries[0]?.label || DEFAULT_HERO_SMS_COUNTRY_LABEL
+  );
+}
+
+async function previewHeroSmsPriceTiers() {
+  if (!displayHeroSmsPriceTiers) {
+    return;
   }
 
-  selectHeroSmsCountry.value = Array.from(selectHeroSmsCountry.options).some((option) => option.value === previousValue)
-    ? previousValue
-    : String(DEFAULT_HERO_SMS_COUNTRY_ID);
-  updateHeroSmsPlatformDisplay(getSelectedHeroSmsCountryOption().label);
+  const selectedCountries = syncHeroSmsFallbackSelectionOrderFromSelect({
+    enforceMax: true,
+    ensureDefault: true,
+    showLimitToast: false,
+  });
+  const candidates = selectedCountries.length
+    ? selectedCountries
+    : [getSelectedHeroSmsCountryOption()];
+  const maxPriceText = normalizeHeroSmsMaxPriceValue(inputHeroSmsMaxPrice?.value || '');
+  const maxPrice = maxPriceText ? Number(maxPriceText) : null;
+  const apiKey = String(inputHeroSmsApiKey?.value || '').trim();
+
+  displayHeroSmsPriceTiers.textContent = '查询中...';
+  if (rowHeroSmsPriceTiers) {
+    rowHeroSmsPriceTiers.style.display = '';
+  }
+
+  const previews = [];
+  if (!apiKey) {
+    displayHeroSmsPriceTiers.textContent = '请先填写接码 API Key，再查询价格';
+    if (rowHeroSmsPriceTiers) {
+      rowHeroSmsPriceTiers.style.display = '';
+    }
+    return;
+  }
+  for (const country of candidates) {
+    const countryId = normalizeHeroSmsCountryId(country.id);
+    const countryLabel = normalizeHeroSmsCountryLabel(
+      country.label || getHeroSmsCountryLabelById(countryId),
+      `Country #${countryId}`
+    );
+    try {
+      const url = new URL('https://hero-sms.com/stubs/handler_api.php');
+      url.searchParams.set('action', 'getPrices');
+      url.searchParams.set('service', 'dr');
+      url.searchParams.set('country', String(countryId));
+      if (apiKey) {
+        url.searchParams.set('api_key', apiKey);
+      }
+      const response = await fetch(url.toString());
+      const rawText = await response.text();
+      let payload = rawText;
+      try {
+        payload = rawText ? JSON.parse(rawText) : '';
+      } catch {
+        payload = rawText;
+      }
+
+      if (!response.ok) {
+        previews.push(`${countryLabel}: ${summarizeHeroSmsPreviewError(payload, response.status)}`);
+        continue;
+      }
+
+      const priceEntries = collectHeroSmsPriceEntriesForPreview(payload, [])
+        .filter((entry) => Number.isFinite(Number(entry.cost)) && Number(entry.cost) > 0);
+      const inStockPrices = Array.from(new Set(
+        priceEntries
+          .filter((entry) => entry.inStock)
+          .map((entry) => Math.round(Number(entry.cost) * 10000) / 10000)
+      )).sort((left, right) => left - right);
+      const allPrices = Array.from(new Set(
+        priceEntries.map((entry) => Math.round(Number(entry.cost) * 10000) / 10000)
+      )).sort((left, right) => left - right);
+      if (!inStockPrices.length) {
+        if (allPrices.length) {
+          const lowestKnown = formatHeroSmsPriceForPreview(allPrices[0]) || String(allPrices[0]);
+          previews.push(`${countryLabel}: 最低 ${lowestKnown}（库存为 0，当前无可用号源）`);
+          continue;
+        }
+        const reason = summarizeHeroSmsPreviewError(payload, response.status);
+        previews.push(`${countryLabel}: ${reason || '无可用价格'}`);
+        continue;
+      }
+      const lowest = inStockPrices[0];
+      const lowestText = formatHeroSmsPriceForPreview(lowest) || String(lowest);
+      if (Number.isFinite(maxPrice) && maxPrice > 0 && lowest > maxPrice) {
+        previews.push(`${countryLabel}: 最低 ${lowestText}（高于上限 ${formatHeroSmsPriceForPreview(maxPrice) || maxPrice}）`);
+      } else {
+        previews.push(`${countryLabel}: 最低 ${lowestText}`);
+      }
+    } catch (error) {
+      previews.push(`${countryLabel}: 查询失败（${normalizeHeroSmsFetchErrorMessage(error)}）`);
+    }
+  }
+
+  displayHeroSmsPriceTiers.textContent = previews.join('\n') || '未获取';
 }
 
 function getSelectedLocalCpaStep9Mode() {
@@ -2512,111 +3523,6 @@ function setHotmailServiceMode(mode) {
   });
 }
 
-function readCloudflareTempEmailSectionExpanded() {
-  try {
-    return localStorage.getItem(CLOUDFLARE_TEMP_EMAIL_SECTION_EXPANDED_STORAGE_KEY) === '1';
-  } catch (err) {
-    return false;
-  }
-}
-
-function persistCloudflareTempEmailSectionExpanded(expanded) {
-  try {
-    if (expanded) {
-      localStorage.setItem(CLOUDFLARE_TEMP_EMAIL_SECTION_EXPANDED_STORAGE_KEY, '1');
-    } else {
-      localStorage.removeItem(CLOUDFLARE_TEMP_EMAIL_SECTION_EXPANDED_STORAGE_KEY);
-    }
-  } catch (err) {
-    // Keep the current session state even if storage is unavailable.
-  }
-}
-
-function isCloudflareTempEmailSectionVisible() {
-  return Boolean(cloudflareTempEmailSection && cloudflareTempEmailSection.style.display !== 'none');
-}
-
-function updateCloudflareTempEmailSectionExpandedUI() {
-  const expanded = isCloudflareTempEmailSectionVisible() && cloudflareTempEmailSectionExpanded;
-  if (cloudflareTempEmailSectionBody) {
-    cloudflareTempEmailSectionBody.hidden = !expanded;
-  }
-  if (btnToggleCloudflareTempEmailSection) {
-    btnToggleCloudflareTempEmailSection.textContent = expanded ? '收起设置' : '展开设置';
-    btnToggleCloudflareTempEmailSection.title = expanded
-      ? '收起 Cloudflare Temp Email 设置'
-      : '展开 Cloudflare Temp Email 设置';
-    btnToggleCloudflareTempEmailSection.setAttribute('aria-expanded', String(expanded));
-  }
-}
-
-function setCloudflareTempEmailSectionExpanded(expanded, options = {}) {
-  const { persist = true } = options;
-  cloudflareTempEmailSectionExpanded = Boolean(expanded);
-  updateCloudflareTempEmailSectionExpandedUI();
-  if (persist) {
-    persistCloudflareTempEmailSectionExpanded(cloudflareTempEmailSectionExpanded);
-  }
-}
-
-function toggleCloudflareTempEmailSectionExpanded() {
-  setCloudflareTempEmailSectionExpanded(!cloudflareTempEmailSectionExpanded);
-}
-
-function initCloudflareTempEmailSectionExpandedState() {
-  setCloudflareTempEmailSectionExpanded(readCloudflareTempEmailSectionExpanded(), { persist: false });
-}
-
-function readHotmailSectionExpanded() {
-  try {
-    return localStorage.getItem(HOTMAIL_SECTION_EXPANDED_STORAGE_KEY) === '1';
-  } catch (err) {
-    return false;
-  }
-}
-
-function persistHotmailSectionExpanded(expanded) {
-  try {
-    if (expanded) {
-      localStorage.setItem(HOTMAIL_SECTION_EXPANDED_STORAGE_KEY, '1');
-    } else {
-      localStorage.removeItem(HOTMAIL_SECTION_EXPANDED_STORAGE_KEY);
-    }
-  } catch (err) {
-    // Keep the current session state even if storage is unavailable.
-  }
-}
-
-function updateHotmailSectionExpandedUI() {
-  const useHotmail = selectMailProvider?.value === 'hotmail-api';
-  const expanded = useHotmail && hotmailSectionExpanded;
-  if (hotmailSectionBody) {
-    hotmailSectionBody.hidden = !expanded;
-  }
-  if (btnToggleHotmailSection) {
-    btnToggleHotmailSection.textContent = expanded ? '收起设置' : '展开设置';
-    btnToggleHotmailSection.title = expanded ? '收起 Hotmail 账号池设置' : '展开 Hotmail 账号池设置';
-    btnToggleHotmailSection.setAttribute('aria-expanded', String(expanded));
-  }
-}
-
-function setHotmailSectionExpanded(expanded, options = {}) {
-  const { persist = true } = options;
-  hotmailSectionExpanded = Boolean(expanded);
-  updateHotmailSectionExpandedUI();
-  if (persist) {
-    persistHotmailSectionExpanded(hotmailSectionExpanded);
-  }
-}
-
-function toggleHotmailSectionExpanded() {
-  setHotmailSectionExpanded(!hotmailSectionExpanded);
-}
-
-function initHotmailSectionExpandedState() {
-  setHotmailSectionExpanded(readHotmailSectionExpanded(), { persist: false });
-}
-
 function updateAccountRunHistorySettingsUI() {
   if (!rowAccountRunHistoryHelperBaseUrl) {
     return;
@@ -2627,12 +3533,49 @@ function updateAccountRunHistorySettingsUI() {
 
 function updatePhoneVerificationSettingsUI() {
   const enabled = Boolean(inputPhoneVerificationEnabled?.checked);
-  [rowHeroSmsPlatform, rowHeroSmsCountry, rowHeroSmsMaxPrice, rowHeroSmsApiKey].forEach((row) => {
+  const showSettings = enabled && phoneVerificationSectionExpanded;
+  if (rowPhoneVerificationEnabled) {
+    rowPhoneVerificationEnabled.style.display = '';
+  }
+  if (btnTogglePhoneVerificationSection) {
+    btnTogglePhoneVerificationSection.disabled = !enabled;
+    btnTogglePhoneVerificationSection.textContent = showSettings ? '收起设置' : '展开设置';
+    btnTogglePhoneVerificationSection.title = enabled
+      ? (showSettings ? '收起接码设置' : '展开接码设置')
+      : '开启接码后可展开设置';
+    btnTogglePhoneVerificationSection.setAttribute('aria-expanded', String(showSettings));
+  }
+  if (rowPhoneVerificationFold) {
+    rowPhoneVerificationFold.style.display = showSettings ? '' : 'none';
+  }
+
+  const phoneVerificationRows = [
+    typeof rowHeroSmsPlatform !== 'undefined' ? rowHeroSmsPlatform : null,
+    typeof rowHeroSmsCountry !== 'undefined' ? rowHeroSmsCountry : null,
+    typeof rowHeroSmsCountryFallback !== 'undefined' ? rowHeroSmsCountryFallback : null,
+    typeof rowHeroSmsAcquirePriority !== 'undefined' ? rowHeroSmsAcquirePriority : null,
+    typeof rowHeroSmsApiKey !== 'undefined' ? rowHeroSmsApiKey : null,
+    typeof rowHeroSmsMaxPrice !== 'undefined' ? rowHeroSmsMaxPrice : null,
+    typeof rowHeroSmsRuntimePair !== 'undefined' ? rowHeroSmsRuntimePair : null,
+    typeof rowHeroSmsCurrentNumber !== 'undefined' ? rowHeroSmsCurrentNumber : null,
+    typeof rowHeroSmsCurrentCode !== 'undefined' ? rowHeroSmsCurrentCode : null,
+    typeof rowPhoneCodeSettingsGroup !== 'undefined' ? rowPhoneCodeSettingsGroup : null,
+    typeof rowPhoneVerificationResendCount !== 'undefined' ? rowPhoneVerificationResendCount : null,
+    typeof rowPhoneReplacementLimit !== 'undefined' ? rowPhoneReplacementLimit : null,
+    typeof rowPhoneCodeWaitSeconds !== 'undefined' ? rowPhoneCodeWaitSeconds : null,
+    typeof rowPhoneCodeTimeoutWindows !== 'undefined' ? rowPhoneCodeTimeoutWindows : null,
+    typeof rowPhoneCodePollIntervalSeconds !== 'undefined' ? rowPhoneCodePollIntervalSeconds : null,
+    typeof rowPhoneCodePollMaxRounds !== 'undefined' ? rowPhoneCodePollMaxRounds : null,
+  ];
+  phoneVerificationRows.forEach((row) => {
     if (!row) {
       return;
     }
-    row.style.display = enabled ? '' : 'none';
+    row.style.display = showSettings ? '' : 'none';
   });
+  if (!showSettings && typeof rowHeroSmsPriceTiers !== 'undefined' && rowHeroSmsPriceTiers) {
+    rowHeroSmsPriceTiers.style.display = 'none';
+  }
 }
 
 function updatePlusModeUI() {
@@ -3131,15 +4074,68 @@ function applySettingsState(state) {
   if (inputHeroSmsApiKey) {
     inputHeroSmsApiKey.value = state?.heroSmsApiKey || '';
   }
-  if (inputHeroSmsMaxPrice) {
-    inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.heroSmsMaxPrice);
+  if (typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled) {
+    inputHeroSmsReuseEnabled.checked = normalizeHeroSmsReuseEnabledValue(state?.heroSmsReuseEnabled);
   }
-  if (selectHeroSmsCountry) {
+  if (typeof selectHeroSmsAcquirePriority !== 'undefined' && selectHeroSmsAcquirePriority) {
+    selectHeroSmsAcquirePriority.value = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
+  }
+  if (inputHeroSmsMaxPrice) {
+    inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.heroSmsMaxPrice || '');
+  }
+  if (inputPhoneReplacementLimit) {
+    inputPhoneReplacementLimit.value = String(
+      normalizePhoneVerificationReplacementLimit(
+        state?.phoneVerificationReplacementLimit,
+        DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT
+      )
+    );
+  }
+  if (typeof inputPhoneCodeWaitSeconds !== 'undefined' && inputPhoneCodeWaitSeconds) {
+    inputPhoneCodeWaitSeconds.value = String(
+      normalizePhoneCodeWaitSecondsValue(state?.phoneCodeWaitSeconds, DEFAULT_PHONE_CODE_WAIT_SECONDS)
+    );
+  }
+  if (typeof inputPhoneCodeTimeoutWindows !== 'undefined' && inputPhoneCodeTimeoutWindows) {
+    inputPhoneCodeTimeoutWindows.value = String(
+      normalizePhoneCodeTimeoutWindowsValue(state?.phoneCodeTimeoutWindows, DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS)
+    );
+  }
+  if (typeof inputPhoneCodePollIntervalSeconds !== 'undefined' && inputPhoneCodePollIntervalSeconds) {
+    inputPhoneCodePollIntervalSeconds.value = String(
+      normalizePhoneCodePollIntervalSecondsValue(
+        state?.phoneCodePollIntervalSeconds,
+        DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS
+      )
+    );
+  }
+  if (typeof inputPhoneCodePollMaxRounds !== 'undefined' && inputPhoneCodePollMaxRounds) {
+    inputPhoneCodePollMaxRounds.value = String(
+      normalizePhoneCodePollMaxRoundsValue(state?.phoneCodePollMaxRounds, DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS)
+    );
+  }
+  if (typeof applyHeroSmsFallbackSelection === 'function') {
+    const primaryCountry = {
+      id: normalizeHeroSmsCountryId(state?.heroSmsCountryId),
+      label: normalizeHeroSmsCountryLabel(state?.heroSmsCountryLabel),
+    };
+    applyHeroSmsFallbackSelection(
+      [
+        primaryCountry,
+        ...normalizeHeroSmsCountryFallbackList(state?.heroSmsCountryFallback || []),
+      ],
+      { includePrimary: true }
+    );
+    updateHeroSmsPlatformDisplay(getSelectedHeroSmsCountryOption().label);
+  } else if (selectHeroSmsCountry) {
     const restoredCountryId = String(normalizeHeroSmsCountryId(state?.heroSmsCountryId));
     if (Array.from(selectHeroSmsCountry.options).some((option) => option.value === restoredCountryId)) {
       selectHeroSmsCountry.value = restoredCountryId;
     }
     updateHeroSmsPlatformDisplay(state?.heroSmsCountryLabel || getSelectedHeroSmsCountryOption().label);
+  }
+  if (typeof updateHeroSmsRuntimeDisplay === 'function') {
+    updateHeroSmsRuntimeDisplay(state);
   }
   if (state?.autoRunTotalRuns) {
     inputRunCount.value = String(state.autoRunTotalRuns);
@@ -4111,9 +5107,6 @@ function updateMailProviderUI() {
   if (cloudflareTempEmailSection) {
     cloudflareTempEmailSection.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   }
-  if (typeof updateCloudflareTempEmailSectionExpandedUI === 'function') {
-    updateCloudflareTempEmailSectionExpandedUI();
-  }
   if (icloudSection) {
     const showIcloudSection = (useEmailGenerator && useIcloud) || useIcloudProvider;
     icloudSection.style.display = showIcloudSection ? '' : 'none';
@@ -4154,9 +5147,6 @@ function updateMailProviderUI() {
 
   if (hotmailSection) {
     hotmailSection.style.display = useHotmail ? '' : 'none';
-  }
-  if (typeof updateHotmailSectionExpandedUI === 'function') {
-    updateHotmailSectionExpandedUI();
   }
   if (mail2925Section) {
     mail2925Section.style.display = useMail2925AccountPool ? '' : 'none';
@@ -5198,6 +6188,13 @@ function syncIpProxyPasswordToggleLabel() {
   });
 }
 
+function syncHeroSmsApiKeyToggleLabel() {
+  syncToggleButtonLabel(btnToggleHeroSmsApiKey, inputHeroSmsApiKey, {
+    show: '显示接码 API Key',
+    hide: '隐藏接码 API Key',
+  });
+}
+
 async function maybeTakeoverAutoRun(actionLabel) {
   if (!isAutoRunPausedPhase()) {
     return true;
@@ -5357,21 +6354,9 @@ btnToggleIpProxySection?.addEventListener('click', () => {
   }
 });
 
-btnToggleCloudflareTempEmailSection?.addEventListener('click', () => {
-  toggleCloudflareTempEmailSectionExpanded();
+btnTogglePhoneVerificationSection?.addEventListener('click', () => {
+  togglePhoneVerificationSectionExpanded();
 });
-
-btnToggleHotmailSection?.addEventListener('click', () => {
-  toggleHotmailSectionExpanded();
-});
-
-btnToggleHotmailForm?.addEventListener('click', () => {
-  setHotmailSectionExpanded(true);
-}, true);
-
-btnToggleHotmailList?.addEventListener('click', () => {
-  setHotmailSectionExpanded(true);
-}, true);
 
 btnMailLogin?.addEventListener('click', async () => {
   const config = getMailProviderLoginConfig();
@@ -5945,6 +6930,9 @@ function handleIpProxyEnabledToggle(nextEnabled) {
     return;
   }
   setIpProxyEnabled(enabled);
+  if (enabled && typeof setIpProxySectionExpanded === 'function') {
+    setIpProxySectionExpanded(true);
+  }
   syncLatestState({ ipProxyEnabled: enabled });
   updateIpProxyUI(latestState);
   markSettingsDirty(true);
@@ -6626,7 +7614,11 @@ inputAutoDelayMinutes.addEventListener('blur', () => {
 });
 
 inputPhoneVerificationEnabled?.addEventListener('change', () => {
-  updatePhoneVerificationSettingsUI();
+  if (inputPhoneVerificationEnabled.checked) {
+    setPhoneVerificationSectionExpanded(true);
+  } else {
+    updatePhoneVerificationSettingsUI();
+  }
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -6676,6 +7668,16 @@ inputHeroSmsApiKey?.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputHeroSmsReuseEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+selectHeroSmsAcquirePriority?.addEventListener('change', () => {
+  selectHeroSmsAcquirePriority.value = normalizeHeroSmsAcquirePriority(selectHeroSmsAcquirePriority.value);
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
 inputHeroSmsMaxPrice?.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -6685,10 +7687,133 @@ inputHeroSmsMaxPrice?.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+btnHeroSmsPricePreview?.addEventListener('click', async () => {
+  try {
+    await previewHeroSmsPriceTiers();
+    if (typeof showToast === 'function') {
+      showToast('已刷新接码国家价格预览。', 'info', 1600);
+    }
+  } catch (error) {
+    if (typeof showToast === 'function') {
+      showToast(`价格预览失败：${error?.message || error}`, 'warn', 2200);
+    }
+  }
+});
+
+inputPhoneReplacementLimit?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputPhoneReplacementLimit?.addEventListener('blur', () => {
+  inputPhoneReplacementLimit.value = String(
+    normalizePhoneVerificationReplacementLimit(
+      inputPhoneReplacementLimit.value,
+      DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT
+    )
+  );
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputPhoneCodeWaitSeconds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputPhoneCodeWaitSeconds?.addEventListener('blur', () => {
+  inputPhoneCodeWaitSeconds.value = String(
+    normalizePhoneCodeWaitSecondsValue(inputPhoneCodeWaitSeconds.value, DEFAULT_PHONE_CODE_WAIT_SECONDS)
+  );
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputPhoneCodeTimeoutWindows?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputPhoneCodeTimeoutWindows?.addEventListener('blur', () => {
+  inputPhoneCodeTimeoutWindows.value = String(
+    normalizePhoneCodeTimeoutWindowsValue(
+      inputPhoneCodeTimeoutWindows.value,
+      DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS
+    )
+  );
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputPhoneCodePollIntervalSeconds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputPhoneCodePollIntervalSeconds?.addEventListener('blur', () => {
+  inputPhoneCodePollIntervalSeconds.value = String(
+    normalizePhoneCodePollIntervalSecondsValue(
+      inputPhoneCodePollIntervalSeconds.value,
+      DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS
+    )
+  );
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputPhoneCodePollMaxRounds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputPhoneCodePollMaxRounds?.addEventListener('blur', () => {
+  inputPhoneCodePollMaxRounds.value = String(
+    normalizePhoneCodePollMaxRoundsValue(
+      inputPhoneCodePollMaxRounds.value,
+      DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS
+    )
+  );
+  saveSettings({ silent: true }).catch(() => { });
+});
 selectHeroSmsCountry?.addEventListener('change', () => {
-  updateHeroSmsPlatformDisplay(getSelectedHeroSmsCountryOption().label);
+  const selectedCountries = syncHeroSmsFallbackSelectionOrderFromSelect({
+    enforceMax: true,
+    ensureDefault: true,
+    showLimitToast: true,
+  });
+  updateHeroSmsPlatformDisplay(selectedCountries[0]?.label || DEFAULT_HERO_SMS_COUNTRY_LABEL);
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
+});
+
+selectHeroSmsCountryFallback?.addEventListener('change', () => {
+  const selectedCountries = syncHeroSmsFallbackSelectionOrderFromSelect({
+    enforceMax: true,
+    ensureDefault: true,
+    showLimitToast: true,
+  });
+  updateHeroSmsPlatformDisplay(selectedCountries[0]?.label || DEFAULT_HERO_SMS_COUNTRY_LABEL);
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+btnHeroSmsCountryMenu?.addEventListener('click', (event) => {
+  event.preventDefault();
+  const nextOpen = btnHeroSmsCountryMenu.getAttribute('aria-expanded') !== 'true';
+  setHeroSmsCountryMenuOpen(nextOpen);
+});
+
+btnHeroSmsCountryClear?.addEventListener('click', () => {
+  if (!selectHeroSmsCountry) {
+    return;
+  }
+  Array.from(selectHeroSmsCountry.options).forEach((option, index) => {
+    option.selected = index === 0;
+  });
+  heroSmsCountryMenuSearchKeyword = '';
+  const selectedCountries = syncHeroSmsFallbackSelectionOrderFromSelect({
+    enforceMax: true,
+    ensureDefault: true,
+    showLimitToast: false,
+  });
+  updateHeroSmsPlatformDisplay(selectedCountries[0]?.label || DEFAULT_HERO_SMS_COUNTRY_LABEL);
+  setHeroSmsCountryMenuOpen(false);
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+  if (typeof showToast === 'function') {
+    showToast('已清空国家优先级并恢复默认国家。', 'info', 1800);
+  }
 });
 
 // ============================================================
@@ -7087,28 +8212,90 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.heroSmsApiKey !== undefined && inputHeroSmsApiKey) {
         inputHeroSmsApiKey.value = message.payload.heroSmsApiKey || '';
       }
+      if (message.payload.heroSmsReuseEnabled !== undefined && inputHeroSmsReuseEnabled) {
+        inputHeroSmsReuseEnabled.checked = normalizeHeroSmsReuseEnabledValue(message.payload.heroSmsReuseEnabled);
+      }
+      if (message.payload.heroSmsAcquirePriority !== undefined && selectHeroSmsAcquirePriority) {
+        selectHeroSmsAcquirePriority.value = normalizeHeroSmsAcquirePriority(message.payload.heroSmsAcquirePriority);
+      }
       if (message.payload.heroSmsMaxPrice !== undefined && inputHeroSmsMaxPrice) {
         inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(message.payload.heroSmsMaxPrice);
+      }
+      if (message.payload.phoneVerificationReplacementLimit !== undefined && inputPhoneReplacementLimit) {
+        inputPhoneReplacementLimit.value = String(
+          normalizePhoneVerificationReplacementLimit(
+            message.payload.phoneVerificationReplacementLimit,
+            DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT
+          )
+        );
+      }
+      if (message.payload.phoneCodeWaitSeconds !== undefined && inputPhoneCodeWaitSeconds) {
+        inputPhoneCodeWaitSeconds.value = String(
+          normalizePhoneCodeWaitSecondsValue(message.payload.phoneCodeWaitSeconds, DEFAULT_PHONE_CODE_WAIT_SECONDS)
+        );
+      }
+      if (message.payload.phoneCodeTimeoutWindows !== undefined && inputPhoneCodeTimeoutWindows) {
+        inputPhoneCodeTimeoutWindows.value = String(
+          normalizePhoneCodeTimeoutWindowsValue(message.payload.phoneCodeTimeoutWindows, DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS)
+        );
+      }
+      if (message.payload.phoneCodePollIntervalSeconds !== undefined && inputPhoneCodePollIntervalSeconds) {
+        inputPhoneCodePollIntervalSeconds.value = String(
+          normalizePhoneCodePollIntervalSecondsValue(
+            message.payload.phoneCodePollIntervalSeconds,
+            DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS
+          )
+        );
+      }
+      if (message.payload.phoneCodePollMaxRounds !== undefined && inputPhoneCodePollMaxRounds) {
+        inputPhoneCodePollMaxRounds.value = String(
+          normalizePhoneCodePollMaxRoundsValue(message.payload.phoneCodePollMaxRounds, DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS)
+        );
       }
       if (message.payload.phoneVerificationEnabled !== undefined && inputPhoneVerificationEnabled) {
         inputPhoneVerificationEnabled.checked = Boolean(message.payload.phoneVerificationEnabled);
         updatePhoneVerificationSettingsUI();
       }
       if (
-        (message.payload.heroSmsCountryId !== undefined || message.payload.heroSmsCountryLabel !== undefined)
-        && selectHeroSmsCountry
+        message.payload.heroSmsCountryId !== undefined
+        || message.payload.heroSmsCountryLabel !== undefined
+        || message.payload.heroSmsCountryFallback !== undefined
       ) {
-        const nextCountryId = String(
-          normalizeHeroSmsCountryId(
+        const nextPrimary = {
+          id: normalizeHeroSmsCountryId(
             message.payload.heroSmsCountryId !== undefined
               ? message.payload.heroSmsCountryId
-              : selectHeroSmsCountry.value
-          )
+              : latestState?.heroSmsCountryId
+          ),
+          label: normalizeHeroSmsCountryLabel(
+            message.payload.heroSmsCountryLabel !== undefined
+              ? message.payload.heroSmsCountryLabel
+              : latestState?.heroSmsCountryLabel
+          ),
+        };
+        const nextFallback = normalizeHeroSmsCountryFallbackList(
+          message.payload.heroSmsCountryFallback !== undefined
+            ? message.payload.heroSmsCountryFallback
+            : latestState?.heroSmsCountryFallback
         );
-        if (Array.from(selectHeroSmsCountry.options).some((option) => option.value === nextCountryId)) {
-          selectHeroSmsCountry.value = nextCountryId;
-        }
-        updateHeroSmsPlatformDisplay(message.payload.heroSmsCountryLabel || getSelectedHeroSmsCountryOption().label);
+        applyHeroSmsFallbackSelection(
+          [nextPrimary, ...nextFallback],
+          { includePrimary: true }
+        );
+        updateHeroSmsPlatformDisplay(getSelectedHeroSmsCountryOption().label);
+      }
+      if (
+        message.payload.currentPhoneActivation !== undefined
+        || message.payload.currentPhoneVerificationCode !== undefined
+        || message.payload.heroSmsLastPriceTiers !== undefined
+        || message.payload.heroSmsLastPriceCountryId !== undefined
+        || message.payload.heroSmsLastPriceCountryLabel !== undefined
+        || message.payload.heroSmsLastPriceUserLimit !== undefined
+      ) {
+        updateHeroSmsRuntimeDisplay({
+          ...latestState,
+          ...message.payload,
+        });
       }
       updateAccountRunHistorySettingsUI();
       renderContributionMode();
@@ -7176,18 +8363,28 @@ btnTheme.addEventListener('click', () => {
 });
 
 document.addEventListener('click', (event) => {
-  if (!configMenuOpen) {
-    return;
+  const clickedInsideConfigMenu = Boolean(configMenuShell?.contains(event.target));
+  const clickedInsideCountryMenu = Boolean(heroSmsCountryMenuShell?.contains(event.target));
+
+  if (configMenuOpen && !clickedInsideConfigMenu) {
+    closeConfigMenu();
   }
-  if (configMenuShell?.contains(event.target)) {
-    return;
+
+  const countryMenuOpen = btnHeroSmsCountryMenu?.getAttribute('aria-expanded') === 'true';
+  if (countryMenuOpen && !clickedInsideCountryMenu) {
+    setHeroSmsCountryMenuOpen(false);
   }
-  closeConfigMenu();
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && configMenuOpen) {
+  if (event.key !== 'Escape') {
+    return;
+  }
+  if (configMenuOpen) {
     closeConfigMenu();
+  }
+  if (btnHeroSmsCountryMenu?.getAttribute('aria-expanded') === 'true') {
+    setHeroSmsCountryMenuOpen(false);
   }
 });
 
@@ -7208,11 +8405,10 @@ bindPasswordVisibilityToggles();
 initTheme();
 initHotmailListExpandedState();
 initMail2925ListExpandedState();
-initCloudflareTempEmailSectionExpandedState();
-initHotmailSectionExpandedState();
 if (typeof initIpProxySectionExpandedState === 'function') {
   initIpProxySectionExpandedState();
 }
+initPhoneVerificationSectionExpandedState();
 updateSaveButtonState();
 updateConfigMenuControls();
 setLocalCpaStep9Mode(DEFAULT_LOCAL_CPA_STEP9_MODE);
@@ -7230,7 +8426,9 @@ loadHeroSmsCountries().catch((err) => {
     syncIpProxyApiUrlToggleLabel();
     syncIpProxyUsernameToggleLabel();
     syncIpProxyPasswordToggleLabel();
+    syncHeroSmsApiKeyToggleLabel();
     syncPasswordVisibilityToggles();
+    syncHeroSmsApiKeyToggleLabel();
     updatePanelModeUI();
     updateButtonStates();
     updateStatusDisplay(latestState);

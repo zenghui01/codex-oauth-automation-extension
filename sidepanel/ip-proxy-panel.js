@@ -907,14 +907,18 @@ function buildIpProxyActionHintText(options = {}) {
   const mode = normalizeIpProxyModeForCurrentRelease(options?.mode || DEFAULT_IP_PROXY_MODE);
   const poolCount = Math.max(0, Number(options?.poolCount) || 0);
   const changeAvailable = Boolean(options?.changeAvailable);
+  const dynamicPoolCount = poolCount > 0 ? poolCount : 1;
 
   if (mode === 'api') {
-    return '下一条：切到已拉取代理池的下一条。Change：仅账号模式可用。';
+    const nextPart = poolCount > 1
+      ? `下一条：当前共 ${dynamicPoolCount} 条节点，切到已拉取代理池的下一条节点。`
+      : `下一条：当前仅 ${dynamicPoolCount} 条节点，执行重绑复测（不保证更换出口）。`;
+    return `${nextPart} Change：仅账号模式可用。`;
   }
 
   const nextPart = poolCount > 1
-    ? '下一条：切到代理池的下一条节点。'
-    : '下一条：当前仅 1 条节点，执行重绑复测（不保证更换出口）。';
+    ? `下一条：当前共 ${dynamicPoolCount} 条节点，切到代理池的下一条节点。`
+    : `下一条：当前仅 ${dynamicPoolCount} 条节点，执行重绑复测（不保证更换出口）。`;
   const changePart = changeAvailable
     ? 'Change：保持当前 session 重绑链路并复测出口。'
     : 'Change：需 711 账号模式且用户名包含 session。';
@@ -931,7 +935,6 @@ function setIpProxyCurrentDisplay(text = '', hasValue = false) {
 function formatIpProxyCurrentDisplay(state = latestState) {
   const mode = normalizeIpProxyModeForCurrentRelease(state?.ipProxyMode);
   if (mode === 'account') {
-    const runtime = getIpProxyRuntimeSnapshot(state, mode);
     const current = getIpProxyCurrentEntry(state);
     if (!current) {
       return {
@@ -939,10 +942,8 @@ function formatIpProxyCurrentDisplay(state = latestState) {
         hasValue: false,
       };
     }
-    const count = runtime.pool.length > 0 ? runtime.pool.length : 1;
-    const index = runtime.index;
     return {
-      text: `${current.host}:${current.port}${current.region ? ` [${current.region}]` : ''} (${Math.min(index + 1, count)}/${count})`,
+      text: `${current.host}:${current.port}${current.region ? ` [${current.region}]` : ''}`,
       hasValue: true,
     };
   }
@@ -960,7 +961,7 @@ function formatIpProxyCurrentDisplay(state = latestState) {
   const region = String(current.region || '').trim();
   const label = region ? `${current.host}:${current.port} [${region}]` : `${current.host}:${current.port}`;
   return {
-    text: `${label}${count ? ` (${Math.min(index + 1, count)}/${count})` : ''}`,
+    text: label,
     hasValue: true,
   };
 }
@@ -986,19 +987,7 @@ function buildIpProxyCurrentDisplayText(display = {}, runtimeStatus = {}) {
   if (!hasValue || !rawText) {
     return rawText;
   }
-  const runtimeText = String(runtimeStatus?.text || '').trim().toLowerCase();
-  if (!runtimeText) {
-    return rawText;
-  }
-  const endpointToken = extractIpProxyEndpointToken(rawText);
-  if (!endpointToken || !runtimeText.includes(endpointToken)) {
-    return rawText;
-  }
-  const indexToken = extractIpProxyIndexToken(rawText);
-  if (indexToken) {
-    return `节点 ${indexToken}`;
-  }
-  return '当前节点';
+  return rawText;
 }
 
 function formatIpProxyRuntimeStatus(state = latestState) {
@@ -1353,11 +1342,12 @@ function updateIpProxyUI(state = latestState) {
   setIpProxyCurrentDisplay(currentDisplayText, currentDisplay.hasValue);
   const runtimeSnapshot = getIpProxyRuntimeSnapshot(runtimeState, mode, service);
   const runtimePoolCount = Array.isArray(runtimeSnapshot?.pool) ? runtimeSnapshot.pool.length : 0;
+  const runtimePoolCountForDisplay = runtimePoolCount > 0 ? runtimePoolCount : 1;
   const hasCurrentEntry = Boolean(getIpProxyCurrentEntry(runtimeState));
   const changeAvailable = canChangeIpProxyExitWithCurrentSession(runtimeState);
   const nextActionTitle = runtimePoolCount > 1
-    ? '切换到代理池下一条节点并应用'
-    : '当前仅 1 条节点：重绑当前节点并复测连通性（不保证更换出口）';
+    ? `切换到代理池下一条节点并应用（当前共 ${runtimePoolCountForDisplay} 条）`
+    : `当前仅 ${runtimePoolCountForDisplay} 条节点：重绑当前节点并复测连通性（不保证更换出口）`;
 
   if (btnIpProxyRefresh) {
     btnIpProxyRefresh.disabled = actionBusy || !enabled || !canOperate;
