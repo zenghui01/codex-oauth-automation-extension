@@ -31,6 +31,7 @@ importScripts(
   'background/steps/clear-login-cookies.js',
   'background/steps/create-plus-checkout.js',
   'background/steps/fill-plus-checkout.js',
+  'background/steps/gopay-manual-confirm.js',
   'background/steps/paypal-approve.js',
   'background/steps/plus-return-confirm.js',
   'background/steps/oauth-login.js',
@@ -48,10 +49,19 @@ importScripts(
 );
 
 const NORMAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({ plusModeEnabled: false }) || [];
-const PLUS_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({ plusModeEnabled: true }) || NORMAL_STEP_DEFINITIONS;
+const PLUS_PAYPAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  plusModeEnabled: true,
+  plusPaymentMethod: 'paypal',
+}) || NORMAL_STEP_DEFINITIONS;
+const PLUS_GOPAY_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  plusModeEnabled: true,
+  plusPaymentMethod: 'gopay',
+}) || PLUS_PAYPAL_STEP_DEFINITIONS;
+const PLUS_STEP_DEFINITIONS = PLUS_PAYPAL_STEP_DEFINITIONS;
 const ALL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getAllSteps?.() || [
   ...NORMAL_STEP_DEFINITIONS,
-  ...PLUS_STEP_DEFINITIONS,
+  ...PLUS_PAYPAL_STEP_DEFINITIONS,
+  ...PLUS_GOPAY_STEP_DEFINITIONS,
 ];
 const STEP_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
@@ -61,13 +71,18 @@ const NORMAL_STEP_IDS = NORMAL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
   .sort((left, right) => left - right);
-const PLUS_STEP_IDS = PLUS_STEP_DEFINITIONS
+const PLUS_PAYPAL_STEP_IDS = PLUS_PAYPAL_STEP_DEFINITIONS
+  .map((definition) => Number(definition?.id))
+  .filter(Number.isFinite)
+  .sort((left, right) => left - right);
+const PLUS_GOPAY_STEP_IDS = PLUS_GOPAY_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
   .sort((left, right) => left - right);
 const LAST_STEP_ID = Math.max(
   NORMAL_STEP_IDS[NORMAL_STEP_IDS.length - 1] || 10,
-  PLUS_STEP_IDS[PLUS_STEP_IDS.length - 1] || 10
+  PLUS_PAYPAL_STEP_IDS[PLUS_PAYPAL_STEP_IDS.length - 1] || 10,
+  PLUS_GOPAY_STEP_IDS[PLUS_GOPAY_STEP_IDS.length - 1] || 10
 );
 const FINAL_OAUTH_CHAIN_START_STEP = 7;
 
@@ -337,6 +352,10 @@ function isPlusModeState(state = {}) {
   return Boolean(state?.plusModeEnabled);
 }
 
+function normalizePlusPaymentMethod(value = '') {
+  return String(value || '').trim().toLowerCase() === 'gopay' ? 'gopay' : 'paypal';
+}
+
 function normalizeContributionModeSource(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   return normalized === CONTRIBUTION_SOURCE_SUB2API
@@ -372,11 +391,21 @@ function resolveContributionModeRoutingState(state = {}) {
 }
 
 function getStepDefinitionsForState(state = {}) {
-  return isPlusModeState(state) ? PLUS_STEP_DEFINITIONS : NORMAL_STEP_DEFINITIONS;
+  if (!isPlusModeState(state)) {
+    return NORMAL_STEP_DEFINITIONS;
+  }
+  return normalizePlusPaymentMethod(state?.plusPaymentMethod) === 'gopay'
+    ? PLUS_GOPAY_STEP_DEFINITIONS
+    : PLUS_PAYPAL_STEP_DEFINITIONS;
 }
 
 function getStepIdsForState(state = {}) {
-  return isPlusModeState(state) ? PLUS_STEP_IDS : NORMAL_STEP_IDS;
+  if (!isPlusModeState(state)) {
+    return NORMAL_STEP_IDS;
+  }
+  return normalizePlusPaymentMethod(state?.plusPaymentMethod) === 'gopay'
+    ? PLUS_GOPAY_STEP_IDS
+    : PLUS_PAYPAL_STEP_IDS;
 }
 
 function getLastStepIdForState(state = {}) {
@@ -573,6 +602,12 @@ const DEFAULT_STATE = {
   plusBillingAddress: null,
   plusPaypalApprovedAt: null,
   plusReturnUrl: '',
+  plusManualConfirmationPending: false,
+  plusManualConfirmationRequestId: '',
+  plusManualConfirmationStep: 0,
+  plusManualConfirmationMethod: '',
+  plusManualConfirmationTitle: '',
+  plusManualConfirmationMessage: '',
   flowStartTime: null, // 当前流程开始时间。
   tabRegistry: {}, // 程序维护的标签页注册表。
   sourceLastUrls: {}, // 各来源页面最近一次打开的地址记录。
@@ -6244,6 +6279,12 @@ function getDownstreamStateResets(step, state = {}) {
     plusBillingAddress: null,
     plusPaypalApprovedAt: null,
     plusReturnUrl: '',
+    plusManualConfirmationPending: false,
+    plusManualConfirmationRequestId: '',
+    plusManualConfirmationStep: 0,
+    plusManualConfirmationMethod: '',
+    plusManualConfirmationTitle: '',
+    plusManualConfirmationMessage: '',
   };
 
   if (step <= 1) {
@@ -6311,6 +6352,12 @@ function getDownstreamStateResets(step, state = {}) {
         plusBillingAddress: null,
         plusPaypalApprovedAt: null,
         plusReturnUrl: '',
+        plusManualConfirmationPending: false,
+        plusManualConfirmationRequestId: '',
+        plusManualConfirmationStep: 0,
+        plusManualConfirmationMethod: '',
+        plusManualConfirmationTitle: '',
+        plusManualConfirmationMessage: '',
       } : {}),
       ...(step === 8 ? {
         plusPaypalApprovedAt: null,
@@ -7231,7 +7278,11 @@ const AUTO_RUN_BACKGROUND_COMPLETED_STEP_KEYS = new Set([
 const STEP_COMPLETION_SIGNAL_STEP_KEYS = new Set([
   'fill-password',
   'fill-profile',
+  'gopay-subscription-confirm',
   'platform-verify',
+]);
+const STEP_COMPLETION_SIGNAL_TIMEOUTS_BY_STEP_KEY = new Map([
+  ['gopay-subscription-confirm', 1800000],
 ]);
 const AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY = new Map([
   ['plus-checkout-create', 20000],
@@ -7311,6 +7362,14 @@ function getAutoRunPreExecutionDelayMs(step, state = {}) {
     return AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY.get(stepKey) || 0;
   }
   return 0;
+}
+
+function getStepCompletionSignalTimeoutMs(step, state = {}) {
+  const stepKey = getStepExecutionKeyForState(step, state);
+  if (stepKey) {
+    return STEP_COMPLETION_SIGNAL_TIMEOUTS_BY_STEP_KEY.get(stepKey) || AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS;
+  }
+  return AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS;
 }
 
 function notifyStepComplete(step, payload) {
@@ -7393,8 +7452,12 @@ async function finalizeDeferredStepExecutionError(step, error) {
   await appendManualAccountRunRecordIfNeeded(`step${step}_failed`, latestState, getErrorMessage(error));
 }
 
-async function executeStepViaCompletionSignal(step, timeoutMs = AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS) {
-  const completionResultPromise = waitForStepComplete(step, timeoutMs).then(
+async function executeStepViaCompletionSignal(step, timeoutMs = 0) {
+  const executionState = await getState();
+  const resolvedTimeoutMs = Number(timeoutMs) > 0
+    ? timeoutMs
+    : getStepCompletionSignalTimeoutMs(step, executionState);
+  const completionResultPromise = waitForStepComplete(step, resolvedTimeoutMs).then(
     payload => ({ ok: true, payload }),
     error => ({ ok: false, error }),
   );
@@ -7591,6 +7654,19 @@ async function requestStop(options = {}) {
     waiter.reject(new Error(STOP_ERROR_MESSAGE));
   }
   stepWaiters.clear();
+
+  if (state.plusManualConfirmationPending) {
+    const clearManualConfirmationState = {
+      plusManualConfirmationPending: false,
+      plusManualConfirmationRequestId: '',
+      plusManualConfirmationStep: 0,
+      plusManualConfirmationMethod: '',
+      plusManualConfirmationTitle: '',
+      plusManualConfirmationMessage: '',
+    };
+    await setState(clearManualConfirmationState);
+    broadcastDataUpdate(clearManualConfirmationState);
+  }
 
   if (resumeWaiter) {
     resumeWaiter.reject(new Error(STOP_ERROR_MESSAGE));
@@ -8995,6 +9071,15 @@ const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?
   waitForTabCompleteUntilStopped,
   waitForTabUrlMatchUntilStopped,
 });
+const goPayManualConfirmExecutor = self.MultiPageBackgroundGoPayManualConfirm?.createGoPayManualConfirmExecutor({
+  addLog,
+  broadcastDataUpdate,
+  chrome,
+  getTabId,
+  isTabAlive,
+  registerTab,
+  setState,
+});
 const payPalApproveExecutor = self.MultiPageBackgroundPayPalApprove?.createPayPalApproveExecutor({
   addLog,
   chrome,
@@ -9045,6 +9130,7 @@ const stepExecutorsByKey = {
   'clear-login-cookies': () => step6Executor.executeStep6(),
   'plus-checkout-create': (state) => plusCheckoutCreateExecutor.executePlusCheckoutCreate(state),
   'plus-checkout-billing': (state) => plusCheckoutBillingExecutor.executePlusCheckoutBilling(state),
+  'gopay-subscription-confirm': (state) => goPayManualConfirmExecutor.executeGoPayManualConfirm(state),
   'paypal-approve': (state) => payPalApproveExecutor.executePayPalApprove(state),
   'plus-checkout-return': (state) => plusReturnConfirmExecutor.executePlusReturnConfirm(state),
   'oauth-login': (state) => step7Executor.executeStep7(state),
@@ -9070,6 +9156,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   clearStopRequest,
   closeLocalhostCallbackTabs,
   closeTabsByUrlPrefix,
+  completeStepFromBackground,
   deleteHotmailAccount,
   deleteHotmailAccounts,
   deleteIcloudAlias,
@@ -9180,10 +9267,16 @@ function buildStepRegistry(definitions = []) {
 }
 
 const normalStepRegistry = buildStepRegistry(NORMAL_STEP_DEFINITIONS);
-const plusStepRegistry = buildStepRegistry(PLUS_STEP_DEFINITIONS);
+const plusPayPalStepRegistry = buildStepRegistry(PLUS_PAYPAL_STEP_DEFINITIONS);
+const plusGoPayStepRegistry = buildStepRegistry(PLUS_GOPAY_STEP_DEFINITIONS);
 
 function getStepRegistryForState(state = {}) {
-  return isPlusModeState(state) ? plusStepRegistry : normalStepRegistry;
+  if (!isPlusModeState(state)) {
+    return normalStepRegistry;
+  }
+  return normalizePlusPaymentMethod(state?.plusPaymentMethod) === 'gopay'
+    ? plusGoPayStepRegistry
+    : plusPayPalStepRegistry;
 }
 
 async function requestOAuthUrlFromPanel(state, options = {}) {

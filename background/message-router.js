@@ -20,6 +20,7 @@
       clearStopRequest,
       closeLocalhostCallbackTabs,
       closeTabsByUrlPrefix,
+      completeStepFromBackground,
       deleteHotmailAccount,
       deleteHotmailAccounts,
       deleteIcloudAlias,
@@ -418,6 +419,54 @@
           return { ok: true };
         }
 
+        case 'RESOLVE_PLUS_MANUAL_CONFIRMATION': {
+          const currentState = await getState();
+          const step = Number(message.payload?.step) || Number(currentState?.plusManualConfirmationStep) || 0;
+          const confirmed = Boolean(message.payload?.confirmed);
+          const requestId = String(message.payload?.requestId || '').trim();
+          const currentRequestId = String(currentState?.plusManualConfirmationRequestId || '').trim();
+          if (!currentState?.plusManualConfirmationPending) {
+            return { ok: true, ignored: true };
+          }
+          if (requestId && currentRequestId && requestId !== currentRequestId) {
+            return { ok: true, ignored: true };
+          }
+
+          const clearManualConfirmationState = {
+            plusManualConfirmationPending: false,
+            plusManualConfirmationRequestId: '',
+            plusManualConfirmationStep: 0,
+            plusManualConfirmationMethod: '',
+            plusManualConfirmationTitle: '',
+            plusManualConfirmationMessage: '',
+          };
+          await setState(clearManualConfirmationState);
+          if (typeof broadcastDataUpdate === 'function') {
+            broadcastDataUpdate(clearManualConfirmationState);
+          }
+
+          if (confirmed) {
+            const methodLabel = String(currentState?.plusManualConfirmationMethod || '').trim().toLowerCase() === 'gopay'
+              ? 'GoPay'
+              : '手动';
+            await addLog(`步骤 ${step}：已确认${methodLabel}订阅完成，准备继续下一步。`, 'ok');
+            await completeStepFromBackground(step, {
+              plusManualConfirmationMethod: currentState?.plusManualConfirmationMethod || '',
+              plusManualConfirmedAt: Date.now(),
+            });
+            return { ok: true };
+          }
+
+          const cancelMessage = String(currentState?.plusManualConfirmationMethod || '').trim().toLowerCase() === 'gopay'
+            ? '已取消 GoPay 订阅确认'
+            : '已取消当前手动确认';
+          await setStepStatus(step, 'failed');
+          await addLog(`步骤 ${step}：${cancelMessage}。`, 'warn');
+          await appendManualAccountRunRecordIfNeeded(`step${step}_failed`, null, cancelMessage);
+          notifyStepError(step, cancelMessage);
+          return { ok: true };
+        }
+
         case 'GET_STATE': {
           return await getState();
         }
@@ -649,12 +698,19 @@
           const sessionUpdates = buildLuckmailSessionSettingsPayload(message.payload || {});
           const modeChanged = Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
             && Boolean(currentState?.plusModeEnabled) !== Boolean(updates.plusModeEnabled);
+          const plusPaymentChanged = Object.prototype.hasOwnProperty.call(updates, 'plusPaymentMethod')
+            && String(currentState?.plusPaymentMethod || 'paypal').trim().toLowerCase()
+              !== String(updates.plusPaymentMethod || 'paypal').trim().toLowerCase();
+          const nextPlusModeEnabled = Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
+            ? Boolean(updates.plusModeEnabled)
+            : Boolean(currentState?.plusModeEnabled);
+          const stepModeChanged = modeChanged || (nextPlusModeEnabled && plusPaymentChanged);
           await setPersistentSettings(updates);
           const stateUpdates = {
             ...updates,
             ...sessionUpdates,
           };
-          if (modeChanged && typeof getStepIdsForState === 'function') {
+          if (stepModeChanged && typeof getStepIdsForState === 'function') {
             const nextStateForSteps = { ...currentState, ...stateUpdates };
             stateUpdates.stepStatuses = Object.fromEntries(
               getStepIdsForState(nextStateForSteps).map((stepId) => [stepId, 'pending'])
@@ -705,6 +761,13 @@
                 : 'Plus 模式已关闭，已恢复普通注册授权步骤。',
               'info'
             );
+          } else if (plusPaymentChanged && nextPlusModeEnabled) {
+            const selectedPlusPaymentMethod = String(
+              stateUpdates.plusPaymentMethod ?? currentState?.plusPaymentMethod ?? 'paypal'
+            ).trim().toLowerCase() === 'gopay'
+              ? 'GoPay'
+              : 'PayPal';
+            await addLog(`Plus 鏀粯鏂瑰紡宸插垏鎹负 ${selectedPlusPaymentMethod}锛屽凡鏇存柊瀵瑰簲鐨?Plus 姝ラ銆?`, 'info');
           }
           return { ok: true, state: await getState(), proxyRouting };
         }

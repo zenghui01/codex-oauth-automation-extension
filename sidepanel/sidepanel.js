@@ -356,10 +356,11 @@ const btnAutoStartContinue = document.getElementById('btn-auto-start-continue');
 const autoHintText = document.querySelector('.auto-hint');
 const stepsList = document.querySelector('.steps-list');
 let currentPlusModeEnabled = false;
+let currentPlusPaymentMethod = 'paypal';
 let heroSmsCountrySelectionOrder = [];
 let heroSmsCountryMenuSearchKeyword = '';
 const heroSmsCountrySearchTextById = new Map();
-let stepDefinitions = getStepDefinitionsForMode(false);
+let stepDefinitions = getStepDefinitionsForMode(false, currentPlusPaymentMethod);
 let STEP_IDS = stepDefinitions.map((step) => Number(step.id)).filter(Number.isFinite);
 let STEP_DEFAULT_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
 let SKIPPABLE_STEPS = new Set(STEP_IDS);
@@ -453,8 +454,22 @@ const AUTO_RUN_PLUS_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-plus
 const PLUS_CONTRIBUTION_PROMPT_LEDGER_STORAGE_KEY = 'multipage-plus-contribution-prompt-ledger';
 const PHONE_VERIFICATION_SECTION_EXPANDED_STORAGE_KEY = 'multipage-phone-verification-section-expanded';
 
-function getStepDefinitionsForMode(plusModeEnabled = false) {
-  return (window.MultiPageStepDefinitions?.getSteps?.({ plusModeEnabled }) || [])
+function normalizePlusPaymentMethod(value = '') {
+  return String(value || '').trim().toLowerCase() === 'gopay' ? 'gopay' : 'paypal';
+}
+
+function getSelectedPlusPaymentMethod() {
+  if (typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod) {
+    return normalizePlusPaymentMethod(selectPlusPaymentMethod.value);
+  }
+  return normalizePlusPaymentMethod(latestState?.plusPaymentMethod || currentPlusPaymentMethod);
+}
+
+function getStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethod = 'paypal') {
+  return (window.MultiPageStepDefinitions?.getSteps?.({
+    plusModeEnabled,
+    plusPaymentMethod: normalizePlusPaymentMethod(plusPaymentMethod),
+  }) || [])
     .sort((left, right) => {
       const leftOrder = Number.isFinite(left.order) ? left.order : left.id;
       const rightOrder = Number.isFinite(right.order) ? right.order : right.id;
@@ -463,9 +478,10 @@ function getStepDefinitionsForMode(plusModeEnabled = false) {
     });
 }
 
-function rebuildStepDefinitionState(plusModeEnabled = false) {
+function rebuildStepDefinitionState(plusModeEnabled = false, plusPaymentMethod = 'paypal') {
   currentPlusModeEnabled = Boolean(plusModeEnabled);
-  stepDefinitions = getStepDefinitionsForMode(currentPlusModeEnabled);
+  currentPlusPaymentMethod = normalizePlusPaymentMethod(plusPaymentMethod);
+  stepDefinitions = getStepDefinitionsForMode(currentPlusModeEnabled, currentPlusPaymentMethod);
   STEP_IDS = stepDefinitions.map((step) => Number(step.id)).filter(Number.isFinite);
   STEP_DEFAULT_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
   SKIPPABLE_STEPS = new Set(STEP_IDS);
@@ -758,6 +774,8 @@ let cloudflareTempEmailDomainEditMode = false;
 let modalChoiceResolver = null;
 let currentModalActions = [];
 let modalResultBuilder = null;
+let activePlusManualConfirmationRequestId = '';
+let plusManualConfirmationDialogInFlight = false;
 let scheduledCountdownTimer = null;
 let configMenuOpen = false;
 let configActionInFlight = false;
@@ -1192,6 +1210,98 @@ async function openConfirmModalWithOption({
     confirmed: result?.choice === 'confirm',
     optionChecked: Boolean(result?.optionChecked),
   };
+}
+
+
+// Override the initial GoPay confirmation helpers so the dialog can
+// recover after an accidental close instead of silently leaving step 7 hanging.
+async function openPlusManualConfirmationDialog(options = {}) {
+  const method = String(options.method || '').trim().toLowerCase();
+  const title = String(options.title || '').trim() || (method === 'gopay' ? 'GoPay 订阅确认' : '手动确认');
+  const message = String(options.message || '').trim()
+    || (method === 'gopay'
+      ? '请在当前订阅页中手动完成 GoPay 订阅，完成后点击“我已完成订阅”继续。'
+      : '请先在页面中完成当前手动操作，完成后点击确认继续。');
+  return openActionModal({
+    title,
+    message,
+    actions: [
+      { id: 'cancel', label: '取消等待', variant: 'btn-ghost' },
+      { id: 'confirm', label: '我已完成订阅', variant: 'btn-primary' },
+    ],
+    alert: method === 'gopay'
+      ? { text: '确认后流程会直接继续到 Plus 模式第 10 步 OAuth 登录。', tone: 'info' }
+      : null,
+  });
+}
+
+async function syncPlusManualConfirmationDialog() {
+  const requestId = String(latestState?.plusManualConfirmationRequestId || '').trim();
+  const pending = Boolean(latestState?.plusManualConfirmationPending);
+  if (!pending || !requestId || plusManualConfirmationDialogInFlight || activePlusManualConfirmationRequestId === requestId) {
+    return;
+  }
+
+  const step = Number(latestState?.plusManualConfirmationStep) || 0;
+  const method = String(latestState?.plusManualConfirmationMethod || '').trim().toLowerCase();
+  const title = latestState?.plusManualConfirmationTitle;
+  const message = latestState?.plusManualConfirmationMessage;
+  activePlusManualConfirmationRequestId = requestId;
+  plusManualConfirmationDialogInFlight = true;
+  let shouldReopenDialog = false;
+
+  try {
+    const choice = await openPlusManualConfirmationDialog({
+      method,
+      title,
+      message,
+    });
+    const currentRequestId = String(latestState?.plusManualConfirmationRequestId || '').trim();
+    const stillPending = Boolean(latestState?.plusManualConfirmationPending);
+    if (!stillPending || currentRequestId !== requestId) {
+      return;
+    }
+    if (choice == null) {
+      shouldReopenDialog = true;
+      showToast('当前订阅确认仍在等待中，将重新弹出确认窗口。', 'info', 1800);
+      return;
+    }
+
+    const confirmed = choice === 'confirm';
+    const response = await chrome.runtime.sendMessage({
+      type: 'RESOLVE_PLUS_MANUAL_CONFIRMATION',
+      source: 'sidepanel',
+      payload: {
+        step,
+        requestId,
+        confirmed,
+      },
+    });
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    if (confirmed) {
+      showToast(method === 'gopay' ? 'GoPay 订阅已确认，正在继续 OAuth 登录...' : '已确认，流程继续执行中...', 'info', 2200);
+    } else {
+      showToast(method === 'gopay' ? '已取消 GoPay 订阅等待。' : '已取消当前手动确认。', 'warn', 2200);
+    }
+  } catch (error) {
+    showToast(error?.message || String(error || '未知错误'), 'error');
+  } finally {
+    if (activePlusManualConfirmationRequestId === requestId) {
+      activePlusManualConfirmationRequestId = '';
+    }
+    plusManualConfirmationDialogInFlight = false;
+    if (
+      shouldReopenDialog
+      && latestState?.plusManualConfirmationPending
+      && String(latestState?.plusManualConfirmationRequestId || '').trim() === requestId
+    ) {
+      setTimeout(() => {
+        void syncPlusManualConfirmationDialog();
+      }, 0);
+    }
+  }
 }
 
 function isPromptDismissed(storageKey) {
@@ -2447,9 +2557,13 @@ function collectSettingsPayload() {
   const currentPayPalAccount = typeof getCurrentPayPalAccount === 'function'
     ? getCurrentPayPalAccount(latestState)
     : payPalAccounts.find((account) => account?.id === String(latestState?.currentPayPalAccountId || '').trim()) || null;
-  const plusPaymentMethod = typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod
-    ? (String(selectPlusPaymentMethod.value || '').trim().toLowerCase() === 'gopay' ? 'gopay' : 'paypal')
-    : (String(latestState?.plusPaymentMethod || '').trim().toLowerCase() === 'gopay' ? 'gopay' : 'paypal');
+  const plusPaymentMethod = typeof getSelectedPlusPaymentMethod === 'function'
+    ? getSelectedPlusPaymentMethod()
+    : (String(
+      (typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod
+        ? selectPlusPaymentMethod.value
+        : latestState?.plusPaymentMethod) || ''
+    ).trim().toLowerCase() === 'gopay' ? 'gopay' : 'paypal');
   return {
     ...(contributionModeEnabled ? {} : {
       panelMode: selectPanelMode.value,
@@ -3593,9 +3707,7 @@ function updatePlusModeUI() {
   const enabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
     ? Boolean(inputPlusModeEnabled.checked)
     : false;
-  const paymentMethod = typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod
-    ? (String(selectPlusPaymentMethod.value || '').trim().toLowerCase() === 'gopay' ? 'gopay' : 'paypal')
-    : (String(latestState?.plusPaymentMethod || '').trim().toLowerCase() === 'gopay' ? 'gopay' : 'paypal');
+  const paymentMethod = getSelectedPlusPaymentMethod();
   if (typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod) {
     selectPlusPaymentMethod.value = paymentMethod;
     selectPlusPaymentMethod.style.display = enabled ? '' : 'none';
@@ -3842,14 +3954,17 @@ function renderStepsList() {
   updateButtonStates();
 }
 
-function syncStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
+function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethod = 'paypal', options = {}) {
   const nextPlusModeEnabled = Boolean(plusModeEnabled);
-  const shouldRender = Boolean(options.render) || nextPlusModeEnabled !== currentPlusModeEnabled;
+  const nextPlusPaymentMethod = normalizePlusPaymentMethod(plusPaymentMethod);
+  const shouldRender = Boolean(options.render)
+    || nextPlusModeEnabled !== currentPlusModeEnabled
+    || nextPlusPaymentMethod !== currentPlusPaymentMethod;
   if (!shouldRender) {
     return;
   }
 
-  rebuildStepDefinitionState(nextPlusModeEnabled);
+  rebuildStepDefinitionState(nextPlusModeEnabled, nextPlusPaymentMethod);
   renderStepsList();
 }
 
@@ -3859,7 +3974,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
 
 function applySettingsState(state) {
   if (typeof syncStepDefinitionsForMode === 'function') {
-    syncStepDefinitionsForMode(Boolean(state?.plusModeEnabled));
+    syncStepDefinitionsForMode(Boolean(state?.plusModeEnabled), state?.plusPaymentMethod);
   }
   const fallbackIpProxyService = '711proxy';
   const fallbackIpProxyMode = 'account';
@@ -3909,9 +4024,7 @@ function applySettingsState(state) {
     inputPlusModeEnabled.checked = Boolean(state?.plusModeEnabled);
   }
   if (typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod) {
-    selectPlusPaymentMethod.value = String(state?.plusPaymentMethod || '').trim().toLowerCase() === 'gopay'
-      ? 'gopay'
-      : 'paypal';
+    selectPlusPaymentMethod.value = normalizePlusPaymentMethod(state?.plusPaymentMethod);
   }
   inputVpsUrl.value = state?.vpsUrl || '';
   inputVpsPassword.value = state?.vpsPassword || '';
@@ -4182,6 +4295,9 @@ function applySettingsState(state) {
     queueLuckmailPurchaseRefresh();
   }
   updateButtonStates();
+  if (typeof syncPlusManualConfirmationDialog === 'function') {
+    void syncPlusManualConfirmationDialog();
+  }
 }
 
 async function restoreState() {
@@ -6801,16 +6917,15 @@ inputPassword.addEventListener('blur', () => {
 
 inputPlusModeEnabled?.addEventListener('change', () => {
   updatePlusModeUI();
-  syncStepDefinitionsForMode(Boolean(inputPlusModeEnabled.checked), { render: true });
+  syncStepDefinitionsForMode(Boolean(inputPlusModeEnabled.checked), getSelectedPlusPaymentMethod(), { render: true });
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
 
 selectPlusPaymentMethod?.addEventListener('change', () => {
-  selectPlusPaymentMethod.value = String(selectPlusPaymentMethod.value || '').trim().toLowerCase() === 'gopay'
-    ? 'gopay'
-    : 'paypal';
+  selectPlusPaymentMethod.value = normalizePlusPaymentMethod(selectPlusPaymentMethod.value);
   updatePlusModeUI();
+  syncStepDefinitionsForMode(Boolean(inputPlusModeEnabled?.checked), selectPlusPaymentMethod.value, { render: true });
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -8149,11 +8264,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputPlusModeEnabled.checked = Boolean(message.payload.plusModeEnabled);
       }
       if (message.payload.plusPaymentMethod !== undefined && selectPlusPaymentMethod) {
-        selectPlusPaymentMethod.value = String(message.payload.plusPaymentMethod || '').trim().toLowerCase() === 'gopay'
-          ? 'gopay'
-          : 'paypal';
+        selectPlusPaymentMethod.value = normalizePlusPaymentMethod(message.payload.plusPaymentMethod);
       }
       if (message.payload.plusModeEnabled !== undefined || message.payload.plusPaymentMethod !== undefined) {
+        syncStepDefinitionsForMode(
+          Boolean(latestState?.plusModeEnabled),
+          latestState?.plusPaymentMethod,
+          { render: true }
+        );
         updatePlusModeUI();
       }
       if (message.payload.currentHotmailAccountId !== undefined || message.payload.hotmailAccounts !== undefined) {
@@ -8343,6 +8461,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       updateAccountRunHistorySettingsUI();
       renderContributionMode();
+      void syncPlusManualConfirmationDialog();
       break;
     }
 
