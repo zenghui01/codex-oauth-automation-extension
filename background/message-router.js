@@ -705,10 +705,16 @@
             ? Boolean(updates.plusModeEnabled)
             : Boolean(currentState?.plusModeEnabled);
           const stepModeChanged = modeChanged || (nextPlusModeEnabled && plusPaymentChanged);
+          const oauthFlowTimeoutDisabled = Object.prototype.hasOwnProperty.call(updates, 'oauthFlowTimeoutEnabled')
+            && updates.oauthFlowTimeoutEnabled === false;
           await setPersistentSettings(updates);
           const stateUpdates = {
             ...updates,
             ...sessionUpdates,
+            ...(oauthFlowTimeoutDisabled ? {
+              oauthFlowDeadlineAt: null,
+              oauthFlowDeadlineSourceUrl: null,
+            } : {}),
           };
           if (stepModeChanged && typeof getStepIdsForState === 'function') {
             const nextStateForSteps = { ...currentState, ...stateUpdates };

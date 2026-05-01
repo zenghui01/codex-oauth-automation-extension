@@ -490,6 +490,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   currentPayPalAccountId: '',
   autoRunSkipFailures: false,
   autoRunFallbackThreadIntervalMinutes: 0,
+  oauthFlowTimeoutEnabled: true,
   autoRunDelayEnabled: false,
   autoRunDelayMinutes: 30,
   autoStepDelaySeconds: null,
@@ -1466,6 +1467,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'plusPaymentMethod':
       return String(value || '').trim().toLowerCase() === 'gopay' ? 'gopay' : 'paypal';
     case 'autoRunSkipFailures':
+    case 'oauthFlowTimeoutEnabled':
     case 'autoRunDelayEnabled':
     case 'phoneVerificationEnabled':
     case 'plusModeEnabled':
@@ -8915,6 +8917,7 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
   DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS,
   DEFAULT_PHONE_CODE_POLL_ROUNDS,
   ensureStep8SignupPageReady,
+  getOAuthFlowRemainingMs,
   getOAuthFlowStepTimeoutMs,
   getState,
   HERO_SMS_COUNTRY_ID,
@@ -9670,6 +9673,16 @@ function normalizeOAuthFlowSourceUrl(value) {
 
 async function startOAuthFlowTimeoutWindow(options = {}) {
   const step = Number(options.step) || 7;
+  const state = options.state || await getState();
+  if (state?.oauthFlowTimeoutEnabled === false) {
+    await setState({
+      oauthFlowDeadlineAt: null,
+      oauthFlowDeadlineSourceUrl: null,
+    });
+    await addLog(`步骤 ${step}：已拿到新的 OAuth 登录地址，授权后链总超时已关闭，仅保留各步骤本地等待超时。`, 'info');
+    return null;
+  }
+
   const deadlineAt = Date.now() + OAUTH_FLOW_TIMEOUT_MS;
   await setState({
     oauthFlowDeadlineAt: deadlineAt,
@@ -9683,6 +9696,10 @@ async function getOAuthFlowRemainingMs(options = {}) {
   const step = Number(options.step) || 7;
   const actionLabel = String(options.actionLabel || '后续授权流程').trim() || '后续授权流程';
   const state = options.state || await getState();
+  if (state?.oauthFlowTimeoutEnabled === false) {
+    return null;
+  }
+
   const deadlineAt = normalizeOAuthFlowDeadlineAt(state?.oauthFlowDeadlineAt);
   const deadlineSourceUrl = normalizeOAuthFlowSourceUrl(state?.oauthFlowDeadlineSourceUrl);
   const currentOauthUrl = normalizeOAuthFlowSourceUrl(options.oauthUrl !== undefined ? options.oauthUrl : state?.oauthUrl);

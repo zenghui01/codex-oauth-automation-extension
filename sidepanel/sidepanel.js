@@ -288,6 +288,7 @@ const inputAutoSkipFailuresThreadIntervalMinutes = document.getElementById('inpu
 const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled');
 const inputAutoDelayMinutes = document.getElementById('input-auto-delay-minutes');
 const inputAutoStepDelaySeconds = document.getElementById('input-auto-step-delay-seconds');
+const inputOAuthFlowTimeoutEnabled = document.getElementById('input-oauth-flow-timeout-enabled');
 const inputVerificationResendCount = document.getElementById('input-verification-resend-count');
 const rowPhoneVerificationEnabled = document.getElementById('row-phone-verification-enabled');
 const btnTogglePhoneVerificationSection = document.getElementById('btn-toggle-phone-verification-section');
@@ -2650,6 +2651,9 @@ function collectSettingsPayload() {
     autoRunDelayEnabled: inputAutoDelayEnabled.checked,
     autoRunDelayMinutes: normalizeAutoDelayMinutes(inputAutoDelayMinutes.value),
     autoStepDelaySeconds: normalizeAutoStepDelaySeconds(inputAutoStepDelaySeconds.value),
+    oauthFlowTimeoutEnabled: inputOAuthFlowTimeoutEnabled
+      ? Boolean(inputOAuthFlowTimeoutEnabled.checked)
+      : true,
     phoneVerificationEnabled: Boolean(inputPhoneVerificationEnabled?.checked),
     verificationResendCount: normalizeVerificationResendCount(
       inputVerificationResendCount?.value,
@@ -4202,6 +4206,11 @@ function applySettingsState(state) {
   inputAutoDelayEnabled.checked = Boolean(state?.autoRunDelayEnabled);
   inputAutoDelayMinutes.value = String(normalizeAutoDelayMinutes(state?.autoRunDelayMinutes));
   inputAutoStepDelaySeconds.value = formatAutoStepDelayInputValue(state?.autoStepDelaySeconds);
+  if (inputOAuthFlowTimeoutEnabled) {
+    inputOAuthFlowTimeoutEnabled.checked = state?.oauthFlowTimeoutEnabled !== undefined
+      ? Boolean(state.oauthFlowTimeoutEnabled)
+      : true;
+  }
   if (inputVerificationResendCount) {
     const restoredVerificationResendCount = state?.verificationResendCount !== undefined
       ? state.verificationResendCount
@@ -7765,6 +7774,11 @@ inputAutoDelayMinutes.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputOAuthFlowTimeoutEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputPhoneVerificationEnabled?.addEventListener('change', () => {
   if (inputPhoneVerificationEnabled.checked) {
     setPhoneVerificationSectionExpanded(true);
@@ -8356,6 +8370,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (message.payload.autoStepDelaySeconds !== undefined) {
         inputAutoStepDelaySeconds.value = formatAutoStepDelayInputValue(message.payload.autoStepDelaySeconds);
+      }
+      if (message.payload.oauthFlowTimeoutEnabled !== undefined && inputOAuthFlowTimeoutEnabled) {
+        inputOAuthFlowTimeoutEnabled.checked = Boolean(message.payload.oauthFlowTimeoutEnabled);
       }
       if (
         (

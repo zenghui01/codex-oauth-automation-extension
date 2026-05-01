@@ -77,6 +77,9 @@ test('sidepanel html exposes phone verification toggle and dedicated HeroSMS row
   assert.match(html, /id="row-phone-code-timeout-windows"/);
   assert.match(html, /id="row-phone-code-poll-interval-seconds"/);
   assert.match(html, /id="row-phone-code-poll-max-rounds"/);
+  assert.match(html, /id="row-oauth-flow-timeout"/);
+  assert.match(html, /id="input-oauth-flow-timeout-enabled"/);
+  assert.match(html, /只取消 Step 7 后链总预算/);
   assert.doesNotMatch(html, /id="input-account-run-history-text-enabled"/);
 });
 
@@ -222,6 +225,7 @@ const inputAutoSkipFailuresThreadIntervalMinutes = { value: '0' };
 const inputAutoDelayEnabled = { checked: false };
 const inputAutoDelayMinutes = { value: '30' };
 const inputAutoStepDelaySeconds = { value: '' };
+const inputOAuthFlowTimeoutEnabled = { checked: false };
 const inputPhoneVerificationEnabled = { checked: true };
 const inputVerificationResendCount = { value: '4' };
 const inputHeroSmsApiKey = { value: 'demo-key' };
@@ -299,6 +303,7 @@ return { collectSettingsPayload };
   const payload = api.collectSettingsPayload();
 
   assert.equal(payload.phoneVerificationEnabled, true);
+  assert.equal(payload.oauthFlowTimeoutEnabled, false);
   assert.equal(payload.accountRunHistoryTextEnabled, true);
   assert.equal(payload.accountRunHistoryHelperBaseUrl, 'http://127.0.0.1:17373');
   assert.equal(payload.heroSmsApiKey, 'demo-key');

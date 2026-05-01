@@ -296,3 +296,99 @@ return {
 
   assert.equal(timeoutMs, 15000);
 });
+
+test('oauth timeout budget clamps local timeout when enabled by default', async () => {
+  const api = new Function(`
+const LOG_PREFIX = '[test]';
+const OAUTH_FLOW_TIMEOUT_MS = 5 * 60 * 1000;
+${extractFunction('buildOAuthFlowTimeoutError')}
+${extractFunction('normalizeOAuthFlowDeadlineAt')}
+${extractFunction('normalizeOAuthFlowSourceUrl')}
+${extractFunction('getOAuthFlowRemainingMs')}
+${extractFunction('getOAuthFlowStepTimeoutMs')}
+return {
+  getOAuthFlowStepTimeoutMs,
+};
+`)();
+
+  const timeoutMs = await api.getOAuthFlowStepTimeoutMs(15000, {
+    step: 8,
+    actionLabel: '登录验证码流程',
+    state: {
+      oauthUrl: 'https://oauth.example/current',
+      oauthFlowDeadlineAt: Date.now() + 1200,
+      oauthFlowDeadlineSourceUrl: 'https://oauth.example/current',
+    },
+  });
+
+  assert(timeoutMs <= 1200);
+  assert(timeoutMs >= 1000);
+});
+
+test('oauth timeout budget disabled mode ignores active deadlines', async () => {
+  const api = new Function(`
+const LOG_PREFIX = '[test]';
+const OAUTH_FLOW_TIMEOUT_MS = 5 * 60 * 1000;
+${extractFunction('buildOAuthFlowTimeoutError')}
+${extractFunction('normalizeOAuthFlowDeadlineAt')}
+${extractFunction('normalizeOAuthFlowSourceUrl')}
+${extractFunction('getOAuthFlowRemainingMs')}
+${extractFunction('getOAuthFlowStepTimeoutMs')}
+return {
+  getOAuthFlowStepTimeoutMs,
+};
+`)();
+
+  const timeoutMs = await api.getOAuthFlowStepTimeoutMs(15000, {
+    step: 9,
+    actionLabel: 'OAuth localhost 回调',
+    state: {
+      oauthFlowTimeoutEnabled: false,
+      oauthUrl: 'https://oauth.example/current',
+      oauthFlowDeadlineAt: Date.now() - 1000,
+      oauthFlowDeadlineSourceUrl: 'https://oauth.example/current',
+    },
+  });
+
+  assert.equal(timeoutMs, 15000);
+});
+
+test('startOAuthFlowTimeoutWindow clears stale deadline when timeout is disabled', async () => {
+  const events = {
+    stateUpdates: [],
+    logs: [],
+  };
+  const api = new Function('events', `
+const OAUTH_FLOW_TIMEOUT_MS = 5 * 60 * 1000;
+async function getState() {
+  return {
+    oauthFlowTimeoutEnabled: false,
+    oauthFlowDeadlineAt: Date.now() - 1000,
+    oauthFlowDeadlineSourceUrl: 'https://oauth.example/old',
+  };
+}
+async function setState(update) {
+  events.stateUpdates.push(update);
+}
+async function addLog(message, level) {
+  events.logs.push({ message, level });
+}
+${extractFunction('normalizeOAuthFlowSourceUrl')}
+${extractFunction('startOAuthFlowTimeoutWindow')}
+return {
+  startOAuthFlowTimeoutWindow,
+};
+`)(events);
+
+  const result = await api.startOAuthFlowTimeoutWindow({
+    step: 7,
+    oauthUrl: 'https://oauth.example/current',
+  });
+
+  assert.equal(result, null);
+  assert.deepStrictEqual(events.stateUpdates, [{
+    oauthFlowDeadlineAt: null,
+    oauthFlowDeadlineSourceUrl: null,
+  }]);
+  assert.match(events.logs[0].message, /授权后链总超时已关闭/);
+});
