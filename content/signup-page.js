@@ -2573,7 +2573,8 @@ async function fillVerificationCode(step, payload) {
     await waitForLoginVerificationPageReady();
   }
 
-  const combinedSignupProfilePage = step === 4 && isCombinedSignupVerificationProfilePage();
+  const combinedSignupProfilePage = step === 4
+    && await waitForCombinedSignupVerificationProfilePage();
   if (combinedSignupProfilePage) {
     if (!signupProfile || !signupProfile.firstName || !signupProfile.lastName) {
       throw new Error('当前注册验证码页面要求同时填写资料，但未提供姓名或生日数据。');
@@ -3402,6 +3403,19 @@ function isCombinedSignupVerificationProfilePage() {
     && isVisibleElement(monthSpinner)
     && isVisibleElement(daySpinner)
   );
+}
+
+async function waitForCombinedSignupVerificationProfilePage(timeout = 2500) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    if (isCombinedSignupVerificationProfilePage()) {
+      return true;
+    }
+    await sleep(100);
+  }
+
+  return isCombinedSignupVerificationProfilePage();
 }
 
 async function step5_fillNameBirthday(payload) {
