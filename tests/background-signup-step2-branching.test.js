@@ -90,6 +90,7 @@ test('step 2 keeps password flow when landing on password page', async () => {
 
 test('step 2 uses phone activation when resolved signup method is phone', async () => {
   const completedPayloads = [];
+  const sequence = [];
   const sentPayloads = [];
   const activation = {
     activationId: 'signup-activation',
@@ -120,7 +121,10 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
     getTabId: async () => 14,
     isTabAlive: async () => true,
     phoneVerificationHelpers: {
-      prepareSignupPhoneActivation: async () => activation,
+      prepareSignupPhoneActivation: async () => {
+        sequence.push('prepareSignupPhoneActivation');
+        return activation;
+      },
       cancelSignupPhoneActivation: async () => {
         throw new Error('activation should not be cancelled on success');
       },
@@ -130,6 +134,15 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
       throw new Error('email resolver should not run for phone signup');
     },
     sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY') {
+        sequence.push('ensureSignupPhoneEntryReady');
+        return {
+          ready: true,
+          state: 'phone_entry',
+          url: 'https://chatgpt.com/',
+        };
+      }
+      sequence.push('submitSignupPhone');
       sentPayloads.push(message.payload);
       return { submitted: true };
     },
@@ -138,6 +151,11 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
 
   await executor.executeStep2({ signupMethod: 'phone' });
 
+  assert.deepStrictEqual(sequence, [
+    'ensureSignupPhoneEntryReady',
+    'prepareSignupPhoneActivation',
+    'submitSignupPhone',
+  ]);
   assert.deepStrictEqual(sentPayloads, [
     {
       signupMethod: 'phone',
@@ -202,6 +220,68 @@ test('step 2 stops with an explicit error instead of silently skipping 3/4/5 on 
 
   assert.deepStrictEqual(completedPayloads, []);
   assert.ok(logs.some((item) => /3\/4\/5/.test(item.message)));
+});
+
+test('step 2 does not force auth-entry retry on logged-out chatgpt home when content reports entry_home', async () => {
+  const completedPayloads = [];
+  const logs = [];
+  const sentPayloads = [];
+  let authEntryCalls = 0;
+
+  const executor = step2Api.createStep2Executor({
+    addLog: async (message, level = 'info') => {
+      logs.push({ message, level });
+    },
+    chrome: {
+      tabs: {
+        update: async () => {},
+        get: async () => ({ url: 'https://chatgpt.com/' }),
+      },
+    },
+    completeStepFromBackground: async (step, payload) => {
+      completedPayloads.push({ step, payload });
+    },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureSignupAuthEntryPageReady: async () => {
+      authEntryCalls += 1;
+      return { tabId: 15 };
+    },
+    ensureSignupEntryPageReady: async () => ({ tabId: 15 }),
+    ensureSignupPostEmailPageReadyInTab: async () => ({
+      state: 'password_page',
+      url: 'https://auth.openai.com/create-account/password',
+    }),
+    getTabId: async () => 15,
+    isTabAlive: async () => true,
+    resolveSignupEmailForFlow: async () => 'user@example.com',
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'ENSURE_SIGNUP_ENTRY_READY') {
+        return { ready: true, state: 'entry_home', url: 'https://chatgpt.com/' };
+      }
+      sentPayloads.push(message.payload);
+      return { submitted: true };
+    },
+    SIGNUP_PAGE_INJECT_FILES: [],
+  });
+
+  await executor.executeStep2({ email: 'user@example.com' });
+
+  assert.equal(authEntryCalls, 0);
+  assert.deepStrictEqual(sentPayloads, [{ email: 'user@example.com' }]);
+  assert.deepStrictEqual(completedPayloads, [
+    {
+      step: 2,
+      payload: {
+        email: 'user@example.com',
+        accountIdentifierType: 'email',
+        accountIdentifier: 'user@example.com',
+        nextSignupState: 'password_page',
+        nextSignupUrl: 'https://auth.openai.com/create-account/password',
+        skippedPasswordStep: false,
+      },
+    },
+  ]);
+  assert.equal(logs.some((item) => /已登录 ChatGPT 首页/.test(item.message)), false);
 });
 
 test('signup flow helper recognizes email verification page as post-email landing page', async () => {

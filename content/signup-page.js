@@ -26,6 +26,7 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
       || message.type === 'RESEND_PHONE_VERIFICATION_CODE'
       || message.type === 'RETURN_TO_ADD_PHONE'
       || message.type === 'ENSURE_SIGNUP_ENTRY_READY'
+      || message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY'
       || message.type === 'ENSURE_SIGNUP_PASSWORD_PAGE_READY'
     ) {
       resetStopState();
@@ -97,6 +98,8 @@ async function handleCommand(message) {
       return await phoneAuthHelpers.returnToAddPhone();
     case 'ENSURE_SIGNUP_ENTRY_READY':
       return await ensureSignupEntryReady();
+    case 'ENSURE_SIGNUP_PHONE_ENTRY_READY':
+      return await ensureSignupPhoneEntryReady();
     case 'ENSURE_SIGNUP_PASSWORD_PAGE_READY':
       return await ensureSignupPasswordPageReady();
     case 'STEP8_FIND_AND_CLICK':
@@ -1041,6 +1044,23 @@ async function ensureSignupEntryReady(timeout = 15000) {
   throw new Error('当前页面没有可用的注册入口，也不在邮箱/密码页。URL: ' + location.href);
 }
 
+async function ensureSignupPhoneEntryReady(timeout = 25000) {
+  const snapshot = await waitForSignupPhoneEntryState({ timeout, step: 2 });
+  if (
+    (snapshot.state === 'phone_entry' && snapshot.phoneInput)
+    || snapshot.state === 'password_page'
+  ) {
+    return {
+      ready: true,
+      state: snapshot.state,
+      url: snapshot.url || location.href,
+    };
+  }
+
+  log(`手机号注册入口识别失败，诊断快照：${JSON.stringify(getSignupEntryDiagnostics())}`, 'warn');
+  throw new Error('当前页面没有可用的手机号注册入口，也不在密码页。URL: ' + location.href);
+}
+
 async function ensureSignupPasswordPageReady(timeout = 20000) {
   const start = Date.now();
 
@@ -1538,6 +1558,52 @@ function isLikelyLoggedInChatgptHomeUrl(rawUrl = location.href) {
     const path = String(parsed.pathname || '');
     if (/^\/(?:auth\/|create-account\/|email-verification|log-in|add-phone)(?:[/?#]|$)/i.test(path)) {
       return false;
+    }
+
+    const signupTrigger = typeof findSignupEntryTrigger === 'function'
+      ? findSignupEntryTrigger()
+      : null;
+    if (signupTrigger) {
+      return false;
+    }
+
+    if (typeof document !== 'undefined' && document && typeof document.querySelectorAll === 'function') {
+      const loginActionPattern = /登录|log\s*in|sign\s*in/i;
+      const candidates = document.querySelectorAll(
+        'a, button, [role="button"], [role="link"], input[type="button"], input[type="submit"]'
+      );
+
+      for (const el of candidates) {
+        const text = typeof getActionText === 'function'
+          ? getActionText(el)
+          : [
+            el?.textContent,
+            el?.value,
+            el?.getAttribute?.('aria-label'),
+            el?.getAttribute?.('title'),
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!text || !loginActionPattern.test(text)) {
+          continue;
+        }
+
+        const visible = typeof isVisibleElement === 'function'
+          ? isVisibleElement(el)
+          : true;
+        if (!visible) {
+          continue;
+        }
+
+        const enabled = typeof isActionEnabled === 'function'
+          ? isActionEnabled(el)
+          : (Boolean(el) && !el.disabled && el?.getAttribute?.('aria-disabled') !== 'true');
+        if (enabled) {
+          return false;
+        }
+      }
     }
 
     return true;

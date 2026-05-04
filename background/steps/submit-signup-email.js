@@ -29,6 +29,11 @@
       return /未找到可用的邮箱输入入口|当前页面没有可用的注册入口，也不在邮箱\/密码页/i.test(message);
     }
 
+    function isSignupPhoneEntryUnavailableErrorMessage(errorLike) {
+      const message = getErrorMessage(errorLike);
+      return /未找到可用的手机号输入入口|当前页面没有可用的手机号注册入口，也不在密码页/i.test(message);
+    }
+
     function isRetryableStep2TransportErrorMessage(errorLike) {
       const message = getErrorMessage(errorLike);
       return /Content script on signup-page did not respond in \d+s|Receiving end does not exist|message channel closed|A listener indicated an asynchronous response|port closed before a response was received|did not respond in \d+s/i.test(message);
@@ -58,17 +63,58 @@
       }
     }
 
-    async function shouldForceAuthEntryRetry(tabId) {
-      if (!Number.isInteger(tabId) || typeof chrome?.tabs?.get !== 'function') {
-        return false;
+    function isReadySignupEntryState(state = '') {
+      const normalized = String(state || '').trim().toLowerCase();
+      return normalized === 'entry_home'
+        || normalized === 'email_entry'
+        || normalized === 'phone_entry'
+        || normalized === 'password_page';
+    }
+
+    async function getSignupEntryReadyState(tabId) {
+      if (!Number.isInteger(tabId) || typeof sendToContentScriptResilient !== 'function') {
+        return '';
       }
 
       try {
-        const tab = await chrome.tabs.get(tabId);
-        return isLikelyLoggedInChatgptHomeUrl(tab?.url);
+        const result = await sendToContentScriptResilient('signup-page', {
+          type: 'ENSURE_SIGNUP_ENTRY_READY',
+          step: 2,
+          source: 'background',
+          payload: {},
+        }, {
+          timeoutMs: 12000,
+          retryDelayMs: 500,
+          logMessage: '步骤 2：正在检查官网注册入口状态...',
+        });
+        if (result?.error) {
+          return '';
+        }
+        return String(result?.state || '').trim().toLowerCase();
       } catch {
+        return '';
+      }
+    }
+
+    async function isLikelyLoggedInChatgptHomeTab(tabId) {
+      if (typeof chrome?.tabs?.get !== 'function') {
         return false;
       }
+
+      const readyState = await getSignupEntryReadyState(tabId);
+      if (isReadySignupEntryState(readyState)) {
+        return false;
+      }
+
+      const currentUrl = await getTabUrl(tabId);
+      return isLikelyLoggedInChatgptHomeUrl(currentUrl);
+    }
+
+    async function shouldForceAuthEntryRetry(tabId) {
+      if (!Number.isInteger(tabId)) {
+        return false;
+      }
+      return isLikelyLoggedInChatgptHomeTab(tabId);
     }
 
     async function getTabUrl(tabId) {
@@ -85,8 +131,7 @@
     }
 
     async function failStep2OnLoggedInSession(tabId, reasonMessage = '') {
-      const currentUrl = await getTabUrl(tabId);
-      if (!isLikelyLoggedInChatgptHomeUrl(currentUrl)) {
+      if (!(await isLikelyLoggedInChatgptHomeTab(tabId))) {
         return false;
       }
 
@@ -118,6 +163,28 @@
       } catch (error) {
         return { error: getErrorMessage(error) };
       }
+    }
+
+    async function ensureSignupPhoneEntryReady(tabId) {
+      if (!Number.isInteger(tabId)) {
+        throw new Error('步骤 2：未找到可用的注册页标签，无法切换到手机号注册入口。');
+      }
+
+      const result = await sendToContentScriptResilient('signup-page', {
+        type: 'ENSURE_SIGNUP_PHONE_ENTRY_READY',
+        step: 2,
+        source: 'background',
+        payload: {},
+      }, {
+        timeoutMs: 30000,
+        retryDelayMs: 700,
+        logMessage: '步骤 2：正在打开官网注册入口并切换到手机号注册...',
+      });
+
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      return result || {};
     }
 
     async function submitSignupEmail(resolvedEmail, options = {}) {
@@ -174,6 +241,26 @@
         }
       }
 
+      try {
+        await ensureSignupPhoneEntryReady(signupTabId);
+      } catch (entryError) {
+        const entryErrorMessage = getErrorMessage(entryError);
+        if (await failStep2OnLoggedInSession(signupTabId, entryErrorMessage)) {
+          return;
+        }
+        if (
+          isSignupPhoneEntryUnavailableErrorMessage(entryErrorMessage)
+          || isSignupEntryUnavailableErrorMessage(entryErrorMessage)
+          || isRetryableStep2TransportErrorMessage(entryErrorMessage)
+        ) {
+          await addLog('步骤 2：手机号注册入口尚未就绪，正在重新打开官网入口后重试一次...', 'warn');
+          signupTabId = (await ensureSignupEntryPageReady(2)).tabId;
+          await ensureSignupPhoneEntryReady(signupTabId);
+        } else {
+          throw entryError;
+        }
+      }
+
       const activation = await phoneVerificationHelpers.prepareSignupPhoneActivation(state);
       let step2Result = await submitSignupPhone(activation.phoneNumber, activation, {
         timeoutMs: 45000,
@@ -183,13 +270,18 @@
 
       if (step2Result?.error) {
         const errorMessage = getErrorMessage(step2Result.error);
-        if (isSignupEntryUnavailableErrorMessage(errorMessage) || isRetryableStep2TransportErrorMessage(errorMessage)) {
-          await addLog('步骤 2：手机号注册入口不可用或通信超时，正在切换认证入口页后重试一次...', 'warn');
-          signupTabId = (await ensureSignupAuthEntryPageReady(2)).tabId;
+        if (
+          isSignupPhoneEntryUnavailableErrorMessage(errorMessage)
+          || isSignupEntryUnavailableErrorMessage(errorMessage)
+          || isRetryableStep2TransportErrorMessage(errorMessage)
+        ) {
+          await addLog('步骤 2：手机号注册入口不可用或通信超时，正在重新准备手机号注册入口后重试一次...', 'warn');
+          signupTabId = (await ensureSignupEntryPageReady(2)).tabId;
+          await ensureSignupPhoneEntryReady(signupTabId);
           step2Result = await submitSignupPhone(activation.phoneNumber, activation, {
             timeoutMs: 45000,
             retryDelayMs: 700,
-            logMessage: '步骤 2：认证入口页已打开，正在重新提交手机号...',
+            logMessage: '步骤 2：手机号注册入口已就绪，正在重新提交手机号...',
           });
         }
       }

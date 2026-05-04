@@ -99,6 +99,10 @@
       return step > 0 ? step : null;
     }
 
+    function getActivePhoneVerificationVisibleStep(fallback = 9) {
+      return normalizeLogStep(activePhoneVerificationLogStep) || fallback;
+    }
+
     function normalizePhoneVerificationLogMessage(message) {
       return String(message || '')
         .replace(/^Step\s+9\s+diagnostics\s*:\s*/i, 'diagnostics: ')
@@ -2122,7 +2126,7 @@
         ? config.countryCandidates
         : [];
       if (!allCountryCandidates.length) {
-        throw new Error('Step 9: 5sim countries are empty. Please select at least one country in 接码设置。');
+        throw new Error(`Step ${getActivePhoneVerificationVisibleStep()}: 5sim countries are empty. Please select at least one country in 接码设置。`);
       }
       const blockedCountryIds = new Set(
         (Array.isArray(options?.blockedCountryIds) ? options.blockedCountryIds : [])
@@ -2610,7 +2614,7 @@
         ? config.countryCandidates
         : resolveNexSmsCountryCandidates(state);
       if (!allCountryCandidates.length) {
-        throw new Error('Step 9: NexSMS countries are empty. Please select at least one country in 接码设置。');
+        throw new Error(`Step ${getActivePhoneVerificationVisibleStep()}: NexSMS countries are empty. Please select at least one country in 接码设置。`);
       }
       const blockedCountryIds = new Set(
         (Array.isArray(options?.blockedCountryIds) ? options.blockedCountryIds : [])
@@ -2872,7 +2876,7 @@
         ? config.countryCandidates
         : resolveCountryCandidates(state);
       if (!allCountryCandidates.length) {
-        throw new Error('Step 9: HeroSMS countries are empty. Please select at least one country in 接码设置。');
+        throw new Error(`Step ${getActivePhoneVerificationVisibleStep()}: HeroSMS countries are empty. Please select at least one country in 接码设置。`);
       }
       const blockedCountryIds = new Set(
         (Array.isArray(options?.blockedCountryIds) ? options.blockedCountryIds : [])
@@ -2912,10 +2916,6 @@
 
       for (let round = 1; round <= maxAcquireRounds; round += 1) {
         if (maxAcquireRounds > 1) {
-          await addLog(
-            `步骤 9：HeroSMS 正在获取手机号（第 ${round}/${maxAcquireRounds} 轮）...`,
-            'info'
-          );
           await addLog(
             `步骤 9：HeroSMS 正在获取手机号（第 ${round}/${maxAcquireRounds} 轮）...`,
             'info'
@@ -3868,7 +3868,7 @@
         (provider === PHONE_SMS_PROVIDER_5SIM || provider === PHONE_SMS_PROVIDER_NEXSMS)
         && !countryCandidates.length
       ) {
-        throw new Error(`Step 9: ${provider === PHONE_SMS_PROVIDER_5SIM ? '5sim' : 'NexSMS'} countries are empty. Please select at least one country in 接码设置。`);
+        throw new Error(`Step ${getActivePhoneVerificationVisibleStep()}: ${provider === PHONE_SMS_PROVIDER_5SIM ? '5sim' : 'NexSMS'} countries are empty. Please select at least one country in 接码设置。`);
       }
       const normalizeCountryKey = (value) => (
         provider === PHONE_SMS_PROVIDER_5SIM
@@ -4064,9 +4064,9 @@
         const skippedSuffix = skippedFallbackProviders.length
           ? ` | skipped fallback providers: ${skippedFallbackProviders.join('; ')}`
           : '';
-        throw new Error(`Step 9: all provider candidates failed to acquire number. ${providerErrors.join(' | ')}${skippedSuffix}`);
+        throw new Error(`Step ${getActivePhoneVerificationVisibleStep()}: all provider candidates failed to acquire number. ${providerErrors.join(' | ')}${skippedSuffix}`);
       }
-      throw lastProviderError || new Error('Step 9: failed to acquire phone activation.');
+      throw lastProviderError || new Error(`Step ${getActivePhoneVerificationVisibleStep()}: failed to acquire phone activation.`);
     }
 
     async function prepareSignupPhoneActivation(state = {}, options = {}) {
