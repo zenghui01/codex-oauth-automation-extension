@@ -9494,6 +9494,8 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
   DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS,
   DEFAULT_PHONE_CODE_POLL_ROUNDS,
   ensureStep8SignupPageReady,
+  generateRandomBirthday,
+  generateRandomName,
   getOAuthFlowRemainingMs,
   getOAuthFlowStepTimeoutMs,
   getState,

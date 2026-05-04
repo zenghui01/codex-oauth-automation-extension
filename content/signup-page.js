@@ -84,7 +84,7 @@ async function handleCommand(message) {
     case 'SUBMIT_PHONE_NUMBER':
       return await phoneAuthHelpers.submitPhoneNumber(message.payload);
     case 'SUBMIT_PHONE_VERIFICATION_CODE':
-      return await phoneAuthHelpers.submitPhoneVerificationCode(message.payload);
+      return await submitPhoneVerificationCodeWithProfileFallback(message.payload);
     case 'RESEND_PHONE_VERIFICATION_CODE':
       return await phoneAuthHelpers.resendPhoneVerificationCode();
     case 'RETURN_TO_ADD_PHONE':
@@ -1337,6 +1337,69 @@ const phoneAuthHelpers = self.MultiPagePhoneAuth?.createPhoneAuthHelpers?.({
     throw new Error('Phone auth helpers are unavailable.');
   },
 };
+
+async function waitForPhoneVerificationProfileCompletion(timeout = 30000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+
+    if (isStep8Ready()) {
+      return {
+        success: true,
+        consentReady: true,
+        url: location.href,
+      };
+    }
+
+    if (isAddPhonePageReady()) {
+      return {
+        returnedToAddPhone: true,
+        url: location.href,
+      };
+    }
+
+    await sleep(150);
+  }
+
+  if (isStep8Ready()) {
+    return {
+      success: true,
+      consentReady: true,
+      url: location.href,
+    };
+  }
+
+  return {
+    success: true,
+    assumed: true,
+    url: location.href,
+  };
+}
+
+async function submitPhoneVerificationCodeWithProfileFallback(payload = {}) {
+  const result = await phoneAuthHelpers.submitPhoneVerificationCode(payload);
+  if (!(isStep5Ready() || isSignupProfilePageUrl(result?.url || location.href))) {
+    return result;
+  }
+
+  const signupProfile = payload?.signupProfile || {};
+  if (!signupProfile.firstName || !signupProfile.lastName) {
+    throw new Error('手机号验证后进入资料页，但未提供步骤 5 所需的姓名数据。');
+  }
+
+  await step5_fillNameBirthday(signupProfile);
+  const nextState = await waitForPhoneVerificationProfileCompletion();
+  const mergedResult = {
+    ...result,
+    ...nextState,
+    profileCompleted: true,
+  };
+  if (nextState.consentReady || nextState.returnedToAddPhone) {
+    delete mergedResult.assumed;
+  }
+  return mergedResult;
+}
 
 function normalizeInlineText(text) {
   return (text || '').replace(/\s+/g, ' ').trim();
