@@ -102,6 +102,8 @@
       setContributionMode,
       setEmailState,
       setEmailStateSilently,
+      setSignupPhoneState,
+      setSignupPhoneStateSilently,
       setIcloudAliasPreservedState,
       setIcloudAliasUsedState,
       setLuckmailPurchaseDisabledState,
@@ -160,6 +162,20 @@
         return String(getStepDefinitionForState(step, state)?.key || '').trim();
       }
       return '';
+    }
+
+    function resolveSignupPhonePayload(payload = {}) {
+      const directPhone = String(
+        payload?.signupPhoneNumber
+        || payload?.phoneNumber
+        || ''
+      ).trim();
+      if (directPhone) {
+        return directPhone;
+      }
+      return String(payload?.accountIdentifierType || '').trim().toLowerCase() === 'phone'
+        ? String(payload?.accountIdentifier || '').trim()
+        : '';
     }
 
     function isStepProtectedFromAutoSkip(status) {
@@ -337,6 +353,12 @@
           if (payload.email) {
             await setEmailState(payload.email);
           }
+          {
+            const signupPhoneNumber = resolveSignupPhonePayload(payload);
+            if (signupPhoneNumber) {
+              await setSignupPhoneStateSilently(signupPhoneNumber);
+            }
+          }
           if (payload.skipRegistrationFlow) {
             const latestState = await getState();
             for (const skipStep of [3, 4, 5]) {
@@ -361,6 +383,12 @@
           break;
         case 3:
           if (payload.email) await setEmailState(payload.email);
+          {
+            const signupPhoneNumber = resolveSignupPhonePayload(payload);
+            if (signupPhoneNumber) {
+              await setSignupPhoneStateSilently(signupPhoneNumber);
+            }
+          }
           if (payload.signupVerificationRequestedAt) {
             await setState({ signupVerificationRequestedAt: payload.signupVerificationRequestedAt });
           }
@@ -1166,6 +1194,26 @@
           await setEmailState(message.payload.email);
           await resumeAutoRun();
           return { ok: true, email: message.payload.email };
+        }
+
+        case 'SET_SIGNUP_PHONE_STATE': {
+          const state = await getState();
+          if (isAutoRunLockedState(state)) {
+            throw new Error('自动流程运行中，当前不能手动修改注册手机号。');
+          }
+          const phoneNumber = resolveSignupPhonePayload(message.payload) || null;
+          await setSignupPhoneStateSilently(phoneNumber);
+          return { ok: true, phoneNumber };
+        }
+
+        case 'SAVE_SIGNUP_PHONE': {
+          const state = await getState();
+          if (isAutoRunLockedState(state)) {
+            throw new Error('自动流程运行中，当前不能手动修改注册手机号。');
+          }
+          const phoneNumber = resolveSignupPhonePayload(message.payload) || null;
+          await setSignupPhoneState(phoneNumber);
+          return { ok: true, phoneNumber };
         }
 
         case 'FETCH_GENERATED_EMAIL': {

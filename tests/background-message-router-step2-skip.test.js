@@ -11,6 +11,8 @@ function createRouter(overrides = {}) {
     logs: [],
     stepStatuses: [],
     emailStates: [],
+    signupPhoneStates: [],
+    signupPhoneSilentStates: [],
     finalizePayloads: [],
     phoneFinalizations: [],
     notifyCompletions: [],
@@ -109,6 +111,12 @@ function createRouter(overrides = {}) {
       events.emailStates.push(email);
     },
     setEmailStateSilently: async () => {},
+    setSignupPhoneState: async (phoneNumber) => {
+      events.signupPhoneStates.push(phoneNumber);
+    },
+    setSignupPhoneStateSilently: async (phoneNumber) => {
+      events.signupPhoneSilentStates.push(phoneNumber);
+    },
     setIcloudAliasPreservedState: async () => {},
     setIcloudAliasUsedState: async () => {},
     setLuckmailPurchaseDisabledState: async () => {},
@@ -144,6 +152,22 @@ test('message router skips step 3 when step 2 lands on verification page', async
   assert.deepStrictEqual(events.emailStates, ['user@example.com']);
   assert.deepStrictEqual(events.stepStatuses, [{ step: 3, status: 'skipped' }]);
   assert.equal(events.logs[0]?.message, '步骤 2：提交邮箱后页面直接进入验证码页，已自动跳过步骤 3。');
+});
+
+test('message router syncs signup phone runtime state from step 2 payload immediately', async () => {
+  const { router, events } = createRouter({
+    state: { stepStatuses: { 3: 'pending' } },
+  });
+
+  await router.handleStepData(2, {
+    accountIdentifierType: 'phone',
+    accountIdentifier: '66959916439',
+    signupPhoneNumber: '66959916439',
+  });
+
+  assert.deepStrictEqual(events.emailStates, []);
+  assert.deepStrictEqual(events.signupPhoneSilentStates, ['66959916439']);
+  assert.deepStrictEqual(events.signupPhoneStates, []);
 });
 
 test('message router does not overwrite a completed step 3 when step 2 is replayed', async () => {
@@ -264,7 +288,23 @@ test('message router finalizes step 3 before marking it completed', async () => 
       },
     },
   ]);
-  assert.deepStrictEqual(response, { ok: true });
+assert.deepStrictEqual(response, { ok: true });
+});
+
+test('message router saves runtime signup phone from sidepanel message', async () => {
+  const { router, events } = createRouter();
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SIGNUP_PHONE',
+    source: 'sidepanel',
+    payload: {
+      phoneNumber: '66959916439',
+    },
+  }, {});
+
+  assert.deepStrictEqual(events.signupPhoneStates, ['66959916439']);
+  assert.deepStrictEqual(events.signupPhoneSilentStates, []);
+  assert.deepStrictEqual(response, { ok: true, phoneNumber: '66959916439' });
 });
 
 test('message router finalizes pending phone activation on platform verify success', async () => {

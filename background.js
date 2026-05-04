@@ -2550,6 +2550,32 @@ async function setEmailState(email) {
   }
 }
 
+async function setSignupPhoneStateSilently(phoneNumber) {
+  const normalizedPhoneNumber = String(phoneNumber || '').trim();
+  const currentState = await getState();
+  const updates = {
+    signupPhoneNumber: normalizedPhoneNumber,
+  };
+
+  if (normalizedPhoneNumber) {
+    updates.accountIdentifierType = 'phone';
+    updates.accountIdentifier = normalizedPhoneNumber;
+  } else if (String(currentState?.accountIdentifierType || '').trim().toLowerCase() === 'phone') {
+    updates.accountIdentifierType = null;
+    updates.accountIdentifier = '';
+  }
+
+  await setState(updates);
+  broadcastDataUpdate(updates);
+}
+
+async function setSignupPhoneState(phoneNumber) {
+  await setSignupPhoneStateSilently(phoneNumber);
+  if (String(phoneNumber || '').trim()) {
+    await appendManualAccountRunRecordIfNeeded('step2_stopped', null, '步骤 2 已使用手机号，流程尚未完成。');
+  }
+}
+
 async function setPasswordState(password) {
   await setState({ password });
   broadcastDataUpdate({ password });
@@ -10296,6 +10322,8 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   setContributionMode,
   setEmailState,
   setEmailStateSilently,
+  setSignupPhoneState,
+  setSignupPhoneStateSilently,
   setIcloudAliasPreservedState,
   setIcloudAliasUsedState,
   setLuckmailPurchaseDisabledState,

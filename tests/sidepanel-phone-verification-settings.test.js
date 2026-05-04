@@ -60,6 +60,8 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /id="row-phone-verification-fold"/);
   assert.match(html, /id="input-phone-verification-enabled"/);
   assert.match(html, /id="row-signup-method"/);
+  assert.match(html, /id="row-signup-phone"/);
+  assert.match(html, /id="input-signup-phone"/);
   assert.match(html, /data-signup-method="email"/);
   assert.match(html, /data-signup-method="phone"/);
   assert.match(html, /id="row-phone-sms-provider"/);
@@ -118,6 +120,14 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /id="row-nex-sms-service-code"/);
   assert.match(html, /id="input-nex-sms-service-code"/);
   assert.doesNotMatch(html, /id="input-account-run-history-text-enabled"/);
+});
+
+test('sidepanel source wires runtime signup phone field to background sync messages', () => {
+  assert.match(sidepanelSource, /function getRuntimeSignupPhoneValue\(state = latestState\)/);
+  assert.match(sidepanelSource, /function syncSignupPhoneInputFromState\(state = latestState\)/);
+  assert.match(sidepanelSource, /type:\s*'SET_SIGNUP_PHONE_STATE'/);
+  assert.match(sidepanelSource, /type:\s*'SAVE_SIGNUP_PHONE'/);
+  assert.match(sidepanelSource, /message\.payload\.signupPhoneNumber !== undefined/);
 });
 
 test('hero sms country helpers keep empty summary state and expose removable order handling', () => {

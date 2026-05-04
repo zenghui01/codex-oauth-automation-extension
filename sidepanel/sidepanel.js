@@ -50,6 +50,7 @@ const displayLocalhostUrl = document.getElementById('display-localhost-url');
 const displayStatus = document.getElementById('display-status');
 const statusBar = document.getElementById('status-bar');
 const inputEmail = document.getElementById('input-email');
+const inputSignupPhone = document.getElementById('input-signup-phone');
 const inputPassword = document.getElementById('input-password');
 const btnToggleVpsUrl = document.getElementById('btn-toggle-vps-url');
 const btnToggleVpsPassword = document.getElementById('btn-toggle-vps-password');
@@ -333,6 +334,7 @@ const btnTogglePhoneVerificationSection = document.getElementById('btn-toggle-ph
 const rowPhoneVerificationFold = document.getElementById('row-phone-verification-fold');
 const inputPhoneVerificationEnabled = document.getElementById('input-phone-verification-enabled');
 const rowSignupMethod = document.getElementById('row-signup-method');
+const rowSignupPhone = document.getElementById('row-signup-phone');
 const signupMethodButtons = Array.from(document.querySelectorAll('[data-signup-method]'));
 const selectPhoneSmsProvider = document.getElementById('select-phone-sms-provider');
 const rowHeroSmsPlatform = document.getElementById('row-hero-sms-platform');
@@ -6691,6 +6693,9 @@ function isSignupMethodSwitchLocked() {
 
 function updateSignupMethodUI(options = {}) {
   if (!signupMethodButtons.length) {
+    if (typeof syncSignupPhoneInputFromState === 'function') {
+      syncSignupPhoneInputFromState(latestState);
+    }
     return;
   }
 
@@ -6739,6 +6744,9 @@ function updateSignupMethodUI(options = {}) {
       signupMethod: selectedMethod,
     }
   );
+  if (typeof syncSignupPhoneInputFromState === 'function') {
+    syncSignupPhoneInputFromState(latestState);
+  }
 }
 
 function updatePhoneVerificationSettingsUI() {
@@ -6922,6 +6930,48 @@ async function setRuntimeEmailState(email) {
   return normalizedEmail;
 }
 
+function getRuntimeSignupPhoneValue(state = latestState) {
+  const identifierType = String(state?.accountIdentifierType || '').trim().toLowerCase();
+  return String(
+    state?.signupPhoneNumber
+    || (identifierType === 'phone' ? state?.accountIdentifier : '')
+    || ''
+  ).trim();
+}
+
+function syncSignupPhoneInputFromState(state = latestState) {
+  const signupPhone = getRuntimeSignupPhoneValue(state);
+  if (typeof inputSignupPhone !== 'undefined' && inputSignupPhone) {
+    inputSignupPhone.value = signupPhone;
+  }
+  if (typeof rowSignupPhone !== 'undefined' && rowSignupPhone) {
+    const rawSignupMethod = state?.signupMethod || (
+      typeof getSelectedSignupMethod === 'function'
+        ? getSelectedSignupMethod()
+        : 'email'
+    );
+    const selectedMethod = typeof normalizeSignupMethod === 'function'
+      ? normalizeSignupMethod(rawSignupMethod)
+      : (String(rawSignupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email');
+    rowSignupPhone.style.display = (selectedMethod === 'phone' || Boolean(signupPhone)) ? '' : 'none';
+  }
+}
+
+async function setRuntimeSignupPhoneState(phoneNumber) {
+  const normalizedPhone = String(phoneNumber || '').trim() || null;
+  const response = await chrome.runtime.sendMessage({
+    type: 'SET_SIGNUP_PHONE_STATE',
+    source: 'sidepanel',
+    payload: { phoneNumber: normalizedPhone },
+  });
+
+  if (response?.error) {
+    throw new Error(response.error);
+  }
+
+  return normalizedPhone;
+}
+
 async function openPlusManualConfirmationDialog(options = {}) {
   const method = String(options.method || '').trim().toLowerCase();
   const gopayValue = typeof PLUS_PAYMENT_METHOD_GOPAY !== 'undefined' ? PLUS_PAYMENT_METHOD_GOPAY : 'gopay';
@@ -7032,6 +7082,40 @@ async function clearRegistrationEmail(options = {}) {
   }
 }
 
+async function clearRegistrationSignupPhone(options = {}) {
+  const { silent = false } = options;
+  if (!getRuntimeSignupPhoneValue(latestState)) {
+    if (typeof inputSignupPhone !== 'undefined' && inputSignupPhone) {
+      inputSignupPhone.value = '';
+    }
+    syncSignupPhoneInputFromState(latestState);
+    return;
+  }
+
+  if (typeof inputSignupPhone !== 'undefined' && inputSignupPhone) {
+    inputSignupPhone.value = '';
+  }
+  syncLatestState({
+    signupPhoneNumber: '',
+    ...(String(latestState?.accountIdentifierType || '').trim().toLowerCase() === 'phone'
+      ? {
+        accountIdentifierType: null,
+        accountIdentifier: '',
+      }
+      : {}),
+  });
+  syncSignupPhoneInputFromState(latestState);
+
+  try {
+    await setRuntimeSignupPhoneState(null);
+  } catch (err) {
+    if (!silent) {
+      showToast(`清空注册手机号失败：${err.message}`, 'error');
+    }
+    throw err;
+  }
+}
+
 function markSettingsDirty(isDirty = true) {
   settingsDirty = isDirty;
   if (isDirty) {
@@ -7129,6 +7213,9 @@ function applyAutoRunStatus(payload = currentAutoRun) {
     || isCustomMailProvider()
     || usesCustomEmailPoolGenerator();
   inputEmail.disabled = locked;
+  if (typeof inputSignupPhone !== 'undefined' && inputSignupPhone) {
+    inputSignupPhone.disabled = locked;
+  }
   inputAutoSkipFailures.disabled = scheduled;
 
   const lockedRunCount = typeof getLockedRunCountFromEmailPool === 'function'
@@ -7339,6 +7426,9 @@ function applySettingsState(state) {
   renderStepStatuses(latestState);
 
   inputEmail.value = state?.email || '';
+  if (typeof syncSignupPhoneInputFromState === 'function') {
+    syncSignupPhoneInputFromState(state);
+  }
   syncPasswordField(state || {});
   if (typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled) {
     inputPlusModeEnabled.checked = Boolean(state?.plusModeEnabled);
@@ -10410,6 +10500,9 @@ btnReset.addEventListener('click', async () => {
     currentLuckmailPurchase: null,
     currentLuckmailMailCursor: null,
     email: null,
+    signupPhoneNumber: '',
+    accountIdentifierType: null,
+    accountIdentifier: '',
   });
   syncAutoRunState({
     autoRunning: false,
@@ -10427,6 +10520,12 @@ btnReset.addEventListener('click', async () => {
   displayLocalhostUrl.textContent = '等待中...';
   displayLocalhostUrl.classList.remove('has-value');
   inputEmail.value = '';
+  if (typeof inputSignupPhone !== 'undefined' && inputSignupPhone) {
+    inputSignupPhone.value = '';
+  }
+  if (typeof syncSignupPhoneInputFromState === 'function') {
+    syncSignupPhoneInputFromState(latestState);
+  }
   displayStatus.textContent = '就绪';
   statusBar.className = 'status-bar';
   logArea.innerHTML = '';
@@ -10475,6 +10574,29 @@ inputEmail.addEventListener('change', async () => {
   }
 });
 inputEmail.addEventListener('input', updateButtonStates);
+if (typeof inputSignupPhone !== 'undefined' && inputSignupPhone) {
+  inputSignupPhone.addEventListener('change', async () => {
+    const phoneNumber = inputSignupPhone.value.trim();
+    inputSignupPhone.value = phoneNumber;
+    try {
+      if (phoneNumber) {
+        const response = await chrome.runtime.sendMessage({
+          type: 'SAVE_SIGNUP_PHONE',
+          source: 'sidepanel',
+          payload: { phoneNumber },
+        });
+        if (response?.error) {
+          throw new Error(response.error);
+        }
+      } else {
+        await clearRegistrationSignupPhone();
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+  inputSignupPhone.addEventListener('input', updateButtonStates);
+}
 inputVpsUrl.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -12089,6 +12211,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       displayLocalhostUrl.textContent = '等待中...';
       displayLocalhostUrl.classList.remove('has-value');
       inputEmail.value = '';
+      if (typeof inputSignupPhone !== 'undefined' && inputSignupPhone) {
+        inputSignupPhone.value = '';
+      }
+      syncLatestState({
+        signupPhoneNumber: '',
+        accountIdentifierType: null,
+        accountIdentifier: '',
+      });
+      if (typeof syncSignupPhoneInputFromState === 'function') {
+        syncSignupPhoneInputFromState(latestState);
+      }
       displayStatus.textContent = '就绪';
       statusBar.className = 'status-bar';
       logArea.innerHTML = '';
@@ -12125,6 +12258,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.email !== undefined) {
         inputEmail.value = message.payload.email || '';
         queueCustomEmailPoolRefresh();
+      }
+      if (
+        message.payload.signupPhoneNumber !== undefined
+        || message.payload.accountIdentifierType !== undefined
+        || message.payload.accountIdentifier !== undefined
+      ) {
+        if (typeof syncSignupPhoneInputFromState === 'function') {
+          syncSignupPhoneInputFromState(latestState);
+        }
       }
       if (
         message.payload.password !== undefined
