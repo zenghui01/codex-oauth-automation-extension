@@ -1047,6 +1047,7 @@ test('phone verification helper uses HeroSMS getStatusV2 after acquiring a numbe
     stateUpdates.some((entry) => entry?.currentPhoneActivation === null && entry?.currentPhoneVerificationCode === ''),
     true
   );
+  assert.equal(currentState.phoneNumber, '447911123456');
   const actions = requests.map((url) => url.searchParams.get('action'));
   assert.deepStrictEqual(actions, [
     'getPrices',

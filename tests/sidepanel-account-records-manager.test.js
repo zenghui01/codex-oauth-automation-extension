@@ -407,3 +407,77 @@ test('account records manager displays phone-only records with account identifie
   assert.match(list.innerHTML, /\+6612345/);
   assert.doesNotMatch(list.innerHTML, /\(空邮箱\)/);
 });
+
+test('account records manager displays combined email and phone identities in one record', () => {
+  const source = fs.readFileSync('sidepanel/account-records-manager.js', 'utf8');
+  const windowObject = {};
+  const api = new Function('window', `${source}; return window.SidepanelAccountRecordsManager;`)(windowObject);
+
+  const list = createNode();
+  const manager = api.createAccountRecordsManager({
+    state: {
+      getLatestState: () => ({
+        accountRunHistory: [
+          {
+            recordId: 'phone:+447700900123',
+            accountIdentifierType: 'phone',
+            accountIdentifier: '+447700900123',
+            phoneNumber: '+447700900123',
+            email: 'bound@example.com',
+            finalStatus: 'success',
+            finishedAt: '2026-04-17T04:31:00.000Z',
+            retryCount: 0,
+            failureLabel: '流程完成',
+          },
+          {
+            recordId: 'mail@example.com',
+            accountIdentifierType: 'email',
+            accountIdentifier: 'mail@example.com',
+            phoneNumber: '447799342687',
+            email: 'mail@example.com',
+            finalStatus: 'failed',
+            finishedAt: '2026-04-17T04:30:00.000Z',
+            retryCount: 0,
+            failureLabel: '步骤 9 失败',
+          },
+        ],
+      }),
+      syncLatestState() {},
+    },
+    dom: {
+      accountRecordsList: list,
+      accountRecordsMeta: createNode(),
+      accountRecordsOverlay: createNode(),
+      accountRecordsPageLabel: createNode(),
+      accountRecordsStats: createNode(),
+      btnAccountRecordsNext: createNode(),
+      btnAccountRecordsPrev: createNode(),
+      btnClearAccountRecords: createNode(),
+      btnCloseAccountRecords: createNode(),
+      btnDeleteSelectedAccountRecords: createNode(),
+      btnOpenAccountRecords: createNode(),
+      btnToggleAccountRecordsSelection: createNode(),
+    },
+    helpers: {
+      escapeHtml: (value) => String(value || ''),
+    },
+    runtime: {
+      sendMessage: async () => ({}),
+    },
+    constants: {
+      displayTimeZone: 'Asia/Shanghai',
+      pageSize: 10,
+    },
+  });
+
+  manager.render();
+
+  assert.match(list.innerHTML, /\+447700900123/);
+  assert.match(list.innerHTML, /邮箱 bound@example\.com/);
+  assert.match(list.innerHTML, /mail@example\.com/);
+  assert.match(list.innerHTML, /绑定手机号 447799342687/);
+  assert.match(
+    list.innerHTML,
+    /title="\+447700900123 \/ 邮箱 bound@example\.com"/
+  );
+});

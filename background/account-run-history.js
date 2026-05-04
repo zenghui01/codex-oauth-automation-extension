@@ -104,26 +104,64 @@
         : normalizedValue.toLowerCase();
     }
 
+    function getActivationPhoneNumber(activation = null) {
+      if (!activation || typeof activation !== 'object' || Array.isArray(activation)) {
+        return '';
+      }
+      return String(
+        activation.phoneNumber
+        ?? activation.number
+        ?? activation.phone
+        ?? ''
+      ).trim();
+    }
+
+    function resolveStatePhoneNumber(state = {}) {
+      const identifierType = String(state?.accountIdentifierType || '').trim().toLowerCase();
+      const accountIdentifierPhone = identifierType === 'phone'
+        ? String(state?.accountIdentifier || '').trim()
+        : '';
+
+      return String(
+        state?.phoneNumber
+        || state?.signupPhoneNumber
+        || accountIdentifierPhone
+        || getActivationPhoneNumber(state?.signupPhoneCompletedActivation)
+        || getActivationPhoneNumber(state?.signupPhoneActivation)
+        || getActivationPhoneNumber(state?.currentPhoneActivation)
+        || ''
+      ).trim();
+    }
+
+    function normalizePhoneRecordKey(value = '') {
+      const rawValue = String(value || '').trim();
+      const digits = rawValue.replace(/\D+/g, '');
+      return digits || rawValue.toLowerCase();
+    }
+
     function resolveRecordIdentity(record = {}) {
-      const email = String(record.email || '').trim().toLowerCase();
-      const phoneNumber = String(record.phoneNumber ?? record.phone ?? record.number ?? '').trim();
+      const rawEmail = String(record.email || '').trim().toLowerCase();
+      const rawPhoneNumber = String(record.phoneNumber ?? record.phone ?? record.number ?? '').trim();
       const rawIdentifierType = String(record.accountIdentifierType || '').trim().toLowerCase();
       const inferredIdentifierType = rawIdentifierType === 'phone'
-        || (!email && phoneNumber)
         ? 'phone'
-        : 'email';
+        : (rawIdentifierType === 'email'
+          ? 'email'
+          : ((!rawEmail && rawPhoneNumber) ? 'phone' : 'email'));
       const rawAccountIdentifier = String(
         record.accountIdentifier
-        || (inferredIdentifierType === 'phone' ? phoneNumber : email)
+        || (inferredIdentifierType === 'phone' ? rawPhoneNumber : rawEmail)
         || ''
       ).trim();
       const accountIdentifierType = rawAccountIdentifier
         ? normalizeAccountIdentifierType(inferredIdentifierType)
-        : (email ? 'email' : (phoneNumber ? 'phone' : ''));
+        : (rawEmail ? 'email' : (rawPhoneNumber ? 'phone' : ''));
       const accountIdentifier = normalizeAccountIdentifierValue(
-        rawAccountIdentifier || (accountIdentifierType === 'phone' ? phoneNumber : email),
+        rawAccountIdentifier || (accountIdentifierType === 'phone' ? rawPhoneNumber : rawEmail),
         accountIdentifierType || inferredIdentifierType
       );
+      const email = rawEmail || (accountIdentifierType === 'email' ? accountIdentifier : '');
+      const phoneNumber = rawPhoneNumber || (accountIdentifierType === 'phone' ? accountIdentifier : '');
 
       return {
         email,
@@ -279,7 +317,7 @@
         accountIdentifierType: state.accountIdentifierType,
         accountIdentifier: state.accountIdentifier,
         email: state.email,
-        phoneNumber: state.phoneNumber || state.signupPhoneNumber,
+        phoneNumber: resolveStatePhoneNumber(state),
       });
       const email = identity.email;
       const phoneNumber = identity.phoneNumber;
@@ -329,7 +367,7 @@
 
       const recordId = String(record.recordId || '').trim();
       const emailKey = String(record.email || '').trim().toLowerCase();
-      const phoneKey = String(record.phoneNumber || '').trim().toLowerCase();
+      const phoneKey = normalizePhoneRecordKey(record.phoneNumber);
       const identifierKey = buildRecordId(
         record.accountIdentifier || record.email || record.phoneNumber,
         record.accountIdentifierType || (phoneKey && !emailKey ? 'phone' : 'email')
@@ -337,7 +375,7 @@
       const nextHistory = normalizedHistory.filter((item) => {
         const itemRecordId = String(item.recordId || '').trim();
         const itemEmailKey = String(item.email || '').trim().toLowerCase();
-        const itemPhoneKey = String(item.phoneNumber || '').trim().toLowerCase();
+        const itemPhoneKey = normalizePhoneRecordKey(item.phoneNumber);
         const itemIdentifierKey = buildRecordId(
           item.accountIdentifier || item.email || item.phoneNumber,
           item.accountIdentifierType || (itemPhoneKey && !itemEmailKey ? 'phone' : 'email')

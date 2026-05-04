@@ -7238,6 +7238,7 @@ async function persistSignupPhoneInputValue(options = {}) {
     signupPhoneInputDirty = getSignupPhoneInputValue() !== normalizedPhone;
     syncLatestState({
       signupPhoneNumber: normalizedPhone,
+      phoneNumber: '',
       ...(normalizedPhone
         ? {
           accountIdentifierType: 'phone',

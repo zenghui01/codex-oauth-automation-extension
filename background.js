@@ -801,6 +801,7 @@ const DEFAULT_STATE = {
   currentLuckmailPurchase: null,
   currentLuckmailMailCursor: null,
   currentPhoneActivation: null,
+  phoneNumber: '',
   currentPhoneVerificationCode: '',
   currentPhoneVerificationCountdownEndsAt: 0,
   currentPhoneVerificationCountdownWindowIndex: 0,
@@ -2694,6 +2695,7 @@ async function setEmailStateSilently(email) {
   if (normalizedEmail) {
     updates.accountIdentifierType = 'email';
     updates.accountIdentifier = normalizedEmail;
+    updates.phoneNumber = '';
     updates.signupPhoneNumber = '';
     updates.signupPhoneActivation = null;
     updates.signupPhoneCompletedActivation = null;
@@ -2726,6 +2728,7 @@ async function setSignupPhoneStateSilently(phoneNumber) {
   if (normalizedPhoneNumber) {
     updates.accountIdentifierType = 'phone';
     updates.accountIdentifier = normalizedPhoneNumber;
+    updates.phoneNumber = '';
     if (!isPhoneActivationForNumber(currentState?.signupPhoneActivation, normalizedPhoneNumber)) {
       updates.signupPhoneActivation = null;
       updates.signupPhoneVerificationRequestedAt = null;

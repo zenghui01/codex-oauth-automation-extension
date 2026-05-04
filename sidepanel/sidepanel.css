@@ -3038,14 +3038,31 @@ header {
   cursor: pointer;
 }
 
-.account-record-item-email {
+.account-record-item-identity {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-record-item-email,
+.account-record-item-secondary {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.account-record-item-email {
   color: var(--text-primary);
   font-size: 12px;
+  font-weight: 600;
+}
+
+.account-record-item-secondary {
+  color: var(--text-secondary);
+  font-size: 10px;
   font-weight: 600;
 }
 

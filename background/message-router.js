@@ -216,6 +216,7 @@
           await setEmailState(email);
         }
         const updates = {
+          phoneNumber: '',
           signupPhoneNumber: '',
           signupPhoneActivation: null,
           signupPhoneCompletedActivation: null,

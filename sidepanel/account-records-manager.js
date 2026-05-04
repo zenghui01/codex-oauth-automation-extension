@@ -72,8 +72,15 @@
       if (rawRecordId) {
         return rawRecordId.toLowerCase();
       }
-      const identifierType = String(record.accountIdentifierType || '').trim().toLowerCase() === 'phone'
-        || (!record.email && (record.accountIdentifier || record.phoneNumber))
+      const rawIdentifierType = String(record.accountIdentifierType || '').trim().toLowerCase();
+      const hasPhoneOnlyIdentifier = !record.email && (
+        record.phoneNumber
+        || record.phone
+        || record.number
+        || (record.accountIdentifier && !/@/.test(String(record.accountIdentifier || '')))
+      );
+      const identifierType = rawIdentifierType === 'phone'
+        || (!rawIdentifierType && hasPhoneOnlyIdentifier)
         ? 'phone'
         : 'email';
       const identifier = String(
@@ -89,12 +96,71 @@
         : identifier.toLowerCase();
     }
 
-    function getRecordPrimaryIdentifier(record = {}) {
-      const email = String(record.email || '').trim();
-      if (email) {
-        return email;
+    function getRecordIdentifierType(record = {}) {
+      const rawType = String(record.accountIdentifierType || '').trim().toLowerCase();
+      if (rawType === 'phone') {
+        return 'phone';
       }
-      return String(record.accountIdentifier || record.phoneNumber || record.phone || record.number || '').trim();
+      if (rawType === 'email') {
+        return 'email';
+      }
+      if (!record.email && (record.phoneNumber || record.phone || record.number)) {
+        return 'phone';
+      }
+      if (!record.email && record.accountIdentifier && !/@/.test(String(record.accountIdentifier || ''))) {
+        return 'phone';
+      }
+      return 'email';
+    }
+
+    function getRecordEmail(record = {}) {
+      const identifierType = getRecordIdentifierType(record);
+      return String(
+        record.email
+        || (identifierType === 'email' ? record.accountIdentifier : '')
+        || ''
+      ).trim();
+    }
+
+    function getRecordPhoneNumber(record = {}) {
+      const identifierType = getRecordIdentifierType(record);
+      return String(
+        record.phoneNumber
+        || record.phone
+        || record.number
+        || (identifierType === 'phone' ? record.accountIdentifier : '')
+        || ''
+      ).trim();
+    }
+
+    function getRecordPrimaryIdentifier(record = {}) {
+      const identifierType = getRecordIdentifierType(record);
+      const email = getRecordEmail(record);
+      const phoneNumber = getRecordPhoneNumber(record);
+      return identifierType === 'phone'
+        ? (phoneNumber || String(record.accountIdentifier || '').trim() || email)
+        : (email || String(record.accountIdentifier || '').trim() || phoneNumber);
+    }
+
+    function getRecordSecondaryIdentifier(record = {}) {
+      const identifierType = getRecordIdentifierType(record);
+      const email = getRecordEmail(record);
+      const phoneNumber = getRecordPhoneNumber(record);
+      if (identifierType === 'phone' && email) {
+        return `邮箱 ${email}`;
+      }
+      if (identifierType !== 'phone' && phoneNumber) {
+        return `绑定手机号 ${phoneNumber}`;
+      }
+      return '';
+    }
+
+    function getRecordTitle(record = {}) {
+      const primaryIdentifier = getRecordPrimaryIdentifier(record) || '(空账号)';
+      const secondaryIdentifier = getRecordSecondaryIdentifier(record);
+      return secondaryIdentifier
+        ? `${primaryIdentifier} / ${secondaryIdentifier}`
+        : primaryIdentifier;
     }
 
     function getAccountRunRecords(currentState = state.getLatestState()) {
@@ -382,6 +448,8 @@
       dom.accountRecordsList.innerHTML = visibleRecords.map((record) => {
         const recordId = buildRecordId(record);
         const primaryIdentifier = getRecordPrimaryIdentifier(record) || '(空账号)';
+        const secondaryIdentifier = getRecordSecondaryIdentifier(record);
+        const recordTitle = getRecordTitle(record);
         const statusMeta = getStatusMeta(record);
         const summaryText = getRecordSummaryText(record);
         const retryCount = normalizeRetryCount(record.retryCount);
@@ -408,12 +476,15 @@
           <div
             class="${itemClassNames}"
             data-account-record-id="${escapeHtml(recordId)}"
-            title="${escapeHtml(primaryIdentifier)}"
+            title="${escapeHtml(recordTitle)}"
           >
             <div class="account-record-item-top">
               <div class="account-record-item-email-row">
                 ${selectionMarkup}
-                <div class="account-record-item-email mono">${escapeHtml(primaryIdentifier)}</div>
+                <div class="account-record-item-identity">
+                  <div class="account-record-item-email mono">${escapeHtml(primaryIdentifier)}</div>
+                  ${secondaryIdentifier ? `<div class="account-record-item-secondary mono">${escapeHtml(secondaryIdentifier)}</div>` : ''}
+                </div>
               </div>
               <div class="account-record-item-side">
                 <span class="account-record-item-status">${escapeHtml(statusMeta.label)}</span>

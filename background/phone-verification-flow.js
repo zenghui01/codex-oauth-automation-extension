@@ -5312,6 +5312,9 @@
             clearCountrySmsFailure(activation.countryId, activation.provider);
             shouldCancelActivation = false;
             await clearCurrentActivation();
+            await setPhoneRuntimeState({
+              phoneNumber: activation.phoneNumber,
+            });
             addPhoneReentryWithSameActivation = 0;
             await addLog('步骤 9：手机号验证已完成，等待 OAuth 授权页。', 'ok');
             return submitResult;
