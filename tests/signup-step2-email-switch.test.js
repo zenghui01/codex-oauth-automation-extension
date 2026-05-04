@@ -625,6 +625,299 @@ return {
   assert.deepEqual(api.getClicks(), ['免费注册', 'Continue with phone number']);
 });
 
+test('submitSignupPhoneNumberAndContinue auto-switches signup country before filling the local phone number', async () => {
+  const api = new Function(`
+const logs = [];
+const clicks = [];
+const filled = [];
+const selectEvents = [];
+let now = 0;
+
+const continueButton = {
+  textContent: 'Continue',
+  value: '',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'type') return 'submit';
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+  getBoundingClientRect() {
+    return { width: 200, height: 48 };
+  },
+};
+
+const countryOptions = [
+  { value: 'AU', textContent: 'Australia (+61)', buttonText: '澳大利亚 (+61)' },
+  { value: 'GB', textContent: 'United Kingdom (+44)', buttonText: '英国 (+44)' },
+];
+
+const countrySelect = {
+  options: countryOptions,
+  selectedIndex: 0,
+  dispatchEvent(event) {
+    selectEvents.push(event?.type || '');
+    return true;
+  },
+};
+
+Object.defineProperty(countrySelect, 'value', {
+  get() {
+    return countryOptions[countrySelect.selectedIndex]?.value || '';
+  },
+  set(nextValue) {
+    const nextIndex = countryOptions.findIndex((option) => option.value === String(nextValue || ''));
+    if (nextIndex >= 0) {
+      countrySelect.selectedIndex = nextIndex;
+    }
+  },
+});
+
+const hiddenPhoneInput = {
+  kind: 'hidden-phone',
+  value: '',
+  getAttribute() {
+    return '';
+  },
+};
+
+const phoneInput = {
+  kind: 'phone',
+  value: '',
+  getAttribute(name) {
+    if (name === 'type') return 'tel';
+    return '';
+  },
+  closest(selector) {
+    if (selector === 'form') {
+      return form;
+    }
+    return form;
+  },
+};
+
+const selectValueNode = {
+  get textContent() {
+    return countryOptions[countrySelect.selectedIndex]?.buttonText || '';
+  },
+};
+
+const countryButton = {
+  querySelector(selector) {
+    return selector === '.react-aria-SelectValue' ? selectValueNode : null;
+  },
+  get textContent() {
+    return selectValueNode.textContent;
+  },
+};
+
+const form = {
+  textContent: '英国 (+44)',
+  querySelector(selector) {
+    if (selector === 'select') return countrySelect;
+    if (selector === 'input[name="phoneNumber"]') return hiddenPhoneInput;
+    if (selector === 'button[aria-haspopup="listbox"]') return countryButton;
+    return null;
+  },
+};
+
+const document = {
+  documentElement: {
+    lang: 'zh-CN',
+    getAttribute(name) {
+      return name === 'lang' ? 'zh-CN' : '';
+    },
+  },
+  querySelector(selector) {
+    if (selector === SIGNUP_PHONE_INPUT_SELECTOR) {
+      return phoneInput;
+    }
+    if (selector === 'button[type="submit"], input[type="submit"]') {
+      return continueButton;
+    }
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"]') {
+      return [];
+    }
+    if (selector === 'a, button, [role="button"], [role="link"]') {
+      return [];
+    }
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [continueButton];
+    }
+    if (selector === 'input') {
+      return [phoneInput];
+    }
+    return [];
+  },
+};
+
+const location = {
+  href: 'https://chatgpt.com/',
+};
+
+const window = {
+  setTimeout(fn) {
+    fn();
+  },
+};
+
+const Date = {
+  now() {
+    return now;
+  },
+};
+
+class Event {
+  constructor(type) {
+    this.type = type;
+  }
+}
+
+function isVisibleElement(el) {
+  return Boolean(el);
+}
+
+function isActionEnabled(el) {
+  return Boolean(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+}
+
+function getActionText(el) {
+  return [el?.textContent, el?.value, el?.getAttribute?.('aria-label'), el?.getAttribute?.('title')]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\\s+/g, ' ')
+    .trim();
+}
+
+function getSignupPasswordInput() {
+  return null;
+}
+
+function isSignupPasswordPage() {
+  return false;
+}
+
+function getSignupPasswordSubmitButton() {
+  return null;
+}
+
+function findSignupEntryTrigger() {
+  return null;
+}
+
+function getSignupPasswordDisplayedEmail() {
+  return '';
+}
+
+function getPageTextSnapshot() {
+  return countryButton.textContent;
+}
+
+function throwIfStopped() {}
+function isStopError() { return false; }
+
+function log(message, level = 'info') {
+  logs.push({ message, level });
+}
+
+async function humanPause() {}
+
+function simulateClick(target) {
+  clicks.push(getActionText(target));
+}
+
+function fillInput(target, value) {
+  target.value = value;
+  filled.push({ target: target.kind, value });
+}
+
+async function sleep(ms) {
+  now += ms;
+}
+
+${extractConst('SIGNUP_ENTRY_TRIGGER_PATTERN')}
+${extractConst('SIGNUP_EMAIL_INPUT_SELECTOR')}
+${extractConst('SIGNUP_PHONE_INPUT_SELECTOR')}
+${extractConst('SIGNUP_SWITCH_TO_EMAIL_PATTERN')}
+${extractConst('SIGNUP_SWITCH_ACTION_PATTERN')}
+${extractConst('SIGNUP_EMAIL_ACTION_PATTERN')}
+${extractConst('SIGNUP_WORK_EMAIL_PATTERN')}
+${extractConst('SIGNUP_PHONE_ACTION_PATTERN')}
+${extractConst('SIGNUP_SWITCH_TO_PHONE_PATTERN')}
+${extractConst('SIGNUP_MORE_OPTIONS_PATTERN')}
+
+${extractFunction('getSignupEmailInput')}
+${extractFunction('getSignupPhoneInput')}
+${extractFunction('findSignupUseEmailTrigger')}
+${extractFunction('findSignupUsePhoneTrigger')}
+${extractFunction('findSignupMoreOptionsTrigger')}
+${extractFunction('getSignupEmailContinueButton')}
+${extractFunction('inspectSignupEntryState')}
+${extractFunction('getSignupEntryStateSummary')}
+function getSignupEntryDiagnostics() { return {}; }
+${extractFunction('normalizePhoneDigits')}
+${extractFunction('extractDialCodeFromText')}
+${extractFunction('dispatchSignupPhoneFieldEvents')}
+${extractFunction('normalizeSignupCountryLabel')}
+${extractFunction('getSignupPhoneOptionLabel')}
+${extractFunction('normalizeSignupCountryOptionValue')}
+${extractFunction('getSignupRegionDisplayName')}
+${extractFunction('getSignupPhoneCountryMatchLabels')}
+${extractFunction('isSameSignupCountryOption')}
+${extractFunction('getSignupPhoneForm')}
+${extractFunction('getSignupPhoneCountrySelect')}
+${extractFunction('getSignupPhoneSelectedCountryOption')}
+${extractFunction('getSignupPhoneCountryButtonText')}
+${extractFunction('getSignupPhoneDisplayedDialCode')}
+${extractFunction('getSignupPhoneHiddenNumberInput')}
+${extractFunction('findSignupPhoneCountryOptionByLabel')}
+${extractFunction('findSignupPhoneCountryOptionByPhoneNumber')}
+${extractFunction('trySelectSignupPhoneCountryOption')}
+${extractFunction('ensureSignupPhoneCountrySelected')}
+${extractFunction('toNationalPhoneNumber')}
+${extractFunction('toE164PhoneNumber')}
+${extractFunction('resolveSignupPhoneDialCode')}
+${extractFunction('waitForSignupPhoneEntryState')}
+${extractFunction('submitSignupPhoneNumberAndContinue')}
+
+return {
+  async run() {
+    return submitSignupPhoneNumberAndContinue({
+      phoneNumber: '+447859232013',
+      countryLabel: 'United Kingdom',
+    });
+  },
+  getClicks() {
+    return clicks.slice();
+  },
+  getFilled() {
+    return filled.slice();
+  },
+  getSelectValue() {
+    return countrySelect.value;
+  },
+  getSelectEvents() {
+    return selectEvents.slice();
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.submitted, true);
+  assert.equal(result.phoneInputValue, '7859232013');
+  assert.equal(api.getSelectValue(), 'GB');
+  assert.deepEqual(api.getSelectEvents(), ['input', 'change']);
+  assert.deepEqual(api.getClicks(), ['Continue']);
+  assert.deepEqual(api.getFilled(), [
+    { target: 'phone', value: '7859232013' },
+    { target: 'hidden-phone', value: '+447859232013' },
+  ]);
+});
+
 test('submitSignupPhoneNumberAndContinue switches from email mode to phone mode and submits local number', async () => {
   const api = new Function(`
 const logs = [];
@@ -815,7 +1108,25 @@ ${extractFunction('getSignupEntryStateSummary')}
 function getSignupEntryDiagnostics() { return {}; }
 ${extractFunction('normalizePhoneDigits')}
 ${extractFunction('extractDialCodeFromText')}
+${extractFunction('dispatchSignupPhoneFieldEvents')}
+${extractFunction('normalizeSignupCountryLabel')}
+${extractFunction('getSignupPhoneOptionLabel')}
+${extractFunction('normalizeSignupCountryOptionValue')}
+${extractFunction('getSignupRegionDisplayName')}
+${extractFunction('getSignupPhoneCountryMatchLabels')}
+${extractFunction('isSameSignupCountryOption')}
+${extractFunction('getSignupPhoneForm')}
+${extractFunction('getSignupPhoneCountrySelect')}
+${extractFunction('getSignupPhoneSelectedCountryOption')}
+${extractFunction('getSignupPhoneCountryButtonText')}
+${extractFunction('getSignupPhoneDisplayedDialCode')}
+${extractFunction('getSignupPhoneHiddenNumberInput')}
+${extractFunction('findSignupPhoneCountryOptionByLabel')}
+${extractFunction('findSignupPhoneCountryOptionByPhoneNumber')}
+${extractFunction('trySelectSignupPhoneCountryOption')}
+${extractFunction('ensureSignupPhoneCountrySelected')}
 ${extractFunction('toNationalPhoneNumber')}
+${extractFunction('toE164PhoneNumber')}
 ${extractFunction('resolveSignupPhoneDialCode')}
 ${extractFunction('waitForSignupPhoneEntryState')}
 ${extractFunction('submitSignupPhoneNumberAndContinue')}

@@ -1151,6 +1151,256 @@ function extractDialCodeFromText(value) {
   return String(match?.[1] || match?.[2] || '').trim();
 }
 
+function dispatchSignupPhoneFieldEvents(element) {
+  if (!element) return;
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function normalizeSignupCountryLabel(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function getSignupPhoneOptionLabel(option) {
+  return String(option?.textContent || option?.label || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeSignupCountryOptionValue(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function getSignupRegionDisplayName(regionCode, locale) {
+  const normalizedRegionCode = normalizeSignupCountryOptionValue(regionCode);
+  const normalizedLocale = String(locale || '').trim();
+  if (!/^[A-Z]{2}$/.test(normalizedRegionCode) || !normalizedLocale || typeof Intl?.DisplayNames !== 'function') {
+    return '';
+  }
+  try {
+    return String(
+      new Intl.DisplayNames([normalizedLocale], { type: 'region' }).of(normalizedRegionCode) || ''
+    ).trim();
+  } catch {
+    return '';
+  }
+}
+
+function getSignupPhoneCountryMatchLabels(option) {
+  const labels = new Set();
+  const pushLabel = (value) => {
+    const label = String(value || '').replace(/\s+/g, ' ').trim();
+    if (label) {
+      labels.add(label);
+    }
+  };
+
+  pushLabel(getSignupPhoneOptionLabel(option));
+
+  const regionCode = normalizeSignupCountryOptionValue(option?.value);
+  if (/^[A-Z]{2}$/.test(regionCode)) {
+    pushLabel(regionCode);
+    pushLabel(getSignupRegionDisplayName(regionCode, 'en'));
+
+    const rootScope = typeof self !== 'undefined' ? self : globalThis;
+    const pageLocale = String(
+      document?.documentElement?.lang
+      || document?.documentElement?.getAttribute?.('lang')
+      || rootScope?.navigator?.language
+      || ''
+    ).trim();
+    if (pageLocale && !/^en(?:[-_]|$)/i.test(pageLocale)) {
+      pushLabel(getSignupRegionDisplayName(regionCode, pageLocale));
+    }
+  }
+
+  return Array.from(labels);
+}
+
+function isSameSignupCountryOption(left, right) {
+  if (!left || !right) {
+    return false;
+  }
+
+  const leftValue = normalizeSignupCountryOptionValue(left.value);
+  const rightValue = normalizeSignupCountryOptionValue(right.value);
+  if (leftValue && rightValue) {
+    return leftValue === rightValue;
+  }
+
+  return normalizeSignupCountryLabel(getSignupPhoneOptionLabel(left)) === normalizeSignupCountryLabel(getSignupPhoneOptionLabel(right));
+}
+
+function getSignupPhoneForm(phoneInput = getSignupPhoneInput()) {
+  return phoneInput?.closest?.('form') || null;
+}
+
+function getSignupPhoneCountrySelect(phoneInput = getSignupPhoneInput()) {
+  const form = getSignupPhoneForm(phoneInput);
+  if (!form || typeof form.querySelector !== 'function') {
+    return null;
+  }
+  return form.querySelector('select');
+}
+
+function getSignupPhoneSelectedCountryOption(phoneInput = getSignupPhoneInput()) {
+  const select = getSignupPhoneCountrySelect(phoneInput);
+  if (!select || select.selectedIndex < 0) {
+    return null;
+  }
+  return select.options?.[select.selectedIndex] || null;
+}
+
+function getSignupPhoneCountryButtonText(phoneInput = getSignupPhoneInput()) {
+  const form = getSignupPhoneForm(phoneInput);
+  if (!form || typeof form.querySelector !== 'function') return '';
+  const button = form.querySelector('button[aria-haspopup="listbox"]');
+  if (!button) return '';
+  const valueNode = button.querySelector('.react-aria-SelectValue');
+  return String(valueNode?.textContent || button.textContent || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getSignupPhoneDisplayedDialCode(phoneInput = getSignupPhoneInput()) {
+  const buttonDialCode = extractDialCodeFromText(getSignupPhoneCountryButtonText(phoneInput));
+  if (buttonDialCode) {
+    return buttonDialCode;
+  }
+  const inputRoot = phoneInput?.closest?.('fieldset, form, [data-rac], div') || document;
+  const visibleText = String(inputRoot?.textContent || '').replace(/\s+/g, ' ').trim();
+  const rootDialCode = extractDialCodeFromText(visibleText);
+  if (rootDialCode) {
+    return rootDialCode;
+  }
+  const pageDialCode = extractDialCodeFromText(getPageTextSnapshot());
+  if (pageDialCode) {
+    return pageDialCode;
+  }
+  return '';
+}
+
+function getSignupPhoneHiddenNumberInput(phoneInput = getSignupPhoneInput()) {
+  const form = getSignupPhoneForm(phoneInput);
+  if (!form || typeof form.querySelector !== 'function') {
+    return null;
+  }
+  return form.querySelector('input[name="phoneNumber"]');
+}
+
+function findSignupPhoneCountryOptionByLabel(phoneInput, countryLabel) {
+  const select = getSignupPhoneCountrySelect(phoneInput);
+  if (!select) {
+    return null;
+  }
+  const normalizedTarget = normalizeSignupCountryLabel(countryLabel);
+  if (!normalizedTarget) {
+    return null;
+  }
+
+  const options = Array.from(select.options || []);
+  return options.find((option) => (
+    getSignupPhoneCountryMatchLabels(option).some((label) => normalizeSignupCountryLabel(label) === normalizedTarget)
+  ))
+    || options.find((option) => {
+      const normalizedLabels = getSignupPhoneCountryMatchLabels(option)
+        .map((label) => normalizeSignupCountryLabel(label))
+        .filter(Boolean);
+      return normalizedLabels.some((optionLabel) => (
+        optionLabel.length > 2
+        && normalizedTarget.length > 2
+        && (optionLabel.includes(normalizedTarget) || normalizedTarget.includes(optionLabel))
+      ));
+    })
+    || null;
+}
+
+function findSignupPhoneCountryOptionByPhoneNumber(phoneInput, phoneNumber) {
+  const select = getSignupPhoneCountrySelect(phoneInput);
+  if (!select) {
+    return null;
+  }
+  const digits = normalizePhoneDigits(phoneNumber);
+  if (!digits) {
+    return null;
+  }
+
+  let bestMatch = null;
+  let bestDialCodeLength = 0;
+  for (const option of Array.from(select.options || [])) {
+    const dialCode = normalizePhoneDigits(extractDialCodeFromText(getSignupPhoneOptionLabel(option)));
+    if (!dialCode || !digits.startsWith(dialCode)) {
+      continue;
+    }
+    if (dialCode.length > bestDialCodeLength) {
+      bestMatch = option;
+      bestDialCodeLength = dialCode.length;
+    }
+  }
+  return bestMatch;
+}
+
+async function trySelectSignupPhoneCountryOption(select, targetOption) {
+  if (!select || !targetOption) {
+    return false;
+  }
+  const selectedOption = select.selectedIndex >= 0
+    ? (select.options?.[select.selectedIndex] || null)
+    : null;
+  if (selectedOption && isSameSignupCountryOption(selectedOption, targetOption)) {
+    return true;
+  }
+  select.value = String(targetOption.value || '');
+  dispatchSignupPhoneFieldEvents(select);
+  await sleep(250);
+  const nextSelectedOption = select.selectedIndex >= 0
+    ? (select.options?.[select.selectedIndex] || null)
+    : null;
+  return Boolean(nextSelectedOption && isSameSignupCountryOption(nextSelectedOption, targetOption));
+}
+
+async function ensureSignupPhoneCountrySelected(phoneInput, options = {}) {
+  const select = getSignupPhoneCountrySelect(phoneInput);
+  if (!select) {
+    return {
+      hasSelect: false,
+      matched: false,
+      selectedOption: null,
+    };
+  }
+
+  const byLabel = findSignupPhoneCountryOptionByLabel(phoneInput, options.countryLabel);
+  if (await trySelectSignupPhoneCountryOption(select, byLabel)) {
+    return {
+      hasSelect: true,
+      matched: true,
+      selectedOption: getSignupPhoneSelectedCountryOption(phoneInput),
+    };
+  }
+
+  const byPhoneNumber = findSignupPhoneCountryOptionByPhoneNumber(phoneInput, options.phoneNumber);
+  if (await trySelectSignupPhoneCountryOption(select, byPhoneNumber)) {
+    return {
+      hasSelect: true,
+      matched: true,
+      selectedOption: getSignupPhoneSelectedCountryOption(phoneInput),
+    };
+  }
+
+  return {
+    hasSelect: true,
+    matched: false,
+    selectedOption: getSignupPhoneSelectedCountryOption(phoneInput),
+  };
+}
+
 function toNationalPhoneNumber(value, dialCode) {
   const digits = normalizePhoneDigits(value);
   const normalizedDialCode = normalizePhoneDigits(dialCode);
@@ -1167,24 +1417,41 @@ function toNationalPhoneNumber(value, dialCode) {
   return digits;
 }
 
+function toE164PhoneNumber(value, dialCode) {
+  const digits = normalizePhoneDigits(value);
+  const normalizedDialCode = normalizePhoneDigits(dialCode);
+  const isExplicitInternational = /^\s*(?:\+|00)\s*\d/.test(String(value || '').trim());
+  if (!digits) {
+    return '';
+  }
+  if (isExplicitInternational) {
+    return `+${digits}`;
+  }
+  if (!normalizedDialCode) {
+    return `+${digits}`;
+  }
+  if (digits.startsWith(normalizedDialCode)) {
+    return `+${digits}`;
+  }
+  if (digits.startsWith('0')) {
+    return `+${normalizedDialCode}${digits.slice(1)}`;
+  }
+  return `+${normalizedDialCode}${digits}`;
+}
+
 function resolveSignupPhoneDialCode(phoneInput, options = {}) {
   const { phoneNumber = '', countryLabel = '' } = options;
-  const inputRoot = phoneInput?.closest?.('fieldset, form, [data-rac], div') || document;
-  const visibleText = String(inputRoot?.textContent || '').replace(/\s+/g, ' ').trim();
-  const rootDialCode = extractDialCodeFromText(visibleText);
-  if (rootDialCode) {
-    return rootDialCode;
-  }
-  const pageDialCode = extractDialCodeFromText(getPageTextSnapshot());
-  if (pageDialCode) {
-    return pageDialCode;
+  const displayedDialCode = getSignupPhoneDisplayedDialCode(phoneInput);
+  if (displayedDialCode) {
+    return displayedDialCode;
   }
   const countryText = String(countryLabel || '').trim();
+  if (/australia|澳大利亚/i.test(countryText)) return '61';
   if (/thailand|泰国/i.test(countryText)) return '66';
   if (/vietnam|越南/i.test(countryText)) return '84';
   if (/england|united kingdom|英国|uk/i.test(countryText)) return '44';
   const digits = normalizePhoneDigits(phoneNumber);
-  const knownDialCodes = ['66', '84', '44', '1', '81', '82', '86', '852', '855', '856', '60', '62', '63', '65'];
+  const knownDialCodes = ['66', '84', '61', '44', '1', '81', '82', '86', '852', '855', '856', '60', '62', '63', '65'];
   return knownDialCodes.find((code) => digits.startsWith(code) && digits.length > code.length) || '';
 }
 
@@ -1278,6 +1545,14 @@ async function submitSignupPhoneNumberAndContinue(payload = {}) {
     throw new Error(`步骤 2：未找到可用的手机号输入入口。URL: ${location.href}`);
   }
 
+  const countrySelection = await ensureSignupPhoneCountrySelected(snapshot.phoneInput, {
+    countryLabel,
+    phoneNumber,
+  });
+  if (countrySelection.hasSelect && !countrySelection.matched) {
+    log(`步骤 2：手机号国家下拉框未能自动切换到 ${countryLabel || phoneNumber}，将继续使用当前国家。`, 'warn');
+  }
+
   const dialCode = resolveSignupPhoneDialCode(snapshot.phoneInput, {
     phoneNumber,
     countryId: payload.countryId,
@@ -1291,6 +1566,11 @@ async function submitSignupPhoneNumberAndContinue(payload = {}) {
   log(`步骤 2：正在填写手机号：${phoneNumber}`);
   await humanPause(500, 1400);
   fillInput(snapshot.phoneInput, inputValue);
+  const hiddenPhoneNumberInput = getSignupPhoneHiddenNumberInput(snapshot.phoneInput);
+  const e164PhoneNumber = toE164PhoneNumber(phoneNumber, dialCode);
+  if (hiddenPhoneNumberInput && e164PhoneNumber) {
+    fillInput(hiddenPhoneNumberInput, e164PhoneNumber);
+  }
   log(`步骤 2：手机号已填写：${phoneNumber}${dialCode ? `（区号 +${dialCode}，本地号 ${inputValue}）` : ''}`);
 
   const continueButton = getSignupEmailContinueButton({ allowDisabled: true });
