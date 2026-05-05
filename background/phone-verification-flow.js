@@ -6,6 +6,8 @@
       addLog: rawAddLog = async () => {},
       ensureStep8SignupPageReady,
       fetchImpl = (...args) => fetch(...args),
+      generateRandomBirthday,
+      generateRandomName,
       getOAuthFlowStepTimeoutMs,
       getState,
       sendToContentScript,
@@ -3623,13 +3625,35 @@
 
     async function submitPhoneVerificationCode(tabId, code) {
       const visibleStep = normalizeLogStep(activePhoneVerificationLogStep) || 9;
+      const signupProfile = (
+        typeof generateRandomName === 'function'
+        && typeof generateRandomBirthday === 'function'
+      )
+        ? (() => {
+          const name = generateRandomName();
+          const birthday = generateRandomBirthday();
+          if (!name?.firstName || !name?.lastName || !birthday) {
+            return null;
+          }
+          return {
+            firstName: name.firstName,
+            lastName: name.lastName,
+            year: birthday.year,
+            month: birthday.month,
+            day: birthday.day,
+          };
+        })()
+        : null;
       const timeoutMs = typeof getOAuthFlowStepTimeoutMs === 'function'
         ? await getOAuthFlowStepTimeoutMs(45000, { step: visibleStep, actionLabel: '提交手机验证码' })
         : 45000;
       const result = await sendToContentScriptResilient('signup-page', {
         type: 'SUBMIT_PHONE_VERIFICATION_CODE',
         source: 'background',
-        payload: { code },
+        payload: {
+          code,
+          ...(signupProfile ? { signupProfile } : {}),
+        },
       }, {
         timeoutMs,
         responseTimeoutMs: timeoutMs,
