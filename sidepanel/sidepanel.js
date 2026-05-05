@@ -708,8 +708,6 @@ const DEFAULT_MAIL_2925_MODE = MAIL_2925_MODE_PROVIDE;
 const NEW_USER_GUIDE_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-new-user-guide-prompt-dismissed';
 const AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-skip-failures-prompt-dismissed';
 const AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-fallback-risk-prompt-dismissed';
-const AUTO_RUN_PLUS_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-plus-risk-prompt-dismissed';
-const PLUS_CONTRIBUTION_PROMPT_LEDGER_STORAGE_KEY = 'multipage-plus-contribution-prompt-ledger';
 const PHONE_VERIFICATION_SECTION_EXPANDED_STORAGE_KEY = 'multipage-phone-verification-section-expanded';
 let phoneVerificationSectionExpanded = false;
 
@@ -794,10 +792,6 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
 }
 const CONTRIBUTION_CONTENT_PROMPT_DISMISSED_VERSION_STORAGE_KEY = 'multipage-contribution-content-prompt-dismissed-version';
 const AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS = 3;
-const AUTO_RUN_PLUS_RISK_WARNING_MAX_SAFE_RUNS = 3;
-const PLUS_CONTRIBUTION_PROMPT_THRESHOLD = 5;
-const PLUS_CONTRIBUTION_ACCOUNT_CREDIT = 5;
-const PLUS_CONTRIBUTION_DONATION_CREDIT = 20;
 const HOTMAIL_SERVICE_MODE_REMOTE = 'remote';
 const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
 const ICLOUD_PROVIDER = 'icloud';
@@ -1794,190 +1788,8 @@ function setAutoRunFallbackRiskPromptDismissed(dismissed) {
   setPromptDismissed(AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
 }
 
-function isAutoRunPlusRiskPromptDismissed() {
-  return isPromptDismissed(AUTO_RUN_PLUS_RISK_PROMPT_DISMISSED_STORAGE_KEY);
-}
-
-function setAutoRunPlusRiskPromptDismissed(dismissed) {
-  setPromptDismissed(AUTO_RUN_PLUS_RISK_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
-}
-
 function shouldWarnAutoRunFallbackRisk(totalRuns, autoRunSkipFailures) {
   return totalRuns >= AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS;
-}
-
-function shouldWarnPlusAutoRunRisk(totalRuns, plusModeEnabled) {
-  return Boolean(plusModeEnabled)
-    && Math.floor(Number(totalRuns) || 0) > AUTO_RUN_PLUS_RISK_WARNING_MAX_SAFE_RUNS;
-}
-
-function normalizePlusContributionPromptNumber(value) {
-  const number = Math.floor(Number(value) || 0);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function normalizePlusContributionPromptLedger(value = {}) {
-  const source = value && typeof value === 'object' ? value : {};
-  return {
-    promptBaseline: normalizePlusContributionPromptNumber(source.promptBaseline),
-    donationCredit: Math.max(0, normalizePlusContributionPromptNumber(source.donationCredit)),
-  };
-}
-
-function getPlusContributionPromptLedger() {
-  try {
-    return normalizePlusContributionPromptLedger(
-      JSON.parse(localStorage.getItem(PLUS_CONTRIBUTION_PROMPT_LEDGER_STORAGE_KEY) || '{}')
-    );
-  } catch {
-    return normalizePlusContributionPromptLedger();
-  }
-}
-
-function setPlusContributionPromptLedger(ledger) {
-  localStorage.setItem(
-    PLUS_CONTRIBUTION_PROMPT_LEDGER_STORAGE_KEY,
-    JSON.stringify(normalizePlusContributionPromptLedger(ledger))
-  );
-}
-
-function isSuccessfulPlusAccountRecord(record = {}) {
-  return record?.finalStatus === 'success' && Boolean(record.plusModeEnabled);
-}
-
-function getPlusContributionPromptTotals(records = []) {
-  return (Array.isArray(records) ? records : []).reduce((totals, record) => {
-    if (!isSuccessfulPlusAccountRecord(record)) {
-      return totals;
-    }
-    if (record.contributionMode) {
-      totals.contributionSuccess += 1;
-    } else {
-      totals.plusSuccess += 1;
-    }
-    return totals;
-  }, {
-    plusSuccess: 0,
-    contributionSuccess: 0,
-  });
-}
-
-function getPlusContributionPromptProgress(records = [], ledger = getPlusContributionPromptLedger()) {
-  const totals = getPlusContributionPromptTotals(records);
-  const normalizedLedger = normalizePlusContributionPromptLedger(ledger);
-  const credit = (totals.contributionSuccess * PLUS_CONTRIBUTION_ACCOUNT_CREDIT)
-    + normalizedLedger.donationCredit;
-  const netCount = totals.plusSuccess - credit;
-  const sinceLastPrompt = netCount - normalizedLedger.promptBaseline;
-  return {
-    ...totals,
-    credit,
-    netCount,
-    sinceLastPrompt,
-    shouldPrompt: sinceLastPrompt >= PLUS_CONTRIBUTION_PROMPT_THRESHOLD,
-  };
-}
-
-function shouldShowPlusContributionPrompt(records = [], plusModeEnabled = false, ledger = getPlusContributionPromptLedger()) {
-  return Boolean(plusModeEnabled)
-    && getPlusContributionPromptProgress(records, ledger).shouldPrompt;
-}
-
-function markPlusContributionPromptShown(records = [], ledger = getPlusContributionPromptLedger()) {
-  const progress = getPlusContributionPromptProgress(records, ledger);
-  const nextLedger = {
-    ...normalizePlusContributionPromptLedger(ledger),
-    promptBaseline: progress.netCount,
-  };
-  setPlusContributionPromptLedger(nextLedger);
-  return nextLedger;
-}
-
-function addPlusContributionPromptCredit(credit, ledger = getPlusContributionPromptLedger()) {
-  const normalizedLedger = normalizePlusContributionPromptLedger(ledger);
-  const nextLedger = {
-    ...normalizedLedger,
-    donationCredit: normalizedLedger.donationCredit + Math.max(0, normalizePlusContributionPromptNumber(credit)),
-  };
-  setPlusContributionPromptLedger(nextLedger);
-  return nextLedger;
-}
-
-function getPlusContributionSupportImageUrl() {
-  if (typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
-    return chrome.runtime.getURL('docs/images/微信.png');
-  }
-  return '../docs/images/微信.png';
-}
-
-function buildPlusContributionSupportPromptHtml() {
-  const imageUrl = getPlusContributionSupportImageUrl();
-  return [
-    '<span class="plus-contribution-prompt-copy">您觉得这个 Plus 功能怎么样？您的账户数量应该已经够个人使用啦。</span>',
-    '<span class="plus-contribution-prompt-copy">可以打开贡献给作者贡献几个账号，以便于让作者开发更好的功能出来吗？或者打赏一下作者？</span>',
-    `<img class="plus-contribution-prompt-image" src="${escapeHtml(imageUrl)}" alt="微信打赏二维码" />`,
-  ].join('');
-}
-
-function openPlusContributionSupportModal() {
-  return openActionModal({
-    title: 'Plus 功能使用反馈',
-    messageHtml: buildPlusContributionSupportPromptHtml(),
-    actions: [
-      { id: null, label: '取消', variant: 'btn-ghost' },
-      { id: 'contribute', label: '去贡献账号', variant: 'btn-outline' },
-      { id: 'donated', label: '已打赏', variant: 'btn-primary' },
-    ],
-  });
-}
-
-async function enterContributionModeFromPlusPrompt() {
-  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-    return null;
-  }
-
-  const response = await chrome.runtime.sendMessage({
-    type: 'SET_CONTRIBUTION_MODE',
-    source: 'sidepanel',
-    payload: { enabled: true },
-  });
-
-  if (response?.error) {
-    throw new Error(response.error);
-  }
-  if (response?.state && typeof applySettingsState === 'function') {
-    applySettingsState(response.state);
-  }
-  if (typeof renderContributionMode === 'function') {
-    renderContributionMode();
-  }
-  return response?.state || null;
-}
-
-async function maybeShowPlusContributionPromptBeforeAutoRun(plusModeEnabled) {
-  const records = Array.isArray(latestState?.accountRunHistory) ? latestState.accountRunHistory : [];
-  if (!shouldShowPlusContributionPrompt(records, plusModeEnabled)) {
-    return true;
-  }
-
-  const choice = await openPlusContributionSupportModal();
-  const ledger = markPlusContributionPromptShown(records);
-  if (choice === 'donated') {
-    addPlusContributionPromptCredit(PLUS_CONTRIBUTION_DONATION_CREDIT, ledger);
-    showToast('感谢打赏支持，已延后下一次 Plus 提醒。', 'success', 2200);
-    return true;
-  }
-  if (choice === 'contribute') {
-    openExternalUrl(getContributionPortalUrl());
-    try {
-      await enterContributionModeFromPlusPrompt();
-      showToast('已进入贡献模式，并打开贡献页面。', 'info', 2200);
-    } catch (error) {
-      showToast(`贡献模式开启失败：${error.message}`, 'error', 2600);
-    }
-    return false;
-  }
-  return true;
 }
 
 async function openAutoSkipFailuresConfirmModal() {
@@ -1998,19 +1810,6 @@ async function openAutoRunFallbackRiskConfirmModal(totalRuns) {
     title: '自动运行风险提醒',
     message: `当前轮数已经不适合单节点情况，请确保已经配置并打开节点轮询功能（若没有配置，请点击贡献/使用按钮，根据网页中使用教程进行配置），避免连续使用一个节点注册，导致出现手机号验证。`,
     confirmLabel: '继续',
-  });
-
-  return {
-    confirmed: result.confirmed,
-    dismissPrompt: result.optionChecked,
-  };
-}
-
-async function openPlusAutoRunRiskConfirmModal(totalRuns) {
-  const result = await openConfirmModalWithOption({
-    title: 'Plus 自动轮数提醒',
-    message: `Plus 模式下当前设置为 ${totalRuns} 轮。轮数过多可能造成 PayPal 或账号快速封号。建议够用就好：我注册了几个使用，没多注册，完全足够使用，并且没有封号。这个模式下只要可以注册成功就能使用，所以不要贪杯哦。`,
-    confirmLabel: '我知道了，继续',
   });
 
   return {
@@ -10877,9 +10676,6 @@ async function startAutoRunFromCurrentSettings() {
   if (lockedRunCount > 0) {
     inputRunCount.value = String(lockedRunCount);
   }
-  const plusModeEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
-    ? Boolean(inputPlusModeEnabled.checked)
-    : Boolean(currentPlusModeEnabled || latestState?.plusModeEnabled);
   let mode = 'restart';
   const autoRunSkipFailures = inputAutoSkipFailures.checked;
   const contributionNickname = String(inputContributionNickname?.value || '').trim();
@@ -10900,12 +10696,6 @@ async function startAutoRunFromCurrentSettings() {
     mode = choice;
   }
 
-  const confirmedPlusContributionPrompt = await maybeShowPlusContributionPromptBeforeAutoRun(plusModeEnabled);
-  if (!confirmedPlusContributionPrompt) {
-    clearPendingAutoRunStartRunCount();
-    return false;
-  }
-
   if (shouldWarnAutoRunFallbackRisk(totalRuns, autoRunSkipFailures)
     && !isAutoRunFallbackRiskPromptDismissed()) {
     const result = await openAutoRunFallbackRiskConfirmModal(totalRuns);
@@ -10915,18 +10705,6 @@ async function startAutoRunFromCurrentSettings() {
     }
     if (result.dismissPrompt) {
       setAutoRunFallbackRiskPromptDismissed(true);
-    }
-  }
-
-  if (shouldWarnPlusAutoRunRisk(totalRuns, plusModeEnabled)
-    && !isAutoRunPlusRiskPromptDismissed()) {
-    const result = await openPlusAutoRunRiskConfirmModal(totalRuns);
-    if (!result.confirmed) {
-      clearPendingAutoRunStartRunCount();
-      return false;
-    }
-    if (result.dismissPrompt) {
-      setAutoRunPlusRiskPromptDismissed(true);
     }
   }
 
