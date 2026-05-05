@@ -78,6 +78,8 @@ test('background account history settings are normalized independently from hotm
     extractFunction('normalizeFiveSimMaxPrice'),
     extractFunction('normalizeFiveSimCountryFallback'),
     extractFunction('normalizeSub2ApiGroupNames'),
+    extractFunction('normalizeBoundedIntegerSetting'),
+    extractFunction('normalizeLocalHttpBaseUrl'),
     extractFunction('normalizePersistentSettingValue'),
   ].join('\n');
 
@@ -197,6 +199,15 @@ return {
   assert.equal(api.normalizePersistentSettingValue('gopayHelperCountryCode', ' 86 '), '+86');
   assert.equal(api.normalizePersistentSettingValue('gopayHelperPhoneNumber', ' +86 138-0013-8000 '), '+8613800138000');
   assert.equal(api.normalizePersistentSettingValue('gopayHelperPin', ' 12-34-56 '), '123456');
+  assert.equal(api.normalizePersistentSettingValue('gopayHelperOtpChannel', 'SMS'), 'sms');
+  assert.equal(api.normalizePersistentSettingValue('gopayHelperOtpChannel', 'unknown'), 'whatsapp');
+  assert.equal(api.normalizePersistentSettingValue('gopayHelperLocalSmsHelperEnabled', 1), true);
+  assert.equal(
+    api.normalizePersistentSettingValue('gopayHelperLocalSmsHelperUrl', 'http://127.0.0.1:18767/otp?x=1'),
+    'http://127.0.0.1:18767'
+  );
+  assert.equal(api.normalizePersistentSettingValue('gopayHelperLocalSmsTimeoutSeconds', '999'), 300);
+  assert.equal(api.normalizePersistentSettingValue('gopayHelperLocalSmsPollIntervalSeconds', '0'), 1);
   assert.equal(api.normalizePersistentSettingValue('verificationResendCount', '7'), 7);
   assert.equal(api.normalizePersistentSettingValue('verificationResendCount', '-1'), 0);
   assert.equal(api.normalizePersistentSettingValue('phoneVerificationReplacementLimit', '9'), 9);

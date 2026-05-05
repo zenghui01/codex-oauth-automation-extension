@@ -11,7 +11,7 @@
 
   function createPlusCheckoutCreateExecutor(deps = {}) {
     const {
-      addLog,
+      addLog: rawAddLog = async () => {},
       chrome,
       completeStepFromBackground,
       ensureContentScriptReadyOnTabUntilStopped,
@@ -24,6 +24,14 @@
       waitForTabCompleteUntilStopped,
       throwIfStopped = () => {},
     } = deps;
+
+    function addLog(message, level = 'info', options = {}) {
+      return rawAddLog(message, level, {
+        step: 6,
+        stepKey: 'plus-checkout-create',
+        ...(options && typeof options === 'object' ? options : {}),
+      });
+    }
 
     function normalizePlusPaymentMethod(value = '') {
       const rootScope = typeof self !== 'undefined' ? self : globalThis;
@@ -77,6 +85,14 @@
         return cleaned.slice(countryDigits.length);
       }
       return cleaned;
+    }
+
+    function normalizeGpcOtpChannel(value = '') {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      if (rootScope.GoPayUtils?.normalizeGpcOtpChannel) {
+        return rootScope.GoPayUtils.normalizeGpcOtpChannel(value);
+      }
+      return String(value || '').trim().toLowerCase() === 'sms' ? 'sms' : 'whatsapp';
     }
 
     function resolveGpcHelperCardKey(state = {}) {
@@ -307,9 +323,12 @@
           type: 'gopay',
           country_code: countryCode,
           phone_number: normalizeHelperPhoneNumber(phoneNumber, countryCode),
+          phone_mode: 'manual',
+          otp_channel: normalizeGpcOtpChannel(state?.gopayHelperOtpChannel),
         },
       };
 
+      const orderCreatedAt = Date.now();
       const { response, data } = await fetchJsonWithTimeout(apiUrl, {
         method: 'POST',
         headers: {
@@ -346,6 +365,7 @@
         nextAction,
         flowId,
         challengeId,
+        orderCreatedAt,
         responsePayload: data && typeof data === 'object' && !Array.isArray(data) ? data : null,
         country: 'ID',
         currency: 'IDR',
@@ -385,6 +405,7 @@
         gopayHelperFlowId: result.flowId,
         gopayHelperChallengeId: result.challengeId,
         gopayHelperStartPayload: result.responsePayload,
+        gopayHelperOrderCreatedAt: result.orderCreatedAt || Date.now(),
       });
       await addLog('步骤 6：GPC 订单已创建，准备继续下一步。', 'info');
       await completeStepFromBackground(6, {

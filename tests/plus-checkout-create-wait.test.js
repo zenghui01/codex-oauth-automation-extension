@@ -175,12 +175,58 @@ test('GPC checkout injects Plus script before reading ChatGPT session token and 
     type: 'gopay',
     country_code: '86',
     phone_number: '13800138000',
+    phone_mode: 'manual',
+    otp_channel: 'whatsapp',
   });
   assert.equal(events.find((event) => event.type === 'set-state')?.payload?.plusCheckoutSource, 'gpc-helper');
   assert.equal(events.find((event) => event.type === 'set-state')?.payload?.gopayHelperReferenceId, 'ref_123');
   assert.equal(events.find((event) => event.type === 'set-state')?.payload?.gopayHelperFlowId, 'flow_789');
+  assert.ok(events.find((event) => event.type === 'set-state')?.payload?.gopayHelperOrderCreatedAt > 0);
   assert.equal(events.find((event) => event.type === 'complete')?.step, 6);
   assert.equal(events.find((event) => event.type === 'complete')?.payload?.plusCheckoutSource, 'gpc-helper');
+});
+
+test('GPC checkout forwards selected SMS OTP channel', async () => {
+  const fetchCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 88 }),
+        remove: async () => {},
+      },
+    },
+    completeStepFromBackground: async () => {},
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ reference_id: 'ref_sms', next_action: 'enter_otp' }),
+      };
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async () => ({ accessToken: 'session-access-token' }),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePlusCheckoutCreate({
+    email: 'sms@example.com',
+    plusPaymentMethod: 'gpc-helper',
+    gopayHelperApiUrl: 'https://gopay.hwork.pro/',
+    gopayHelperPhoneNumber: '+8613800138000',
+    gopayHelperCountryCode: '+86',
+    gopayHelperPin: '123456',
+    gopayHelperCardKey: 'card_sms',
+    gopayHelperOtpChannel: 'sms',
+  });
+
+  const helperPayload = JSON.parse(fetchCalls[0].options.body);
+  assert.equal(helperPayload.gopay_link.phone_mode, 'manual');
+  assert.equal(helperPayload.gopay_link.otp_channel, 'sms');
 });
 
 test('GPC checkout treats non-zero API amount as non-free-trial and does not create order', async () => {

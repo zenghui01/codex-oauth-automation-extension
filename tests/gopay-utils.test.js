@@ -12,6 +12,9 @@ test('GoPay utils normalize manual OTP input', () => {
   const api = loadGoPayUtils();
   assert.equal(api.normalizeGoPayOtp(' 12-34 56 '), '123456');
   assert.equal(api.normalizeGoPayOtp('abc'), '');
+  assert.equal(api.normalizeGpcOtpChannel('sms'), 'sms');
+  assert.equal(api.normalizeGpcOtpChannel('wa'), 'whatsapp');
+  assert.equal(api.normalizeGpcOtpChannel('unknown'), 'whatsapp');
 });
 
 test('GoPay utils keeps GPC helper payment method distinct', () => {

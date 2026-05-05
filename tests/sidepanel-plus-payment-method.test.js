@@ -132,6 +132,7 @@ test('sidepanel Plus UI hides PayPal account selector while GoPay is selected', 
   const bundle = [
     extractFunction('normalizePlusPaymentMethod'),
     extractFunction('getSelectedPlusPaymentMethod'),
+    extractFunction('normalizeGpcOtpChannelValue'),
     extractFunction('updatePlusModeUI'),
   ].join('\n');
 
@@ -208,6 +209,7 @@ test('sidepanel Plus UI shows GPC fields and purchase button only for GPC withou
   const bundle = [
     extractFunction('normalizePlusPaymentMethod'),
     extractFunction('getSelectedPlusPaymentMethod'),
+    extractFunction('normalizeGpcOtpChannelValue'),
     extractFunction('updatePlusModeUI'),
   ].join('\n');
 
@@ -224,6 +226,11 @@ const rowGpcHelperApi = { style: { display: 'none' } };
 const rowGpcHelperCardKey = { style: { display: 'none' } };
 const rowGpcHelperCountryCode = { style: { display: 'none' } };
 const rowGpcHelperPhone = { style: { display: 'none' } };
+const rowGpcHelperOtpChannel = { style: { display: 'none' } };
+const selectGpcHelperOtpChannel = { value: 'whatsapp' };
+const rowGpcHelperLocalSmsEnabled = { style: { display: 'none' } };
+const inputGpcHelperLocalSmsEnabled = { checked: false };
+const rowGpcHelperLocalSmsUrl = { style: { display: 'none' } };
 const rowGpcHelperPin = { style: { display: 'none' } };
 const rowGoPayCountryCode = { style: { display: 'none' } };
 const rowGoPayPhone = { style: { display: 'none' } };
@@ -233,10 +240,12 @@ ${bundle}
 return {
   updatePlusModeUI,
   selectPlusPaymentMethod,
+  selectGpcHelperOtpChannel,
+  inputGpcHelperLocalSmsEnabled,
   btnGpcCardKeyPurchase,
   rowPayPalAccount,
   plusPaymentMethodCaption,
-  rows: { rowGpcHelperApi, rowGpcHelperCardKey, rowGpcHelperCountryCode, rowGpcHelperPhone, rowGpcHelperPin },
+  rows: { rowGpcHelperApi, rowGpcHelperCardKey, rowGpcHelperCountryCode, rowGpcHelperPhone, rowGpcHelperOtpChannel, rowGpcHelperLocalSmsEnabled, rowGpcHelperLocalSmsUrl, rowGpcHelperPin },
 };
 `)();
 
@@ -247,7 +256,25 @@ return {
   assert.equal(api.rows.rowGpcHelperApi.style.display, 'none');
   assert.equal(api.rows.rowGpcHelperCardKey.style.display, '');
   assert.equal(api.rows.rowGpcHelperPhone.style.display, '');
+  assert.equal(api.rows.rowGpcHelperOtpChannel.style.display, '');
+  assert.equal(api.rows.rowGpcHelperLocalSmsEnabled.style.display, 'none');
+  assert.equal(api.rows.rowGpcHelperLocalSmsUrl.style.display, 'none');
   assert.match(api.plusPaymentMethodCaption.textContent, /GPC/);
+
+  api.selectGpcHelperOtpChannel.value = 'sms';
+  api.updatePlusModeUI();
+  assert.equal(api.rows.rowGpcHelperLocalSmsEnabled.style.display, '');
+  assert.equal(api.rows.rowGpcHelperLocalSmsUrl.style.display, 'none');
+
+  api.inputGpcHelperLocalSmsEnabled.checked = true;
+  api.updatePlusModeUI();
+  assert.equal(api.rows.rowGpcHelperLocalSmsUrl.style.display, '');
+
+  api.selectGpcHelperOtpChannel.value = 'whatsapp';
+  api.updatePlusModeUI();
+  assert.equal(api.inputGpcHelperLocalSmsEnabled.checked, false);
+  assert.equal(api.rows.rowGpcHelperLocalSmsEnabled.style.display, 'none');
+  assert.equal(api.rows.rowGpcHelperLocalSmsUrl.style.display, 'none');
 
   api.selectPlusPaymentMethod.value = 'gopay';
   api.updatePlusModeUI();

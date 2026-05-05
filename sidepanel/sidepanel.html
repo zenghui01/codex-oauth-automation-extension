@@ -315,6 +315,28 @@
         <input type="text" id="input-gpc-helper-phone" class="data-input"
           placeholder="GPC 专用手机号，不读取 GoPay 手机字段" autocomplete="tel" />
       </div>
+      <div class="data-row" id="row-gpc-helper-otp-channel" style="display:none;">
+        <span class="data-label">GPC OTP</span>
+        <select id="select-gpc-helper-otp-channel" class="data-select">
+          <option value="whatsapp">WhatsApp</option>
+          <option value="sms">SMS</option>
+        </select>
+      </div>
+      <div class="data-row" id="row-gpc-helper-local-sms-enabled" style="display:none;">
+        <span class="data-label">本地短信</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="input-gpc-helper-local-sms-enabled" />
+          <span class="toggle-switch-track" aria-hidden="true">
+            <span class="toggle-switch-thumb"></span>
+          </span>
+        </label>
+        <span class="setting-caption">从本机 macOS Messages helper 读取 SMS OTP</span>
+      </div>
+      <div class="data-row" id="row-gpc-helper-local-sms-url" style="display:none;">
+        <span class="data-label">短信接口</span>
+        <input type="text" id="input-gpc-helper-local-sms-url" class="data-input"
+          placeholder="http://127.0.0.1:18767" autocomplete="off" />
+      </div>
       <div class="data-row" id="row-gpc-helper-pin" style="display:none;">
         <span class="data-label">GPC PIN</span>
         <div class="input-with-icon">

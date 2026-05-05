@@ -141,6 +141,9 @@ test('sidepanel html exposes Plus mode, PayPal, and GoPay settings', () => {
   assert.match(html, /id="input-gpc-helper-card-key"/);
   assert.match(html, /id="btn-gpc-helper-balance"/);
   assert.match(html, /id="input-gpc-helper-phone"/);
+  assert.match(html, /id="select-gpc-helper-otp-channel"/);
+  assert.match(html, /id="input-gpc-helper-local-sms-enabled"/);
+  assert.match(html, /id="input-gpc-helper-local-sms-url"/);
   assert.match(html, /id="input-gpc-helper-pin"/);
   assert.match(html, /id="shared-form-modal"/);
 });

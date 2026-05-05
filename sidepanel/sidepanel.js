@@ -194,6 +194,12 @@ const rowGpcHelperCountryCode = document.getElementById('row-gpc-helper-country-
 const selectGpcHelperCountryCode = document.getElementById('select-gpc-helper-country-code');
 const rowGpcHelperPhone = document.getElementById('row-gpc-helper-phone');
 const inputGpcHelperPhone = document.getElementById('input-gpc-helper-phone');
+const rowGpcHelperOtpChannel = document.getElementById('row-gpc-helper-otp-channel');
+const selectGpcHelperOtpChannel = document.getElementById('select-gpc-helper-otp-channel');
+const rowGpcHelperLocalSmsEnabled = document.getElementById('row-gpc-helper-local-sms-enabled');
+const inputGpcHelperLocalSmsEnabled = document.getElementById('input-gpc-helper-local-sms-enabled');
+const rowGpcHelperLocalSmsUrl = document.getElementById('row-gpc-helper-local-sms-url');
+const inputGpcHelperLocalSmsUrl = document.getElementById('input-gpc-helper-local-sms-url');
 const rowGpcHelperPin = document.getElementById('row-gpc-helper-pin');
 const inputGpcHelperPin = document.getElementById('input-gpc-helper-pin');
 const btnToggleGpcHelperPin = document.getElementById('btn-toggle-gpc-helper-pin');
@@ -2032,6 +2038,34 @@ function getSelectedPlusPaymentMethod(state = latestState) {
   return normalizePlusPaymentMethod(state?.plusPaymentMethod || currentPlusPaymentMethod || defaultMethod);
 }
 
+function normalizeGpcOtpChannelValue(value = '') {
+  const rootScope = typeof window !== 'undefined' ? window : globalThis;
+  if (rootScope.GoPayUtils?.normalizeGpcOtpChannel) {
+    return rootScope.GoPayUtils.normalizeGpcOtpChannel(value);
+  }
+  return String(value || '').trim().toLowerCase() === 'sms' ? 'sms' : 'whatsapp';
+}
+
+function normalizeGpcLocalSmsHelperBaseUrlValue(value = '') {
+  const fallback = 'http://127.0.0.1:18767';
+  const rawValue = String(value || fallback).trim();
+  try {
+    const parsed = new URL(rawValue);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return fallback;
+    }
+    const endpointPath = parsed.pathname.replace(/\/+$/g, '') || '/';
+    if (['/otp', '/latest-otp', '/health'].includes(endpointPath)) {
+      parsed.pathname = '';
+      parsed.search = '';
+      parsed.hash = '';
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
+
 function hasOwnStateValue(source, key) {
   return Object.prototype.hasOwnProperty.call(source, key);
 }
@@ -2738,6 +2772,36 @@ function collectSettingsPayload() {
       .map((line) => line.trim())
       .filter(Boolean)
       .join('\n'));
+  const normalizeGpcOtpChannelSafe = typeof normalizeGpcOtpChannelValue === 'function'
+    ? normalizeGpcOtpChannelValue
+    : ((value = '') => {
+      const rootScope = typeof window !== 'undefined' ? window : globalThis;
+      if (rootScope.GoPayUtils?.normalizeGpcOtpChannel) {
+        return rootScope.GoPayUtils.normalizeGpcOtpChannel(value);
+      }
+      return String(value || '').trim().toLowerCase() === 'sms' ? 'sms' : 'whatsapp';
+    });
+  const normalizeGpcLocalSmsHelperBaseUrlSafe = typeof normalizeGpcLocalSmsHelperBaseUrlValue === 'function'
+    ? normalizeGpcLocalSmsHelperBaseUrlValue
+    : ((value = '') => {
+      const fallback = 'http://127.0.0.1:18767';
+      const rawValue = String(value || fallback).trim();
+      try {
+        const parsed = new URL(rawValue);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          return fallback;
+        }
+        const endpointPath = parsed.pathname.replace(/\/+$/g, '') || '/';
+        if (['/otp', '/latest-otp', '/health'].includes(endpointPath)) {
+          parsed.pathname = '';
+          parsed.search = '';
+          parsed.hash = '';
+        }
+        return parsed.toString().replace(/\/$/, '');
+      } catch {
+        return fallback;
+      }
+    });
   const getSelectedIpProxyEnabledSafe = typeof getSelectedIpProxyEnabled === 'function'
     ? getSelectedIpProxyEnabled
     : (() => false);
@@ -3078,6 +3142,16 @@ function collectSettingsPayload() {
         : (String(latestState?.signupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email'))
     );
   const plusPaymentMethod = getSelectedPlusPaymentMethod();
+  const selectedGpcOtpChannel = normalizeGpcOtpChannelSafe(
+    typeof selectGpcHelperOtpChannel !== 'undefined' && selectGpcHelperOtpChannel
+      ? selectGpcHelperOtpChannel.value
+      : (latestState?.gopayHelperOtpChannel || 'whatsapp')
+  );
+  const selectedGpcLocalSmsHelperEnabled = selectedGpcOtpChannel === 'sms' && Boolean(
+    typeof inputGpcHelperLocalSmsEnabled !== 'undefined' && inputGpcHelperLocalSmsEnabled
+      ? inputGpcHelperLocalSmsEnabled.checked
+      : latestState?.gopayHelperLocalSmsHelperEnabled
+  );
   const selectedSub2ApiGroupName = String(inputSub2ApiGroup.value || '').trim();
   const sub2apiGroupNames = [];
   const seenSub2ApiGroupNames = new Set();
@@ -3193,6 +3267,13 @@ function collectSettingsPayload() {
       : (typeof inputGpcHelperPin !== 'undefined' && inputGpcHelperPin
         ? String(inputGpcHelperPin.value || '')
         : String(latestState?.gopayHelperPin || '')),
+    gopayHelperOtpChannel: selectedGpcOtpChannel,
+    gopayHelperLocalSmsHelperEnabled: selectedGpcLocalSmsHelperEnabled,
+    gopayHelperLocalSmsHelperUrl: normalizeGpcLocalSmsHelperBaseUrlSafe(
+      typeof inputGpcHelperLocalSmsUrl !== 'undefined' && inputGpcHelperLocalSmsUrl
+        ? inputGpcHelperLocalSmsUrl.value
+        : (latestState?.gopayHelperLocalSmsHelperUrl || '')
+    ),
     ...(contributionModeEnabled ? {} : {
       customPassword: inputPassword.value,
     }),
@@ -6919,6 +7000,22 @@ function updatePlusModeUI() {
     ? Boolean(inputPlusModeEnabled.checked)
     : false;
   const method = enabled ? getSelectedPlusPaymentMethod() : defaultMethod;
+  const gpcOtpChannel = normalizeGpcOtpChannelValue(
+    typeof selectGpcHelperOtpChannel !== 'undefined' && selectGpcHelperOtpChannel
+      ? selectGpcHelperOtpChannel.value
+      : (latestState?.gopayHelperOtpChannel || 'whatsapp')
+  );
+  const localSmsEnabled = Boolean(
+    typeof inputGpcHelperLocalSmsEnabled !== 'undefined' && inputGpcHelperLocalSmsEnabled
+      ? inputGpcHelperLocalSmsEnabled.checked
+      : latestState?.gopayHelperLocalSmsHelperEnabled
+  );
+  const selectedMethod = typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod?.value
+    ? normalizePlusPaymentMethod(selectPlusPaymentMethod.value)
+    : method;
+  const gpcRowsVisible = enabled && selectedMethod === gpcValue;
+  const localSmsControlsVisible = gpcRowsVisible && gpcOtpChannel === 'sms';
+  const effectiveLocalSmsEnabled = gpcOtpChannel === 'sms' && localSmsEnabled;
   if (typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod) {
     selectPlusPaymentMethod.value = method;
     if (selectPlusPaymentMethod.style) {
@@ -6946,27 +7043,34 @@ function updatePlusModeUI() {
     if (!row) {
       return;
     }
-    const selectedMethod = typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod?.value
-      ? normalizePlusPaymentMethod(selectPlusPaymentMethod.value)
-      : method;
     row.style.display = enabled && selectedMethod === paypalValue ? '' : 'none';
   });
   [
     typeof rowGpcHelperCardKey !== 'undefined' ? rowGpcHelperCardKey : null,
     typeof rowGpcHelperCountryCode !== 'undefined' ? rowGpcHelperCountryCode : null,
     typeof rowGpcHelperPhone !== 'undefined' ? rowGpcHelperPhone : null,
+    typeof rowGpcHelperOtpChannel !== 'undefined' ? rowGpcHelperOtpChannel : null,
     typeof rowGpcHelperPin !== 'undefined' ? rowGpcHelperPin : null,
   ].forEach((row) => {
     if (!row) {
       return;
     }
-    const selectedMethod = typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod?.value
-      ? normalizePlusPaymentMethod(selectPlusPaymentMethod.value)
-      : method;
-    row.style.display = enabled && selectedMethod === gpcValue ? '' : 'none';
+    row.style.display = gpcRowsVisible ? '' : 'none';
   });
+  if (typeof selectGpcHelperOtpChannel !== 'undefined' && selectGpcHelperOtpChannel) {
+    selectGpcHelperOtpChannel.value = gpcOtpChannel;
+  }
+  if (typeof inputGpcHelperLocalSmsEnabled !== 'undefined' && inputGpcHelperLocalSmsEnabled) {
+    inputGpcHelperLocalSmsEnabled.checked = effectiveLocalSmsEnabled;
+  }
+  if (typeof rowGpcHelperLocalSmsEnabled !== 'undefined' && rowGpcHelperLocalSmsEnabled) {
+    rowGpcHelperLocalSmsEnabled.style.display = localSmsControlsVisible ? '' : 'none';
+  }
+  if (typeof rowGpcHelperLocalSmsUrl !== 'undefined' && rowGpcHelperLocalSmsUrl) {
+    rowGpcHelperLocalSmsUrl.style.display = localSmsControlsVisible && effectiveLocalSmsEnabled ? '' : 'none';
+  }
   if (typeof btnGpcCardKeyPurchase !== 'undefined' && btnGpcCardKeyPurchase) {
-    btnGpcCardKeyPurchase.style.display = enabled && method === gpcValue ? '' : 'none';
+    btnGpcCardKeyPurchase.style.display = gpcRowsVisible ? '' : 'none';
   }
   [
     typeof rowGoPayCountryCode !== 'undefined' ? rowGoPayCountryCode : null,
@@ -6977,9 +7081,6 @@ function updatePlusModeUI() {
     if (!row) {
       return;
     }
-    const selectedMethod = typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod?.value
-      ? normalizePlusPaymentMethod(selectPlusPaymentMethod.value)
-      : method;
     row.style.display = enabled && selectedMethod === gopayValue ? '' : 'none';
   });
 }
@@ -7694,6 +7795,15 @@ function applySettingsState(state) {
   }
   if (typeof inputGpcHelperPhone !== 'undefined' && inputGpcHelperPhone) {
     inputGpcHelperPhone.value = state?.gopayHelperPhoneNumber || '';
+  }
+  if (typeof selectGpcHelperOtpChannel !== 'undefined' && selectGpcHelperOtpChannel) {
+    selectGpcHelperOtpChannel.value = normalizeGpcOtpChannelValue(state?.gopayHelperOtpChannel || 'whatsapp');
+  }
+  if (typeof inputGpcHelperLocalSmsEnabled !== 'undefined' && inputGpcHelperLocalSmsEnabled) {
+    inputGpcHelperLocalSmsEnabled.checked = Boolean(state?.gopayHelperLocalSmsHelperEnabled);
+  }
+  if (typeof inputGpcHelperLocalSmsUrl !== 'undefined' && inputGpcHelperLocalSmsUrl) {
+    inputGpcHelperLocalSmsUrl.value = normalizeGpcLocalSmsHelperBaseUrlValue(state?.gopayHelperLocalSmsHelperUrl || '');
   }
   if (typeof inputGpcHelperPin !== 'undefined' && inputGpcHelperPin) {
     inputGpcHelperPin.value = state?.gopayHelperPin || '';
@@ -11105,6 +11215,9 @@ selectPlusPaymentMethod?.addEventListener('change', () => {
   inputGpcHelperCardKey,
   selectGpcHelperCountryCode,
   inputGpcHelperPhone,
+  selectGpcHelperOtpChannel,
+  inputGpcHelperLocalSmsEnabled,
+  inputGpcHelperLocalSmsUrl,
   inputGpcHelperPin,
   selectGoPayCountryCode,
   inputGoPayPhone,
@@ -11114,6 +11227,16 @@ selectPlusPaymentMethod?.addEventListener('change', () => {
   input?.addEventListener('input', () => {
     markSettingsDirty(true);
     scheduleSettingsAutoSave();
+  });
+  input?.addEventListener('change', () => {
+    if (input === inputGpcHelperLocalSmsEnabled && input.checked && selectGpcHelperOtpChannel) {
+      selectGpcHelperOtpChannel.value = 'sms';
+    }
+    if (input === selectGpcHelperOtpChannel || input === inputGpcHelperLocalSmsEnabled) {
+      updatePlusModeUI();
+    }
+    markSettingsDirty(true);
+    saveSettings({ silent: true }).catch(() => { });
   });
   input?.addEventListener('blur', () => {
     saveSettings({ silent: true }).catch(() => { });
@@ -12937,7 +13060,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.plusPaymentMethod !== undefined && selectPlusPaymentMethod) {
         selectPlusPaymentMethod.value = normalizePlusPaymentMethod(message.payload.plusPaymentMethod);
       }
-      if (message.payload.plusModeEnabled !== undefined || message.payload.plusPaymentMethod !== undefined) {
+      if (message.payload.gopayHelperOtpChannel !== undefined && selectGpcHelperOtpChannel) {
+        selectGpcHelperOtpChannel.value = normalizeGpcOtpChannelValue(message.payload.gopayHelperOtpChannel);
+      }
+      if (message.payload.gopayHelperLocalSmsHelperEnabled !== undefined && inputGpcHelperLocalSmsEnabled) {
+        inputGpcHelperLocalSmsEnabled.checked = Boolean(message.payload.gopayHelperLocalSmsHelperEnabled);
+      }
+      if (message.payload.gopayHelperLocalSmsHelperUrl !== undefined && inputGpcHelperLocalSmsUrl) {
+        inputGpcHelperLocalSmsUrl.value = normalizeGpcLocalSmsHelperBaseUrlValue(message.payload.gopayHelperLocalSmsHelperUrl);
+      }
+      if (message.payload.gopayHelperBalance !== undefined || message.payload.gopayHelperBalanceError !== undefined) {
+        if (typeof displayGpcHelperBalance !== 'undefined' && displayGpcHelperBalance) {
+          const balanceText = String(message.payload.gopayHelperBalance ?? latestState?.gopayHelperBalance ?? '').trim();
+          const balanceError = String(message.payload.gopayHelperBalanceError ?? latestState?.gopayHelperBalanceError ?? '').trim();
+          displayGpcHelperBalance.textContent = balanceError
+            ? `余额查询失败：${balanceError}`
+            : (balanceText || '余额已更新');
+        }
+      }
+      if (
+        message.payload.plusModeEnabled !== undefined
+        || message.payload.plusPaymentMethod !== undefined
+        || message.payload.gopayHelperOtpChannel !== undefined
+        || message.payload.gopayHelperLocalSmsHelperEnabled !== undefined
+      ) {
         syncStepDefinitionsForMode(
           Boolean(latestState?.plusModeEnabled),
           latestState?.plusPaymentMethod,
