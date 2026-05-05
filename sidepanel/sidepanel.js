@@ -708,6 +708,8 @@ const DEFAULT_MAIL_2925_MODE = MAIL_2925_MODE_PROVIDE;
 const NEW_USER_GUIDE_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-new-user-guide-prompt-dismissed';
 const AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-skip-failures-prompt-dismissed';
 const AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-fallback-risk-prompt-dismissed';
+const CPA_PHONE_SIGNUP_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-cpa-phone-signup-prompt-dismissed';
+const CPA_PHONE_SIGNUP_WARNING_MESSAGE = 'CPA 未适配手机号注册模式，认证成功后无法使用。请使用 SUB2API，或者认证成功后重新登录一遍进行解决。';
 const PHONE_VERIFICATION_SECTION_EXPANDED_STORAGE_KEY = 'multipage-phone-verification-section-expanded';
 let phoneVerificationSectionExpanded = false;
 
@@ -1788,8 +1790,71 @@ function setAutoRunFallbackRiskPromptDismissed(dismissed) {
   setPromptDismissed(AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
 }
 
+function isCpaPhoneSignupPromptDismissed() {
+  return isPromptDismissed(CPA_PHONE_SIGNUP_PROMPT_DISMISSED_STORAGE_KEY);
+}
+
+function setCpaPhoneSignupPromptDismissed(dismissed) {
+  setPromptDismissed(CPA_PHONE_SIGNUP_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
+}
+
 function shouldWarnAutoRunFallbackRisk(totalRuns, autoRunSkipFailures) {
   return totalRuns >= AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS;
+}
+
+function shouldWarnCpaPhoneSignup(signupMethod = null, panelMode = null) {
+  const resolvedSignupMethod = normalizeSignupMethod(
+    signupMethod ?? (
+      typeof getSelectedSignupMethod === 'function'
+        ? getSelectedSignupMethod()
+        : DEFAULT_SIGNUP_METHOD
+    )
+  );
+  const resolvedPanelMode = normalizePanelMode(
+    panelMode ?? (
+      typeof getSelectedPanelMode === 'function'
+        ? getSelectedPanelMode()
+        : 'cpa'
+    )
+  );
+
+  return resolvedSignupMethod === SIGNUP_METHOD_PHONE
+    && resolvedPanelMode === 'cpa'
+    && !isCpaPhoneSignupPromptDismissed();
+}
+
+async function openCpaPhoneSignupWarningModal() {
+  const result = await openConfirmModalWithOption({
+    title: 'CPA 手机号注册提醒',
+    message: CPA_PHONE_SIGNUP_WARNING_MESSAGE,
+    confirmLabel: '继续',
+    optionLabel: '不再提醒',
+  });
+
+  return {
+    confirmed: result.confirmed,
+    dismissPrompt: result.optionChecked,
+  };
+}
+
+async function confirmCpaPhoneSignupIfNeeded(options = {}) {
+  const signupMethod = Object.prototype.hasOwnProperty.call(options, 'signupMethod')
+    ? options.signupMethod
+    : null;
+  const panelMode = Object.prototype.hasOwnProperty.call(options, 'panelMode')
+    ? options.panelMode
+    : null;
+
+  if (!shouldWarnCpaPhoneSignup(signupMethod, panelMode)) {
+    return true;
+  }
+
+  const result = await openCpaPhoneSignupWarningModal();
+  if (result.dismissPrompt) {
+    setCpaPhoneSignupPromptDismissed(true);
+  }
+
+  return result.confirmed;
 }
 
 async function openAutoSkipFailuresConfirmModal() {
@@ -6633,6 +6698,21 @@ function normalizeSignupMethod(value = '') {
     : 'email';
 }
 
+function normalizePanelMode(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'sub2api' || normalized === 'codex2api') {
+    return normalized;
+  }
+  return 'cpa';
+}
+
+function getSelectedPanelMode() {
+  const selectedValue = typeof selectPanelMode !== 'undefined' && selectPanelMode
+    ? selectPanelMode.value
+    : (typeof latestState !== 'undefined' ? latestState?.panelMode : '');
+  return normalizePanelMode(selectedValue || 'cpa');
+}
+
 function getSelectedSignupMethod() {
   const activeButton = signupMethodButtons.find((button) => button.classList.contains('is-active'));
   return normalizeSignupMethod(activeButton?.dataset.signupMethod || latestState?.signupMethod || DEFAULT_SIGNUP_METHOD);
@@ -7652,7 +7732,7 @@ function applySettingsState(state) {
   inputVpsUrl.value = state?.vpsUrl || '';
   inputVpsPassword.value = state?.vpsPassword || '';
   setLocalCpaStep9Mode(state?.localCpaStep9Mode);
-  selectPanelMode.value = state?.panelMode || 'cpa';
+  selectPanelMode.value = normalizePanelMode(state?.panelMode || 'cpa');
   inputSub2ApiUrl.value = state?.sub2apiUrl || '';
   inputSub2ApiEmail.value = state?.sub2apiEmail || '';
   inputSub2ApiPassword.value = state?.sub2apiPassword || '';
@@ -9409,8 +9489,12 @@ async function handleDeleteSub2ApiGroup(groupName) {
 }
 
 function updatePanelModeUI() {
-  const useSub2Api = selectPanelMode.value === 'sub2api';
-  const useCodex2Api = selectPanelMode.value === 'codex2api';
+  const panelMode = getSelectedPanelMode();
+  if (selectPanelMode) {
+    selectPanelMode.value = panelMode;
+  }
+  const useSub2Api = panelMode === 'sub2api';
+  const useCodex2Api = panelMode === 'codex2api';
   const useCpa = !useSub2Api && !useCodex2Api;
   rowVpsUrl.style.display = useCpa ? '' : 'none';
   rowVpsPassword.style.display = useCpa ? '' : 'none';
@@ -10714,8 +10798,8 @@ async function startAutoRunFromCurrentSettings() {
   const delayMinutes = normalizeAutoDelayMinutes(inputAutoDelayMinutes.value);
   inputAutoDelayMinutes.value = String(delayMinutes);
   btnAutoRun.innerHTML = delayEnabled
-    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> 璁″垝涓?..'
-    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> 杩愯涓?..';
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> 计划中...'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> 运行中...';
   const response = await chrome.runtime.sendMessage({
     type: delayEnabled ? 'SCHEDULE_AUTO_RUN' : 'AUTO_RUN',
     source: 'sidepanel',
@@ -11133,7 +11217,20 @@ checkboxAutoDeleteIcloud?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
-selectPanelMode.addEventListener('change', () => {
+selectPanelMode.addEventListener('change', async () => {
+  const previousPanelMode = normalizePanelMode(latestState?.panelMode || 'cpa');
+  const nextPanelMode = normalizePanelMode(selectPanelMode.value);
+  selectPanelMode.value = nextPanelMode;
+  const confirmed = await confirmCpaPhoneSignupIfNeeded({
+    signupMethod: getSelectedSignupMethod(),
+    panelMode: nextPanelMode,
+  });
+  if (!confirmed) {
+    selectPanelMode.value = previousPanelMode;
+    updatePanelModeUI();
+    return;
+  }
+  syncLatestState({ panelMode: nextPanelMode });
   updatePanelModeUI();
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
@@ -12045,11 +12142,20 @@ inputPhoneVerificationEnabled?.addEventListener('change', () => {
 });
 
 signupMethodButtons.forEach((button) => {
-  button.addEventListener('click', () => {
+  button.addEventListener('click', async () => {
     if (button.disabled) {
       return;
     }
-    setSignupMethod(button.dataset.signupMethod);
+    const nextSignupMethod = normalizeSignupMethod(button.dataset.signupMethod);
+    const confirmed = await confirmCpaPhoneSignupIfNeeded({
+      signupMethod: nextSignupMethod,
+      panelMode: getSelectedPanelMode(),
+    });
+    if (!confirmed) {
+      updateSignupMethodUI();
+      return;
+    }
+    setSignupMethod(nextSignupMethod);
     updateSignupMethodUI();
     markSettingsDirty(true);
     saveSettings({ silent: true }).catch(() => { });
@@ -12636,7 +12742,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         setLocalCpaStep9Mode(message.payload.localCpaStep9Mode);
       }
       if (message.payload.panelMode !== undefined) {
-        selectPanelMode.value = message.payload.panelMode || 'cpa';
+        selectPanelMode.value = normalizePanelMode(message.payload.panelMode || 'cpa');
         updatePanelModeUI();
       }
       if (
