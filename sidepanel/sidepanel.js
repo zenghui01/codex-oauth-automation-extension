@@ -496,7 +496,7 @@ const stepsList = document.querySelector('.steps-list');
 const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
 const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
 const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
-const DEFAULT_GPC_HELPER_API_URL = 'https://gopay.hwork.pro';
+const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.leftcode.xyz';
 const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
@@ -2695,7 +2695,7 @@ function applyCloudflareTempEmailSettingsState(state = {}) {
 function collectSettingsPayload() {
   const defaultGpcHelperApiUrl = typeof DEFAULT_GPC_HELPER_API_URL !== 'undefined'
     ? DEFAULT_GPC_HELPER_API_URL
-    : 'https://gopay.hwork.pro';
+    : 'https://gpc.leftcode.xyz';
   const { domains, activeDomain } = getCloudflareDomainsFromState();
   const selectedCloudflareDomain = normalizeCloudflareDomainValue(
     !cloudflareDomainEditMode ? selectCfDomain.value : activeDomain
@@ -3287,9 +3287,10 @@ function collectSettingsPayload() {
       : (typeof inputGpcHelperApi !== 'undefined' && inputGpcHelperApi
         ? String(inputGpcHelperApi.value || defaultGpcHelperApiUrl).trim().replace(/\/+$/g, '')
         : String(latestState?.gopayHelperApiUrl || defaultGpcHelperApiUrl).trim()),
-    gopayHelperCardKey: typeof inputGpcHelperCardKey !== 'undefined' && inputGpcHelperCardKey
+    gopayHelperApiKey: typeof inputGpcHelperCardKey !== 'undefined' && inputGpcHelperCardKey
       ? String(inputGpcHelperCardKey.value || '').trim()
-      : String(latestState?.gopayHelperCardKey || '').trim(),
+      : String(latestState?.gopayHelperApiKey || latestState?.gopayHelperCardKey || '').trim(),
+    gopayHelperCardKey: '',
     gopayHelperCountryCode: window.GoPayUtils?.normalizeGoPayCountryCode
       ? window.GoPayUtils.normalizeGoPayCountryCode(typeof selectGpcHelperCountryCode !== 'undefined' && selectGpcHelperCountryCode ? selectGpcHelperCountryCode.value : latestState?.gopayHelperCountryCode)
       : (typeof selectGpcHelperCountryCode !== 'undefined' && selectGpcHelperCountryCode
@@ -7178,6 +7179,7 @@ function updatePlusModeUI() {
     row.style.display = enabled && selectedMethod === paypalValue ? '' : 'none';
   });
   [
+    typeof rowGpcHelperApi !== 'undefined' ? rowGpcHelperApi : null,
     typeof rowGpcHelperCardKey !== 'undefined' ? rowGpcHelperCardKey : null,
     typeof rowGpcHelperCountryCode !== 'undefined' ? rowGpcHelperCountryCode : null,
     typeof rowGpcHelperPhone !== 'undefined' ? rowGpcHelperPhone : null,
@@ -7427,7 +7429,7 @@ async function openPlusManualConfirmationDialog(options = {}) {
           validate: (value) => {
             const normalized = String(value || '').trim().replace(/[^\d]/g, '');
             if (!normalized) return '请输入 OTP 验证码。';
-            if (normalized.length < 4) return 'OTP 验证码长度过短，请检查。';
+            if (!/^\d{6}$/.test(normalized)) return 'OTP 必须是 6 位数字，请检查。';
             return '';
           },
         },
@@ -7920,11 +7922,11 @@ function applySettingsState(state) {
   if (typeof inputGpcHelperApi !== 'undefined' && inputGpcHelperApi) {
     const defaultGpcHelperApiUrl = typeof DEFAULT_GPC_HELPER_API_URL !== 'undefined'
       ? DEFAULT_GPC_HELPER_API_URL
-      : 'https://gopay.hwork.pro';
+      : 'https://gpc.leftcode.xyz';
     inputGpcHelperApi.value = state?.gopayHelperApiUrl || defaultGpcHelperApiUrl;
   }
   if (typeof inputGpcHelperCardKey !== 'undefined' && inputGpcHelperCardKey) {
-    inputGpcHelperCardKey.value = state?.gopayHelperCardKey || '';
+    inputGpcHelperCardKey.value = state?.gopayHelperApiKey || state?.gopayHelperCardKey || '';
   }
   if (typeof selectGpcHelperCountryCode !== 'undefined' && selectGpcHelperCountryCode) {
     const normalizedCountryCode = window.GoPayUtils?.normalizeGoPayCountryCode
@@ -11341,7 +11343,7 @@ btnGpcHelperBalance?.addEventListener('click', async () => {
       source: 'sidepanel',
       payload: {
         gopayHelperApiUrl: inputGpcHelperApi?.value || DEFAULT_GPC_HELPER_API_URL,
-        gopayHelperCardKey: inputGpcHelperCardKey?.value || '',
+        gopayHelperApiKey: inputGpcHelperCardKey?.value || '',
         gopayHelperCountryCode: selectGpcHelperCountryCode?.value || '+86',
         reason: 'manual',
       },
