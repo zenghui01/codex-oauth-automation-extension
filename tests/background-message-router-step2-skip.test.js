@@ -435,6 +435,36 @@ test('message router marks step 3 failed when post-submit finalize fails', async
   assert.deepStrictEqual(response, { ok: true, error: '步骤 3 提交后仍停留在密码页。' });
 });
 
+test('message router does not duplicate step 3 mismatch failure log after finalize already failed', async () => {
+  const mismatchError = 'SIGNUP_PHONE_PASSWORD_MISMATCH::步骤 3：检测到注册手机号或密码不正确，需要重新开始当前轮。页面提示：Incorrect phone number or password';
+  const state = {
+    stepStatuses: {
+      3: 'failed',
+    },
+  };
+  const { router, events } = createRouter({
+    state,
+  });
+
+  const response = await router.handleMessage({
+    type: 'STEP_ERROR',
+    step: 3,
+    source: 'signup-page',
+    payload: {},
+    error: mismatchError,
+  }, {});
+
+  assert.deepStrictEqual(events.stepStatuses, []);
+  assert.equal(events.logs.some(({ message, step }) => /失败：SIGNUP_PHONE_PASSWORD_MISMATCH::/.test(message) && step === 3), false);
+  assert.deepStrictEqual(events.notifyErrors, [
+    {
+      step: 3,
+      error: mismatchError,
+    },
+  ]);
+  assert.deepStrictEqual(response, { ok: true });
+});
+
 test('message router stops the flow and surfaces cloudflare security block errors', async () => {
   const { router, events } = createRouter();
 

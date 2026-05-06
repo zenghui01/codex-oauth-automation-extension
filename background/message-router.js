@@ -587,15 +587,20 @@
             notifyStepError(message.step, '流程已被用户停止。');
             return { ok: true, error: userMessage };
           }
+          const currentState = await getState();
+          const currentStepStatus = currentState?.stepStatuses?.[message.step] || '';
+          const isSignupPhonePasswordMismatch = /SIGNUP_PHONE_PASSWORD_MISMATCH::/i.test(String(message.error || ''));
           if (isStopError(message.error)) {
             await setStepStatus(message.step, 'stopped');
             await addLog('已被用户停止', 'warn', { step: message.step });
             await appendManualAccountRunRecordIfNeeded(`step${message.step}_stopped`, null, message.error);
             notifyStepError(message.step, message.error);
           } else {
-            await setStepStatus(message.step, 'failed');
-            await addLog(`失败：${message.error}`, 'error', { step: message.step });
-            await appendManualAccountRunRecordIfNeeded(`step${message.step}_failed`, null, message.error);
+            if (!(isSignupPhonePasswordMismatch && currentStepStatus === 'failed')) {
+              await setStepStatus(message.step, 'failed');
+              await addLog(`失败：${message.error}`, 'error', { step: message.step });
+              await appendManualAccountRunRecordIfNeeded(`step${message.step}_failed`, null, message.error);
+            }
             notifyStepError(message.step, message.error);
           }
           return { ok: true };
