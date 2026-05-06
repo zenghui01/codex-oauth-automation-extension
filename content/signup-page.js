@@ -450,6 +450,9 @@ const SIGNUP_PHONE_ACTION_PATTERN = /手机|手机号|电话号码|phone|telepho
 const SIGNUP_SWITCH_TO_PHONE_PATTERN = new RegExp([
   String.raw`\u7ee7\u7eed\u4f7f\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?\u767b\u5f55`,
   String.raw`\u6539\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?\u767b\u5f55`,
+  String.raw`\u7ee7\u7eed\u4f7f\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u624b\u673a\u53f7\u7801|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?`,
+  String.raw`\u6539\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u624b\u673a\u53f7\u7801|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?`,
+  String.raw`\u4f7f\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u624b\u673a\u53f7\u7801|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?`,
   String.raw`continue\s+(?:with|using)\s+(?:a\s+)?phone(?:\s+number)?`,
   String.raw`use\s+(?:a\s+)?phone(?:\s+number)?(?:\s+instead)?`,
   String.raw`sign\s*(?:in|up)\s+with\s+(?:a\s+)?phone`,
@@ -615,6 +618,7 @@ function inspectSignupEntryState() {
       passwordInput,
       submitButton: getSignupPasswordSubmitButton({ allowDisabled: true }),
       displayedEmail: getSignupPasswordDisplayedEmail(),
+      passwordErrorText: getSignupPasswordFieldErrorText(),
       url: location.href,
     };
   }
@@ -927,6 +931,7 @@ function getSignupPasswordDiagnostics() {
     title: document.title || '',
     readyState: document.readyState || '',
     displayedEmail: getSignupPasswordDisplayedEmail(),
+    passwordErrorText: getSignupPasswordFieldErrorText(),
     hasVisiblePasswordInput: Boolean(getSignupPasswordInput()),
     passwordInputCount: passwordInputs.length,
     visiblePasswordInputCount: passwordInputs.filter((item) => item.visible).length,
@@ -2484,9 +2489,11 @@ const AUTH_ROUTE_ERROR_PATTERN = /405\s+method\s+not\s+allowed|route\s+error.*40
 const STEP4_405_RECOVERY_ERROR_PREFIX = 'STEP4_405_RECOVERY_LIMIT::';
 const STEP4_405_RECOVERY_LIMIT = 3;
 const SIGNUP_USER_ALREADY_EXISTS_ERROR_PREFIX = 'SIGNUP_USER_ALREADY_EXISTS::';
+const SIGNUP_PHONE_PASSWORD_MISMATCH_ERROR_PREFIX = 'SIGNUP_PHONE_PASSWORD_MISMATCH::';
 const AUTH_MAX_CHECK_ATTEMPTS_ERROR_PREFIX = 'AUTH_MAX_CHECK_ATTEMPTS::';
 const STEP8_EMAIL_IN_USE_ERROR_PREFIX = 'STEP8_EMAIL_IN_USE::';
 const SIGNUP_EMAIL_EXISTS_PATTERN = /与此电子邮件地址相关联的帐户已存在|account\s+associated\s+with\s+this\s+email\s+address\s+already\s+exists|email\s+address.*already\s+exists/i;
+const SIGNUP_PHONE_PASSWORD_MISMATCH_PATTERN = /incorrect\s+phone\s+number\s+or\s+password|phone\s+number\s+or\s+password/i;
 
 const authPageRecovery = self.MultiPageAuthPageRecovery?.createAuthPageRecovery?.({
   detailPattern: AUTH_TIMEOUT_ERROR_DETAIL_PATTERN,
@@ -2543,6 +2550,14 @@ function createSignupUserAlreadyExistsError() {
   );
 }
 
+function createSignupPhonePasswordMismatchError(detailText = '') {
+  const detail = String(detailText || '').replace(/\s+/g, ' ').trim();
+  const suffix = detail ? `页面提示：${detail}` : '页面提示手机号或密码不正确。';
+  return new Error(
+    `${SIGNUP_PHONE_PASSWORD_MISMATCH_ERROR_PREFIX}步骤 3：检测到注册手机号或密码不正确，需要重新开始当前轮。${suffix}`
+  );
+}
+
 function createAuthMaxCheckAttemptsError() {
   return new Error(`${AUTH_MAX_CHECK_ATTEMPTS_ERROR_PREFIX}max_check_attempts on auth retry page; restart the current auth step without clicking Retry.`);
 }
@@ -2570,6 +2585,24 @@ function getVisibleFieldErrorText() {
     });
     if (match) {
       return (match.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  return '';
+}
+
+function getSignupPasswordFieldErrorText() {
+  const text = getVisibleFieldErrorText();
+  if (text && SIGNUP_PHONE_PASSWORD_MISMATCH_PATTERN.test(text)) {
+    return text;
+  }
+
+  const passwordInput = getSignupPasswordInput();
+  if (passwordInput) {
+    const wrapper = passwordInput.closest('form, [data-rac], [role="group"], section, div');
+    const wrapperText = (wrapper?.textContent || '').replace(/\s+/g, ' ').trim();
+    if (wrapperText && SIGNUP_PHONE_PASSWORD_MISMATCH_PATTERN.test(wrapperText)) {
+      return wrapperText;
     }
   }
 
@@ -4372,6 +4405,7 @@ function inspectSignupVerificationState() {
       state: 'password',
       passwordInput,
       submitButton: getSignupPasswordSubmitButton({ allowDisabled: true }),
+      passwordErrorText: getSignupPasswordFieldErrorText(),
     };
   }
 
@@ -4465,6 +4499,10 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
     }
 
     if (snapshot.state === 'password') {
+      if (snapshot.passwordErrorText) {
+        log(`${prepareLogLabel}：检测到密码页报错“${snapshot.passwordErrorText}”，当前轮将回到步骤 1 重新开始。`, 'warn');
+        throw createSignupPhonePasswordMismatchError(snapshot.passwordErrorText);
+      }
       if (!passwordPageDiagnosticsLogged) {
         passwordPageDiagnosticsLogged = true;
         logSignupPasswordDiagnostics(`${prepareLogLabel}：页面仍停留在密码页`);

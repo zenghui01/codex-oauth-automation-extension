@@ -7382,7 +7382,78 @@ function isRestartCurrentAttemptError(error) {
     return loggingStatus.isRestartCurrentAttemptError(error);
   }
   const message = String(typeof error === 'string' ? error : error?.message || '');
-  return /当前邮箱已存在，需要重新开始新一轮/.test(message);
+  return /当前邮箱已存在，需要重新开始新一轮|SIGNUP_PHONE_PASSWORD_MISMATCH::/i.test(message);
+}
+
+function isSignupPhonePasswordMismatchFailure(error) {
+  const message = getErrorMessage(error);
+  return /SIGNUP_PHONE_PASSWORD_MISMATCH::/i.test(message);
+}
+
+function getSignupPhonePasswordMismatchRestartPayload(preservedState = {}) {
+  const preservedEmail = String(preservedState.email || '').trim();
+  const preservedPassword = String(preservedState.password || '').trim();
+  const accountIdentifierType = String(preservedState.accountIdentifierType || '').trim().toLowerCase();
+  const activeSignupPhoneNumber = String(
+    preservedState.signupPhoneNumber
+    || preservedState.signupPhoneActivation?.phoneNumber
+    || preservedState.signupPhoneCompletedActivation?.phoneNumber
+    || (accountIdentifierType === 'phone' ? preservedState.accountIdentifier : '')
+    || ''
+  ).trim();
+  const shouldClearSignupPhoneRuntime = Boolean(
+    activeSignupPhoneNumber
+    || preservedState.signupPhoneActivation
+    || preservedState.signupPhoneCompletedActivation
+    || preservedState.signupPhoneVerificationRequestedAt
+    || preservedState.signupPhoneVerificationPurpose
+    || accountIdentifierType === 'phone'
+  );
+  const restorePayload = {};
+  if (preservedEmail) restorePayload.email = preservedEmail;
+  if (preservedPassword) restorePayload.password = preservedPassword;
+  if (shouldClearSignupPhoneRuntime) {
+    restorePayload.signupPhoneNumber = '';
+    restorePayload.signupPhoneActivation = null;
+    restorePayload.signupPhoneCompletedActivation = null;
+    restorePayload.signupPhoneVerificationRequestedAt = null;
+    restorePayload.signupPhoneVerificationPurpose = '';
+    if (accountIdentifierType === 'phone') {
+      restorePayload.accountIdentifierType = null;
+      restorePayload.accountIdentifier = '';
+    }
+  }
+  return {
+    activeSignupPhoneNumber,
+    preservedEmail,
+    restorePayload,
+    shouldClearSignupPhoneRuntime,
+  };
+}
+
+async function restartSignupPhonePasswordMismatchAttemptFromStep(step, restartCount, error) {
+  const preservedState = await getState();
+  const {
+    activeSignupPhoneNumber,
+    preservedEmail,
+    restorePayload,
+    shouldClearSignupPhoneRuntime,
+  } = getSignupPhonePasswordMismatchRestartPayload(preservedState);
+  const emailSuffix = preservedEmail ? `当前邮箱：${preservedEmail}；` : '';
+  const phoneSuffix = activeSignupPhoneNumber ? `当前手机号：${activeSignupPhoneNumber}；` : '';
+  await addLog(
+    `步骤 ${step}：检测到手机号/密码不匹配，准备丢弃当前注册手机号并回到步骤 1 重新开始（第 ${restartCount} 次重开）。${phoneSuffix}${emailSuffix}原因：${getErrorMessage(error)}`,
+    'warn'
+  );
+  await invalidateDownstreamAfterStepRestart(1, {
+    logLabel: `步骤 ${step} 检测到手机号/密码不匹配后准备回到步骤 1 重新获取手机号重试（第 ${restartCount} 次重开）`,
+  });
+  if (shouldClearSignupPhoneRuntime) {
+    await addLog(`步骤 ${step}：已清空本轮注册手机号与接码订单，下一次重开将重新获取号码。`, 'warn');
+  }
+  if (Object.keys(restorePayload).length) {
+    await setState(restorePayload);
+  }
 }
 
 function isSignupUserAlreadyExistsFailure(error) {
@@ -10040,6 +10111,8 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
     await executeStepAndWait(2, AUTO_STEP_DELAYS[2]);
   }
 
+  let restartFromStep1WithCurrentEmail = false;
+
   if (currentStartStep <= 3) {
     const latestState = await getState();
     const step3Status = latestState.stepStatuses?.[3] || 'pending';
@@ -10052,10 +10125,29 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
     if (isStepDoneStatus(step3Status)) {
       await addLog(`自动运行：步骤 3 当前状态为 ${step3Status}，将直接继续后续流程。`, 'info');
     } else {
-      await executeStepAndWait(3, AUTO_STEP_DELAYS[3]);
+      try {
+        await executeStepAndWait(3, AUTO_STEP_DELAYS[3]);
+      } catch (err) {
+        if (isStopError(err)) {
+          throw err;
+        }
+        if (isSignupPhonePasswordMismatchFailure(err)) {
+          step4RestartCount += 1;
+          await restartSignupPhonePasswordMismatchAttemptFromStep(3, step4RestartCount, err);
+          currentStartStep = 1;
+          continueCurrentAttempt = true;
+          restartFromStep1WithCurrentEmail = true;
+          continue;
+        }
+        throw err;
+      }
     }
   } else {
     await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：继续执行剩余流程（第 ${attemptRuns} 次尝试）===`, 'info');
+  }
+
+  if (restartFromStep1WithCurrentEmail) {
+    continue;
   }
 
   const signupTabId = await getTabId('signup-page');
@@ -10063,7 +10155,6 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
     await chrome.tabs.update(signupTabId, { active: true });
   }
 
-  let restartFromStep1WithCurrentEmail = false;
   let step = Math.max(currentStartStep, 4);
   while (step <= (typeof getLastStepIdForState === 'function'
     ? getLastStepIdForState(await getState())
@@ -10113,22 +10204,26 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
           throw err;
         }
         step4RestartCount += 1;
-        const preservedState = await getState();
-        const preservedEmail = String(preservedState.email || '').trim();
-        const preservedPassword = String(preservedState.password || '').trim();
-        const emailSuffix = preservedEmail ? `当前邮箱：${preservedEmail}；` : '';
-        await addLog(
-          `步骤 4：执行失败，准备沿用当前邮箱回到步骤 1 重新开始（第 ${step4RestartCount} 次重开）。${emailSuffix}原因：${getErrorMessage(err)}`,
-          'warn'
-        );
-        await invalidateDownstreamAfterStepRestart(1, {
-          logLabel: `步骤 4 报错后准备回到步骤 1 沿用当前邮箱重试（第 ${step4RestartCount} 次重开）`,
-        });
-        const restorePayload = {};
-        if (preservedEmail) restorePayload.email = preservedEmail;
-        if (preservedPassword) restorePayload.password = preservedPassword;
-        if (Object.keys(restorePayload).length) {
-          await setState(restorePayload);
+        if (isSignupPhonePasswordMismatchFailure(err)) {
+          await restartSignupPhonePasswordMismatchAttemptFromStep(4, step4RestartCount, err);
+        } else {
+          const preservedState = await getState();
+          const preservedEmail = String(preservedState.email || '').trim();
+          const preservedPassword = String(preservedState.password || '').trim();
+          const emailSuffix = preservedEmail ? `当前邮箱：${preservedEmail}；` : '';
+          await addLog(
+            `步骤 4：执行失败，准备沿用当前邮箱回到步骤 1 重新开始（第 ${step4RestartCount} 次重开）。${emailSuffix}原因：${getErrorMessage(err)}`,
+            'warn'
+          );
+          await invalidateDownstreamAfterStepRestart(1, {
+            logLabel: `步骤 4 报错后准备回到步骤 1 沿用当前邮箱重试（第 ${step4RestartCount} 次重开）`,
+          });
+          const restorePayload = {};
+          if (preservedEmail) restorePayload.email = preservedEmail;
+          if (preservedPassword) restorePayload.password = preservedPassword;
+          if (Object.keys(restorePayload).length) {
+            await setState(restorePayload);
+          }
         }
         currentStartStep = 1;
         continueCurrentAttempt = true;

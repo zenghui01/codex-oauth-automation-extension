@@ -166,7 +166,9 @@
               const retryCount = getAutoRunRoundRetryCount(item);
               const finalReason = item.finalFailureReason || item.failureReasons[item.failureReasons.length - 1] || '未知错误';
               const reasonSummary = formatAutoRunFailureReasons(item.failureReasons);
-              return `第 ${item.round} 轮（重试 ${retryCount} 次，最终原因：${finalReason}；失败记录：${reasonSummary}）`;
+              return !reasonSummary || reasonSummary === finalReason
+                ? `第 ${item.round} 轮（重试 ${retryCount} 次，最终原因：${finalReason}）`
+                : `第 ${item.round} 轮（重试 ${retryCount} 次，最终原因：${finalReason}；失败记录：${reasonSummary}）`;
             })
             .join('；')}`,
           'error'
