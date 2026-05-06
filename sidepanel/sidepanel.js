@@ -3147,7 +3147,7 @@ function collectSettingsPayload() {
       ? selectGpcHelperOtpChannel.value
       : (latestState?.gopayHelperOtpChannel || 'whatsapp')
   );
-  const selectedGpcLocalSmsHelperEnabled = selectedGpcOtpChannel === 'sms' && Boolean(
+  const selectedGpcLocalSmsHelperEnabled = Boolean(
     typeof inputGpcHelperLocalSmsEnabled !== 'undefined' && inputGpcHelperLocalSmsEnabled
       ? inputGpcHelperLocalSmsEnabled.checked
       : latestState?.gopayHelperLocalSmsHelperEnabled
@@ -7014,8 +7014,8 @@ function updatePlusModeUI() {
     ? normalizePlusPaymentMethod(selectPlusPaymentMethod.value)
     : method;
   const gpcRowsVisible = enabled && selectedMethod === gpcValue;
-  const localSmsControlsVisible = gpcRowsVisible && gpcOtpChannel === 'sms';
-  const effectiveLocalSmsEnabled = gpcOtpChannel === 'sms' && localSmsEnabled;
+  const localSmsControlsVisible = gpcRowsVisible;
+  const effectiveLocalSmsEnabled = localSmsEnabled;
   if (typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod) {
     selectPlusPaymentMethod.value = method;
     if (selectPlusPaymentMethod.style) {
@@ -11229,9 +11229,6 @@ selectPlusPaymentMethod?.addEventListener('change', () => {
     scheduleSettingsAutoSave();
   });
   input?.addEventListener('change', () => {
-    if (input === inputGpcHelperLocalSmsEnabled && input.checked && selectGpcHelperOtpChannel) {
-      selectGpcHelperOtpChannel.value = 'sms';
-    }
     if (input === selectGpcHelperOtpChannel || input === inputGpcHelperLocalSmsEnabled) {
       updatePlusModeUI();
     }
