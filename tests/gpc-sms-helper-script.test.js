@@ -79,3 +79,59 @@ print(json.dumps(payload))
     none_after_fresh: true,
   });
 });
+
+test('GPC SMS helper selects and consumes cached OTP records by phone', () => {
+  const code = `
+import importlib.util
+import json
+
+script_path = ${JSON.stringify(scriptPath)}
+spec = importlib.util.spec_from_file_location("gpc_sms_helper_macos", script_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+record_a = {
+    "otp": "111111",
+    "code": "111111",
+    "message_id": "a",
+    "rowid": 1,
+    "phone_e164": "+8615808505050",
+    "account_phone": "+8615808505050",
+    "received_at": "2026-05-05T00:00:00+00:00",
+}
+record_b = {
+    "otp": "222222",
+    "code": "222222",
+    "message_id": "b",
+    "rowid": 2,
+    "phone_e164": "+8618984829950",
+    "account_phone": "+8618984829950",
+    "received_at": "2026-05-05T00:00:10+00:00",
+}
+module.STATE.update({"last_otp": record_b, "otps": [record_b, record_a]})
+selected_a = module.select_otp_record(module.get_state(), phone="+8615808505050")
+module.consume_otp_record(phone="+8615808505050", record=selected_a)
+state_after = module.get_state()
+payload = {
+    "selected_a": selected_a["otp"],
+    "selected_b_after": module.select_otp_record(state_after, phone="+8618984829950")["otp"],
+    "selected_a_after": module.select_otp_record(state_after, phone="+8615808505050") is None,
+    "global_after": module.select_otp_record(state_after)["otp"],
+}
+print(json.dumps(payload))
+`;
+  const run = runPython(['-c', code], {
+    timeout: 3000,
+    env: { GPC_SMS_HELPER_ALLOW_NON_MAC: '1' },
+  });
+  if (!run) {
+    return;
+  }
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout.trim()), {
+    selected_a: '111111',
+    selected_b_after: '222222',
+    selected_a_after: true,
+    global_after: '222222',
+  });
+});
