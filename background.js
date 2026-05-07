@@ -48,6 +48,7 @@ importScripts(
   'microsoft-email.js',
   'luckmail-utils.js',
   'cloudflare-temp-email-utils.js',
+  'cloudmail-utils.js',
   'icloud-utils.js',
   'mail-provider-utils.js',
   'content/activation-utils.js'
@@ -169,6 +170,17 @@ const {
   normalizeCloudflareTempEmailMailApiMessages,
 } = self.CloudflareTempEmailUtils;
 const {
+  DEFAULT_MAIL_PAGE_SIZE: CLOUD_MAIL_DEFAULT_PAGE_SIZE,
+  buildCloudMailHeaders,
+  getCloudMailTokenFromResponse,
+  joinCloudMailUrl,
+  normalizeCloudMailAddress,
+  normalizeCloudMailBaseUrl,
+  normalizeCloudMailDomain,
+  normalizeCloudMailDomains,
+  normalizeCloudMailMailApiMessages,
+} = self.CloudMailUtils;
+const {
   findIcloudAliasByEmail,
   getConfiguredIcloudHostPreference,
   getIcloudHostHintFromMessage,
@@ -224,6 +236,8 @@ const HOTMAIL_PROVIDER = 'hotmail-api';
 const LUCKMAIL_PROVIDER = 'luckmail-api';
 const CLOUDFLARE_TEMP_EMAIL_PROVIDER = 'cloudflare-temp-email';
 const CLOUDFLARE_TEMP_EMAIL_GENERATOR = 'cloudflare-temp-email';
+const CLOUD_MAIL_PROVIDER = 'cloudmail';
+const CLOUD_MAIL_GENERATOR = 'cloudmail';
 const CUSTOM_EMAIL_POOL_GENERATOR = 'custom-pool';
 const HOTMAIL_MAILBOXES = ['INBOX', 'Junk'];
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
@@ -684,6 +698,13 @@ const PERSISTED_SETTING_DEFAULTS = {
   cloudflareTempEmailUseRandomSubdomain: false,
   cloudflareTempEmailDomain: '',
   cloudflareTempEmailDomains: [],
+  cloudMailBaseUrl: '',
+  cloudMailAdminEmail: '',
+  cloudMailAdminPassword: '',
+  cloudMailToken: '',
+  cloudMailReceiveMailbox: '',
+  cloudMailDomain: '',
+  cloudMailDomains: [],
   hotmailAccounts: [],
   mail2925Accounts: [],
   paypalAccounts: [],
@@ -1664,6 +1685,7 @@ function normalizeEmailGenerator(value = '') {
   }
   if (normalized === 'cloudflare') return 'cloudflare';
   if (normalized === CLOUDFLARE_TEMP_EMAIL_GENERATOR) return CLOUDFLARE_TEMP_EMAIL_GENERATOR;
+  if (normalized === 'cloudmail') return 'cloudmail';
   return 'duck';
 }
 
@@ -1897,6 +1919,7 @@ function normalizeMailProvider(value = '') {
     case HOTMAIL_PROVIDER:
     case LUCKMAIL_PROVIDER:
     case CLOUDFLARE_TEMP_EMAIL_PROVIDER:
+    case CLOUD_MAIL_PROVIDER:
     case '163':
     case '163-vip':
     case '126':
@@ -2090,6 +2113,42 @@ function resolveCloudflareTempEmailPollTargetEmail(state = {}, pollPayload = {},
   }
 
   return normalizeCloudflareTempEmailReceiveMailbox(state.email);
+}
+
+function getCloudMailConfig(state = {}) {
+  return {
+    baseUrl: normalizeCloudMailBaseUrl(state.cloudMailBaseUrl),
+    adminEmail: String(state.cloudMailAdminEmail || '').trim(),
+    adminPassword: String(state.cloudMailAdminPassword || ''),
+    token: String(state.cloudMailToken || '').trim(),
+    receiveMailbox: normalizeCloudMailReceiveMailbox(state.cloudMailReceiveMailbox),
+    domain: normalizeCloudMailDomain(state.cloudMailDomain),
+    domains: normalizeCloudMailDomains(state.cloudMailDomains),
+  };
+}
+
+function normalizeCloudMailReceiveMailbox(value = '') {
+  const normalized = normalizeCloudMailAddress(value);
+  if (!normalized) return '';
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : '';
+}
+
+function resolveCloudMailPollTargetEmail(state = {}, pollPayload = {}, config = getCloudMailConfig(state)) {
+  const configuredReceiveMailbox = normalizeCloudMailReceiveMailbox(config.receiveMailbox);
+  const mailProvider = String(state?.mailProvider || '').trim().toLowerCase();
+  const emailGenerator = String(state?.emailGenerator || '').trim().toLowerCase();
+  const shouldPreferConfiguredReceiveMailbox = mailProvider === CLOUD_MAIL_PROVIDER
+    && emailGenerator !== CLOUD_MAIL_GENERATOR;
+  if (shouldPreferConfiguredReceiveMailbox && configuredReceiveMailbox) {
+    return configuredReceiveMailbox;
+  }
+
+  const requestedTarget = normalizeCloudMailReceiveMailbox(pollPayload.targetEmail);
+  if (requestedTarget) {
+    return requestedTarget;
+  }
+
+  return normalizeCloudMailReceiveMailbox(state.email);
 }
 
 function normalizeSub2ApiGroupNames(value = '') {
@@ -2402,6 +2461,19 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeCloudflareTempEmailDomain(value);
     case 'cloudflareTempEmailDomains':
       return normalizeCloudflareTempEmailDomains(value);
+    case 'cloudMailBaseUrl':
+      return normalizeCloudMailBaseUrl(value);
+    case 'cloudMailAdminEmail':
+      return String(value || '').trim();
+    case 'cloudMailAdminPassword':
+    case 'cloudMailToken':
+      return String(value || '');
+    case 'cloudMailReceiveMailbox':
+      return normalizeCloudMailReceiveMailbox(value);
+    case 'cloudMailDomain':
+      return normalizeCloudMailDomain(value);
+    case 'cloudMailDomains':
+      return normalizeCloudMailDomains(value);
     case 'hotmailAccounts':
       return normalizeHotmailAccounts(value);
     case 'mail2925Accounts':
@@ -2510,6 +2582,13 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       domains.unshift(payload.cloudflareTempEmailDomain);
     }
     payload.cloudflareTempEmailDomains = domains;
+  }
+  if (payload.cloudMailDomains) {
+    const domains = normalizeCloudMailDomains(payload.cloudMailDomains);
+    if (payload.cloudMailDomain && !domains.includes(payload.cloudMailDomain)) {
+      domains.unshift(payload.cloudMailDomain);
+    }
+    payload.cloudMailDomains = domains;
   }
   if (
     Object.prototype.hasOwnProperty.call(payload, 'sub2apiGroupName')
@@ -5255,6 +5334,252 @@ async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload 
   throw lastError || new Error(`步骤 ${step}：未在 Cloudflare Temp Email 中找到新的匹配验证码。`);
 }
 
+// ============================================================
+// Cloud Mail (skymail.ink) Integration
+// ============================================================
+
+function ensureCloudMailConfig(state, options = {}) {
+  const { requireToken = false, requireCredentials = false, requireDomain = false } = options;
+  const config = getCloudMailConfig(state);
+  if (!config.baseUrl) {
+    throw new Error('Cloud Mail 服务地址为空或格式无效。');
+  }
+  if (requireCredentials && (!config.adminEmail || !config.adminPassword)) {
+    throw new Error('Cloud Mail 缺少管理员邮箱或密码。');
+  }
+  if (requireToken && !config.token) {
+    throw new Error('Cloud Mail 尚未获取到身份令牌，请先生成 Token。');
+  }
+  if (requireDomain && !config.domain) {
+    throw new Error('Cloud Mail 域名为空或格式无效。');
+  }
+  return config;
+}
+
+async function requestCloudMailJson(config, path, options = {}) {
+  const {
+    method = 'POST',
+    payload,
+    timeoutMs = 20000,
+    requireToken = true,
+  } = options;
+  const url = joinCloudMailUrl(config.baseUrl, path);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: buildCloudMailHeaders(config, {
+        json: payload !== undefined,
+        token: requireToken ? undefined : '',
+      }),
+      body: payload !== undefined ? JSON.stringify(payload) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const errorMessage = err?.name === 'AbortError'
+      ? `Cloud Mail 请求超时（>${Math.round(timeoutMs / 1000)} 秒）`
+      : `Cloud Mail 请求失败：${err.message}`;
+    throw new Error(errorMessage);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = text;
+  }
+  if (!response.ok) {
+    const payloadError = typeof parsed === 'object' && parsed
+      ? (parsed.message || parsed.error || parsed.msg)
+      : '';
+    throw new Error(`Cloud Mail 请求失败：${payloadError || text || `HTTP ${response.status}`}`);
+  }
+  if (parsed && typeof parsed === 'object' && 'code' in parsed && Number(parsed.code) !== 200) {
+    throw new Error(`Cloud Mail 业务错误：${parsed.message || parsed.msg || `code=${parsed.code}`}`);
+  }
+  return parsed;
+}
+
+async function ensureCloudMailToken(state, options = {}) {
+  const { forceRefresh = false } = options;
+  const latestState = state || await getState();
+  const config = ensureCloudMailConfig(latestState, { requireCredentials: true });
+  if (!forceRefresh && config.token) {
+    return { config, token: config.token };
+  }
+  const loginConfig = { ...config, token: '' };
+  const result = await requestCloudMailJson(loginConfig, '/api/public/genToken', {
+    method: 'POST',
+    payload: { email: config.adminEmail, password: config.adminPassword },
+    requireToken: false,
+  });
+  const token = getCloudMailTokenFromResponse(result);
+  if (!token) {
+    throw new Error('Cloud Mail 未返回可用 Token。');
+  }
+  await setPersistentSettings({ cloudMailToken: token });
+  return { config: { ...config, token }, token };
+}
+
+function generateCloudMailAliasLocalPart() {
+  const letters = 'abcdefghijklmnopqrstuvwxyz';
+  const digits = '0123456789';
+  const chars = [];
+  for (let i = 0; i < 6; i++) chars.push(letters[Math.floor(Math.random() * letters.length)]);
+  for (let i = 0; i < 4; i++) chars.push(digits[Math.floor(Math.random() * digits.length)]);
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+}
+
+async function fetchCloudMailAddress(state, options = {}) {
+  throwIfStopped();
+  const latestState = state || await getState();
+  const { config } = await ensureCloudMailToken(latestState);
+  const ensuredConfig = ensureCloudMailConfig({ ...latestState, cloudMailToken: config.token }, {
+    requireToken: true,
+    requireDomain: true,
+  });
+  const requestedLocal = String(options.localPart || options.name || '').trim().toLowerCase()
+    || generateCloudMailAliasLocalPart();
+  const address = `${requestedLocal}@${ensuredConfig.domain}`.toLowerCase();
+  const payload = { list: [{ email: address }] };
+  try {
+    await requestCloudMailJson(ensuredConfig, '/api/public/addUser', { method: 'POST', payload });
+  } catch (err) {
+    if (/token|unauthor|401/i.test(String(err?.message || ''))) {
+      const refreshed = await ensureCloudMailToken(latestState, { forceRefresh: true });
+      await requestCloudMailJson(refreshed.config, '/api/public/addUser', { method: 'POST', payload });
+    } else {
+      throw err;
+    }
+  }
+  await setEmailState(address);
+  await addLog(`Cloud Mail：已生成 ${address}`, 'ok');
+  return address;
+}
+
+function summarizeCloudMailMessagesForLog(messages) {
+  return (messages || [])
+    .slice()
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.receivedDateTime || '') || 0;
+      const rightTime = Date.parse(right.receivedDateTime || '') || 0;
+      return rightTime - leftTime;
+    })
+    .slice(0, 3)
+    .map((message) => {
+      const receivedAt = message?.receivedDateTime || '未知时间';
+      const sender = message?.from?.emailAddress?.address || '未知发件人';
+      const subject = message?.subject || '（无主题）';
+      const preview = String(message?.bodyPreview || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      const address = message?.address || '未知地址';
+      return `[${address}] ${receivedAt} | ${sender} | ${subject} | ${preview}`;
+    })
+    .join(' || ');
+}
+
+async function listCloudMailMessages(state, options = {}) {
+  const latestState = state || await getState();
+  const { config } = await ensureCloudMailToken(latestState);
+  const address = normalizeCloudMailAddress(options.address);
+  const pageSize = Number(options.limit) || CLOUD_MAIL_DEFAULT_PAGE_SIZE;
+  const pageNum = Number(options.page) || 1;
+  const request = async (currentConfig) => requestCloudMailJson(currentConfig, '/api/public/emailList', {
+    method: 'POST',
+    payload: {
+      toEmail: address || undefined,
+      type: 0,
+      isDel: 0,
+      timeSort: 'desc',
+      num: pageNum,
+      size: pageSize,
+    },
+  });
+  let payload;
+  try {
+    payload = await request(config);
+  } catch (err) {
+    if (/token|unauthor|401/i.test(String(err?.message || ''))) {
+      const refreshed = await ensureCloudMailToken(latestState, { forceRefresh: true });
+      payload = await request(refreshed.config);
+    } else {
+      throw err;
+    }
+  }
+  const messages = normalizeCloudMailMailApiMessages(payload).filter((message) => {
+    if (!address) return true;
+    return !message.address || normalizeCloudMailAddress(message.address) === address;
+  });
+  return { config, messages };
+}
+
+async function pollCloudMailVerificationCode(step, state, pollPayload = {}) {
+  const latestState = state || await getState();
+  const config = ensureCloudMailConfig(latestState, { requireCredentials: true });
+  const targetEmail = resolveCloudMailPollTargetEmail(latestState, pollPayload, config);
+  const registrationEmail = normalizeCloudMailReceiveMailbox(latestState.email);
+  if (!targetEmail) {
+    throw new Error('Cloud Mail 轮询前缺少目标邮箱地址，请先填写注册邮箱或"邮件接收"邮箱。');
+  }
+  if (registrationEmail && registrationEmail !== targetEmail) {
+    await addLog(`步骤 ${step}：正在轮询 Cloud Mail 收件邮箱（${targetEmail}），注册邮箱为 ${registrationEmail}...`, 'info');
+  } else {
+    await addLog(`步骤 ${step}：正在轮询 Cloud Mail 邮件（${targetEmail}）...`, 'info');
+  }
+  const maxAttempts = Number(pollPayload.maxAttempts) || 5;
+  const intervalMs = Number(pollPayload.intervalMs) || 3000;
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    throwIfStopped();
+    try {
+      const { messages } = await listCloudMailMessages(latestState, {
+        address: targetEmail,
+        limit: pollPayload.limit || CLOUD_MAIL_DEFAULT_PAGE_SIZE,
+        page: pollPayload.page || 1,
+      });
+      const matchResult = pickVerificationMessageWithTimeFallback(messages, {
+        afterTimestamp: pollPayload.filterAfterTimestamp || 0,
+        senderFilters: pollPayload.senderFilters || [],
+        subjectFilters: pollPayload.subjectFilters || [],
+        excludeCodes: pollPayload.excludeCodes || [],
+      });
+      const match = matchResult.match;
+      if (match?.code) {
+        if (matchResult.usedRelaxedFilters) {
+          const fallbackLabel = matchResult.usedTimeFallback ? '宽松匹配 + 时间回退' : '宽松匹配';
+          await addLog(`步骤 ${step}：严格规则未命中，已改用 ${fallbackLabel} 并命中 Cloud Mail 验证码。`, 'warn');
+        }
+        return {
+          ok: true,
+          code: match.code,
+          emailTimestamp: match.receivedAt || Date.now(),
+          mailId: match.message?.id || '',
+        };
+      }
+      lastError = new Error(`步骤 ${step}：暂未在 Cloud Mail 中找到匹配验证码（${attempt}/${maxAttempts}）。`);
+      await addLog(lastError.message, attempt === maxAttempts ? 'warn' : 'info');
+      const sample = summarizeCloudMailMessagesForLog(messages);
+      if (sample) {
+        await addLog(`步骤 ${step}：最近邮件样本：${sample}`, 'info');
+      }
+    } catch (err) {
+      lastError = err;
+      await addLog(`步骤 ${step}：Cloud Mail 轮询失败：${err.message}`, 'warn');
+    }
+    if (attempt < maxAttempts) {
+      await sleepWithStop(intervalMs);
+    }
+  }
+  throw lastError || new Error(`步骤 ${step}：未在 Cloud Mail 中找到新的匹配验证码。`);
+}
+
 async function getOpenIcloudHostPreference() {
   try {
     const tabs = await chrome.tabs.query({
@@ -7178,6 +7503,7 @@ function getSourceLabel(source) {
     'hotmail-api': 'Hotmail（API对接/本地助手）',
     'luckmail-api': 'LuckMail（API 购邮）',
     'cloudflare-temp-email': 'Cloudflare Temp Email',
+    'cloudmail': 'Cloud Mail',
     'plus-checkout': 'Plus Checkout',
     'paypal-flow': 'PayPal 授权页',
   };
@@ -9167,6 +9493,7 @@ function getEmailGeneratorLabel(generator) {
   }
   if (generator === 'cloudflare') return 'Cloudflare 邮箱';
   if (generator === CLOUDFLARE_TEMP_EMAIL_GENERATOR) return 'Cloudflare Temp Email';
+  if (generator === CLOUD_MAIL_GENERATOR) return 'Cloud Mail';
   return 'Duck 邮箱';
 }
 const mail2925SessionManager = self.MultiPageBackgroundMail2925Session?.createMail2925SessionManager({
@@ -9340,6 +9667,11 @@ async function fetchDuckEmail(options = {}) {
 }
 
 async function fetchGeneratedEmail(state, options = {}) {
+  const currentState = state || await getState();
+  const generator = normalizeEmailGenerator(options.generator ?? currentState.emailGenerator);
+  if (generator === CLOUD_MAIL_GENERATOR) {
+    return fetchCloudMailAddress(currentState, options);
+  }
   return generatedEmailHelpers.fetchGeneratedEmail(state, options);
 }
 
@@ -10439,6 +10771,7 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   chrome,
   closeConflictingTabsForSource,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
+  CLOUD_MAIL_PROVIDER,
   completeStepFromBackground,
   confirmCustomVerificationStepBypassRequest: (step) => chrome.runtime.sendMessage({
     type: 'REQUEST_CUSTOM_VERIFICATION_BYPASS_CONFIRMATION',
@@ -10457,6 +10790,7 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   MAIL_2925_VERIFICATION_INTERVAL_MS,
   MAIL_2925_VERIFICATION_MAX_ATTEMPTS,
   pollCloudflareTempEmailVerificationCode,
+  pollCloudMailVerificationCode,
   pollHotmailVerificationCode,
   pollLuckmailVerificationCode,
   sendToContentScript,
@@ -10562,6 +10896,7 @@ const step4Executor = self.MultiPageBackgroundStep4?.createStep4Executor({
   isTabAlive,
   LUCKMAIL_PROVIDER,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
+  CLOUD_MAIL_PROVIDER,
   resolveVerificationStep: verificationFlowHelpers.resolveVerificationStep,
   reuseOrCreateTab,
   sendToContentScript,
@@ -10607,6 +10942,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   addLog,
   chrome,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
+  CLOUD_MAIL_PROVIDER,
   completeStepFromBackground,
   confirmCustomVerificationStepBypass: verificationFlowHelpers.confirmCustomVerificationStepBypass,
   ensureMail2925MailboxSession,
@@ -11023,6 +11359,9 @@ function getMailConfig(state) {
   }
   if (provider === CLOUDFLARE_TEMP_EMAIL_PROVIDER) {
     return { provider: CLOUDFLARE_TEMP_EMAIL_PROVIDER, label: 'Cloudflare Temp Email' };
+  }
+  if (provider === 'cloudmail') {
+    return { provider: 'cloudmail', label: 'Cloud Mail' };
   }
   if (provider === '163') {
     return { source: 'mail-163', url: 'https://mail.163.com/js6/main.jsp?df=mail163_letter#module=mbox.ListModule%7C%7B%22fid%22%3A1%2C%22order%22%3A%22date%22%2C%22desc%22%3Atrue%7D', label: '163 邮箱' };
