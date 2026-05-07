@@ -378,8 +378,18 @@ const FIVE_SIM_COUNTRY_ID = 'vietnam';
 const FIVE_SIM_COUNTRY_LABEL = '越南 (Vietnam)';
 const FIVE_SIM_SUPPORTED_COUNTRY_IDS = ['indonesia', 'thailand', 'vietnam'];
 const FIVE_SIM_SUPPORTED_COUNTRY_ID_SET = new Set(FIVE_SIM_SUPPORTED_COUNTRY_IDS);
-const HERO_SMS_SUPPORTED_COUNTRY_IDS = [6, 52, 10];
+const HERO_SMS_SUPPORTED_COUNTRY_IDS = [6, 52, 187, 16, 151, 43, 73, 10];
 const HERO_SMS_SUPPORTED_COUNTRY_ID_SET = new Set(HERO_SMS_SUPPORTED_COUNTRY_IDS.map(String));
+const HERO_SMS_COUNTRY_BY_PHONE_PREFIX = Object.freeze([
+  { prefix: '84', id: 10, label: 'Vietnam' },
+  { prefix: '66', id: 52, label: 'Thailand' },
+  { prefix: '62', id: 6, label: 'Indonesia' },
+  { prefix: '44', id: 16, label: 'United Kingdom' },
+  { prefix: '81', id: 151, label: 'Japan' },
+  { prefix: '49', id: 43, label: 'Germany' },
+  { prefix: '33', id: 73, label: 'France' },
+  { prefix: '1', id: 187, label: 'USA' },
+]);
 const FIVE_SIM_OPERATOR = DEFAULT_FIVE_SIM_OPERATOR;
 const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
 const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
@@ -6700,19 +6710,117 @@ async function clearFreeReusablePhoneActivation() {
   return { ok: true, freeReusablePhoneActivation: null };
 }
 
+function inferHeroSmsCountryFromPhoneNumber(phoneNumber = '') {
+  const digits = String(phoneNumber || '').replace(/\D+/g, '');
+  if (!digits) {
+    return null;
+  }
+  const match = HERO_SMS_COUNTRY_BY_PHONE_PREFIX.find((entry) => digits.startsWith(entry.prefix));
+  if (!match) {
+    return null;
+  }
+  return {
+    id: Math.max(1, Math.floor(Number(match.id) || 0)),
+    label: String(match.label || '').trim() || `Country #${match.id}`,
+  };
+}
+
+function normalizePhoneDigits(value = '') {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function phoneNumbersMatch(left = '', right = '') {
+  const leftDigits = normalizePhoneDigits(left);
+  const rightDigits = normalizePhoneDigits(right);
+  return Boolean(leftDigits && rightDigits && leftDigits === rightDigits);
+}
+
+function normalizeLocalHeroSmsActivation(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    return null;
+  }
+  const activationId = String(record.activationId ?? record.id ?? record.activation ?? '').trim();
+  const phoneNumber = String(record.phoneNumber ?? record.number ?? record.phone ?? '').trim();
+  if (!activationId || !phoneNumber) {
+    return null;
+  }
+  const rawProvider = String(record.provider ?? record.smsProvider ?? '').trim();
+  const provider = rawProvider ? normalizePhoneSmsProvider(rawProvider) : PHONE_SMS_PROVIDER_HERO;
+  if (provider !== PHONE_SMS_PROVIDER_HERO) {
+    return null;
+  }
+  const countryId = Math.max(
+    0,
+    Math.floor(Number(record.countryId ?? record.country ?? record.countryCode) || 0)
+  );
+  const countryLabel = String(record.countryLabel || record.label || '').trim();
+  const serviceCode = String(record.serviceCode || record.service || HERO_SMS_SERVICE_CODE).trim() || HERO_SMS_SERVICE_CODE;
+  return {
+    ...record,
+    provider: PHONE_SMS_PROVIDER_HERO,
+    activationId,
+    phoneNumber,
+    serviceCode,
+    ...(countryId > 0 ? { countryId } : {}),
+    ...(countryLabel ? { countryLabel } : {}),
+  };
+}
+
+function findLocalHeroSmsActivationForPhone(state = {}, phoneNumber = '') {
+  const candidates = [
+    state.currentPhoneActivation,
+    state.reusablePhoneActivation,
+    state.pendingPhoneActivationConfirmation,
+    state.signupPhoneActivation,
+    state.signupPhoneCompletedActivation,
+    state.phonePreferredActivation,
+    state.freeReusablePhoneActivation,
+  ];
+  if (Array.isArray(state.phoneReusableActivationPool)) {
+    candidates.push(...state.phoneReusableActivationPool);
+  }
+  for (const candidate of candidates) {
+    const normalized = normalizeLocalHeroSmsActivation(candidate);
+    if (normalized && phoneNumbersMatch(normalized.phoneNumber, phoneNumber)) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
 async function setFreeReusablePhoneActivation(record = {}) {
   const phoneNumber = String(record.phoneNumber || record.number || record.phone || '').trim();
   if (!phoneNumber) {
     throw new Error('请先填写白嫖复用手机号。');
   }
   const state = await getState();
-  const activationId = String(record.activationId || record.id || record.activation || '').trim();
-  const countryId = Math.max(1, Math.floor(Number(record.countryId) || Number(state.heroSmsCountryId) || HERO_SMS_COUNTRY_ID));
+  const localActivation = findLocalHeroSmsActivationForPhone(state, phoneNumber);
+  const activationId = String(
+    record.activationId
+    || record.id
+    || record.activation
+    || localActivation?.activationId
+    || ''
+  ).trim();
+  const inferredCountry = inferHeroSmsCountryFromPhoneNumber(phoneNumber);
+  const hasExplicitCountry = Number.isFinite(Number(record.countryId)) && Number(record.countryId) > 0;
+  const countryId = Math.max(
+    1,
+    Math.floor(
+      Number(record.countryId)
+      || Number(localActivation?.countryId)
+      || Number(inferredCountry?.id)
+      || Number(state.heroSmsCountryId)
+      || HERO_SMS_COUNTRY_ID
+    )
+  );
   const stateCountryLabel = Math.floor(Number(state.heroSmsCountryId) || 0) === countryId
     ? String(state.heroSmsCountryLabel || '').trim()
     : '';
   const countryLabel = String(
     record.countryLabel
+    || (Number(localActivation?.countryId) === countryId ? localActivation?.countryLabel : '')
+    || (!hasExplicitCountry && inferredCountry?.id === countryId ? inferredCountry.label : '')
     || stateCountryLabel
     || (countryId === HERO_SMS_COUNTRY_ID ? HERO_SMS_COUNTRY_LABEL : `Country #${countryId}`)
   ).trim();
@@ -6720,7 +6828,7 @@ async function setFreeReusablePhoneActivation(record = {}) {
     ...(activationId ? { activationId } : {}),
     phoneNumber,
     provider: PHONE_SMS_PROVIDER_HERO,
-    serviceCode: HERO_SMS_SERVICE_CODE,
+    serviceCode: String(record.serviceCode || localActivation?.serviceCode || HERO_SMS_SERVICE_CODE).trim() || HERO_SMS_SERVICE_CODE,
     countryId,
     ...(countryLabel ? { countryLabel } : {}),
     successfulUses: Math.max(0, Math.floor(Number(record.successfulUses) || 0)),
