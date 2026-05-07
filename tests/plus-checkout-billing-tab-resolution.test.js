@@ -916,7 +916,7 @@ test('GPC billing reads SMS OTP from local helper for sms_otp_wait', async () =>
     stateByFrame: {},
     fetchImpl: async (url, options = {}) => {
       fetchCalls.push({ url, options });
-      if (url.startsWith('http://127.0.0.1:18767/otp')) {
+      if (url.startsWith('http://127.0.0.1:18767/latest-otp')) {
         return {
           ok: true,
           status: 200,
@@ -973,17 +973,19 @@ test('GPC billing reads SMS OTP from local helper for sms_otp_wait', async () =>
     gopayHelperOtpChannel: 'sms',
     gopayHelperLocalSmsHelperEnabled: true,
     gopayHelperLocalSmsHelperUrl: 'http://127.0.0.1:18767',
-    gopayHelperPhoneNumber: '+8613800138000',
+    gopayHelperCountryCode: '+86',
+    gopayHelperPhoneNumber: '13800138000',
     gopayHelperOrderCreatedAt: 1710000000000,
   });
 
   assert.equal(events.states.some((state) => state.plusManualConfirmationMethod === 'gopay-otp'), false);
   assert.equal(events.states.some((state) => state.gopayHelperResolvedOtp === '654321'), true);
   const helperUrl = new URL(fetchCalls[1].url);
-  assert.equal(helperUrl.origin + helperUrl.pathname, 'http://127.0.0.1:18767/otp');
+  assert.equal(helperUrl.origin + helperUrl.pathname, 'http://127.0.0.1:18767/latest-otp');
   assert.equal(helperUrl.searchParams.get('task_id'), 'task_sms');
   assert.equal(helperUrl.searchParams.get('reference_id'), 'task_sms');
-  assert.equal(helperUrl.searchParams.get('phone_number'), '+8613800138000');
+  assert.equal(helperUrl.searchParams.get('phone'), '+8613800138000');
+  assert.equal(helperUrl.searchParams.get('consume'), '1');
   assert.equal(helperUrl.searchParams.get('after_ms'), '1710000000000');
   assert.deepEqual(JSON.parse(fetchCalls.find((call) => call.url.endsWith('/api/gp/tasks/task_sms/otp')).options.body), {
     otp: '654321',
@@ -999,7 +1001,7 @@ test('GPC billing can read WhatsApp OTP from local helper when enabled', async (
     stateByFrame: {},
     fetchImpl: async (url, options = {}) => {
       fetchCalls.push({ url, options });
-      if (url.startsWith('http://127.0.0.1:18767/otp')) {
+      if (url.startsWith('http://127.0.0.1:18767/latest-otp')) {
         return {
           ok: true,
           status: 200,
@@ -1056,11 +1058,15 @@ test('GPC billing can read WhatsApp OTP from local helper when enabled', async (
     gopayHelperOtpChannel: 'whatsapp',
     gopayHelperLocalSmsHelperEnabled: true,
     gopayHelperLocalSmsHelperUrl: 'http://127.0.0.1:18767',
-    gopayHelperPhoneNumber: '+8613800138000',
+    gopayHelperCountryCode: '+86',
+    gopayHelperPhoneNumber: '18984829950',
   });
 
   assert.equal(events.states.some((state) => state.plusManualConfirmationMethod === 'gopay-otp'), false);
   assert.equal(events.states.some((state) => state.gopayHelperResolvedOtp === '765432'), true);
+  const helperUrl = new URL(fetchCalls.find((call) => call.url.startsWith('http://127.0.0.1:18767/latest-otp')).url);
+  assert.equal(helperUrl.searchParams.get('phone'), '+8618984829950');
+  assert.equal(helperUrl.searchParams.get('consume'), '1');
   assert.deepEqual(JSON.parse(fetchCalls.find((call) => call.url.endsWith('/api/gp/tasks/task_wa/otp')).options.body), {
     otp: '765432',
   });
@@ -1075,7 +1081,7 @@ test('GPC billing helper mode does not open OTP dialog when helper has no code a
     stateByFrame: {},
     fetchImpl: async (url, options = {}) => {
       fetchCalls.push({ url, options });
-      if (url.startsWith('http://127.0.0.1:18767/otp')) {
+      if (url.startsWith('http://127.0.0.1:18767/latest-otp')) {
         return {
           ok: true,
           status: 200,
@@ -1139,7 +1145,7 @@ test('GPC billing helper mode requests newer OTP after invalid OTP error', async
     stateByFrame: {},
     fetchImpl: async (url, options = {}) => {
       fetchCalls.push({ url, options });
-      if (url.startsWith('http://127.0.0.1:18767/otp')) {
+      if (url.startsWith('http://127.0.0.1:18767/latest-otp')) {
         helperCallCount += 1;
         return {
           ok: true,
@@ -1190,9 +1196,13 @@ test('GPC billing helper mode requests newer OTP after invalid OTP error', async
     .map((call) => JSON.parse(call.options.body));
   assert.deepEqual(otpBodies, [{ otp: '111111' }, { otp: '222222' }]);
   assert.equal(otpPostCount, 2);
-  const helperUrls = fetchCalls.filter((call) => call.url.startsWith('http://127.0.0.1:18767/otp')).map((call) => new URL(call.url));
+  const helperUrls = fetchCalls.filter((call) => call.url.startsWith('http://127.0.0.1:18767/latest-otp')).map((call) => new URL(call.url));
   assert.equal(helperUrls.length, 2);
+  assert.equal(helperUrls[0].searchParams.get('phone'), '+8613800138000');
+  assert.equal(helperUrls[0].searchParams.get('consume'), '1');
   assert.equal(helperUrls[0].searchParams.get('after_ms'), '1710000000000');
+  assert.equal(helperUrls[1].searchParams.get('phone'), '+8613800138000');
+  assert.equal(helperUrls[1].searchParams.get('consume'), '1');
   assert.ok(Number(helperUrls[1].searchParams.get('after_ms')) > 1710000000000);
   assert.equal(events.logs.some((entry) => /OTP 校验失败/.test(entry.message)), true);
   assert.equal(events.completed[0].step, 7);

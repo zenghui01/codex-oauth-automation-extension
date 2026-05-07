@@ -463,11 +463,48 @@
       return Number.isFinite(parsed) ? parsed : 0;
     }
 
+    function normalizeLocalSmsHelperCountryCode(value = '') {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      if (rootScope.GoPayUtils?.normalizeGoPayCountryCode) {
+        return rootScope.GoPayUtils.normalizeGoPayCountryCode(value || '+86');
+      }
+      const digits = String(value || '+86').replace(/\D/g, '');
+      return digits ? `+${digits}` : '+86';
+    }
+
+    function normalizeLocalSmsHelperPhoneE164(phone = '', countryCode = '+86') {
+      const rawPhone = String(phone || '').trim();
+      if (!rawPhone) {
+        return '';
+      }
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      const normalizedCountryCode = normalizeLocalSmsHelperCountryCode(countryCode);
+      const normalizedPhone = rootScope.GoPayUtils?.normalizeGoPayPhone
+        ? rootScope.GoPayUtils.normalizeGoPayPhone(rawPhone)
+        : rawPhone.replace(/[^\d+]/g, '');
+      const phoneDigits = normalizedPhone.replace(/\D/g, '');
+      if (!phoneDigits) {
+        return '';
+      }
+      if (normalizedPhone.startsWith('+')) {
+        return `+${phoneDigits}`;
+      }
+      const countryDigits = normalizedCountryCode.replace(/\D/g, '') || '86';
+      let nationalNumber = phoneDigits;
+      if (countryDigits && nationalNumber.startsWith(countryDigits) && nationalNumber.length > countryDigits.length) {
+        nationalNumber = nationalNumber.slice(countryDigits.length);
+      }
+      return `+${countryDigits}${nationalNumber}`;
+    }
+
     function buildLocalSmsHelperOtpUrl(state = {}, taskId = '', options = {}) {
       const baseUrl = normalizeLocalSmsHelperBaseUrl(state?.gopayHelperLocalSmsHelperUrl);
-      const url = new URL(`${baseUrl}/otp`);
+      const url = new URL(`${baseUrl}/latest-otp`);
       const normalizedTaskId = String(taskId || '').trim();
-      const phoneNumber = String(state?.gopayHelperPhoneNumber || '').trim();
+      const phoneNumber = normalizeLocalSmsHelperPhoneE164(
+        state?.gopayHelperPhoneNumber,
+        state?.gopayHelperCountryCode || '+86'
+      );
       const afterOverrideMs = normalizeEpochMilliseconds(options?.afterMs || options?.after_ms || 0);
       const orderCreatedAt = normalizeEpochMilliseconds(
         state?.gopayHelperOrderCreatedAt
@@ -483,8 +520,9 @@
         url.searchParams.set('reference_id', normalizedTaskId);
       }
       if (phoneNumber) {
-        url.searchParams.set('phone_number', phoneNumber);
+        url.searchParams.set('phone', phoneNumber);
       }
+      url.searchParams.set('consume', '1');
       const effectiveAfterMs = Math.max(orderCreatedAt, afterOverrideMs);
       if (effectiveAfterMs > 0) {
         url.searchParams.set('after_ms', String(effectiveAfterMs));
