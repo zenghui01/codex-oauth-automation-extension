@@ -135,14 +135,18 @@ ${extractFunction('getPageTextSnapshot')}
 ${extractFunction('isLoginPhoneUsernameKind')}
 ${extractFunction('isLoginPhoneEntryPageText')}
 ${extractFunction('isInsideHiddenPhoneControl')}
+${extractFunction('getLoginInputAttributeText')}
+${extractFunction('isLoginEmailLikeInput')}
 ${extractFunction('summarizePhoneInputCandidate')}
 ${extractFunction('isUsablePhoneInputElement')}
 ${extractFunction('collectPhoneInputCandidates')}
 ${extractFunction('findUsablePhoneInput')}
+${extractFunction('getLoginEmailInput')}
 ${extractFunction('getLoginPhoneInput')}
 ${extractFunction('isAddPhonePageReady')}
 
 return {
+  getLoginEmailInput,
   getLoginPhoneInput,
   isAddPhonePageReady,
 };
@@ -166,6 +170,18 @@ test('step 7 does not mistake email entry with a phone switch action for phone i
 
   assert.equal(api.getLoginPhoneInput(), null);
   assert.equal(api.isAddPhonePageReady(), false);
+});
+
+test('step 7 treats unified OpenAI login page as email input despite phone option text', () => {
+  const api = createPhoneLoginEntryApi({
+    href: 'https://auth.openai.com/log-in-or-create-account',
+    pathname: '/log-in-or-create-account',
+    pageText: '\u767b\u5f55\u6216\u6ce8\u518c \u7535\u5b50\u90ae\u4ef6\u5730\u5740 \u7ee7\u7eed \u4f7f\u7528\u7535\u8bdd\u53f7\u7801\u7ee7\u7eed',
+    inputAttributes: { type: 'text', placeholder: '\u7535\u5b50\u90ae\u4ef6\u5730\u5740' },
+  });
+
+  assert.ok(api.getLoginEmailInput(), 'unified login email input should be detected');
+  assert.equal(api.getLoginPhoneInput(), null, 'phone option button must not turn email input into phone input');
 });
 
 test('step 7 detects username text input when usernameKind is phone_number', () => {
