@@ -48,6 +48,8 @@ importScripts(
   'microsoft-email.js',
   'luckmail-utils.js',
   'cloudflare-temp-email-utils.js',
+  'cloudmail-utils.js',
+  'background/cloudmail-provider.js',
   'icloud-utils.js',
   'mail-provider-utils.js',
   'content/activation-utils.js'
@@ -169,6 +171,17 @@ const {
   normalizeCloudflareTempEmailMailApiMessages,
 } = self.CloudflareTempEmailUtils;
 const {
+  DEFAULT_MAIL_PAGE_SIZE: CLOUD_MAIL_DEFAULT_PAGE_SIZE,
+  buildCloudMailHeaders,
+  getCloudMailTokenFromResponse,
+  joinCloudMailUrl,
+  normalizeCloudMailAddress,
+  normalizeCloudMailBaseUrl,
+  normalizeCloudMailDomain,
+  normalizeCloudMailDomains,
+  normalizeCloudMailMailApiMessages,
+} = self.CloudMailUtils;
+const {
   findIcloudAliasByEmail,
   getConfiguredIcloudHostPreference,
   getIcloudHostHintFromMessage,
@@ -224,6 +237,8 @@ const HOTMAIL_PROVIDER = 'hotmail-api';
 const LUCKMAIL_PROVIDER = 'luckmail-api';
 const CLOUDFLARE_TEMP_EMAIL_PROVIDER = 'cloudflare-temp-email';
 const CLOUDFLARE_TEMP_EMAIL_GENERATOR = 'cloudflare-temp-email';
+const CLOUD_MAIL_PROVIDER = 'cloudmail';
+const CLOUD_MAIL_GENERATOR = 'cloudmail';
 const CUSTOM_EMAIL_POOL_GENERATOR = 'custom-pool';
 const HOTMAIL_MAILBOXES = ['INBOX', 'Junk'];
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
@@ -698,6 +713,13 @@ const PERSISTED_SETTING_DEFAULTS = {
   cloudflareTempEmailUseRandomSubdomain: false,
   cloudflareTempEmailDomain: '',
   cloudflareTempEmailDomains: [],
+  cloudMailBaseUrl: '',
+  cloudMailAdminEmail: '',
+  cloudMailAdminPassword: '',
+  cloudMailToken: '',
+  cloudMailReceiveMailbox: '',
+  cloudMailDomain: '',
+  cloudMailDomains: [],
   hotmailAccounts: [],
   mail2925Accounts: [],
   paypalAccounts: [],
@@ -1690,6 +1712,7 @@ function normalizeEmailGenerator(value = '') {
   }
   if (normalized === 'cloudflare') return 'cloudflare';
   if (normalized === CLOUDFLARE_TEMP_EMAIL_GENERATOR) return CLOUDFLARE_TEMP_EMAIL_GENERATOR;
+  if (normalized === 'cloudmail') return 'cloudmail';
   return 'duck';
 }
 
@@ -1923,6 +1946,7 @@ function normalizeMailProvider(value = '') {
     case HOTMAIL_PROVIDER:
     case LUCKMAIL_PROVIDER:
     case CLOUDFLARE_TEMP_EMAIL_PROVIDER:
+    case CLOUD_MAIL_PROVIDER:
     case '163':
     case '163-vip':
     case '126':
@@ -2117,6 +2141,34 @@ function resolveCloudflareTempEmailPollTargetEmail(state = {}, pollPayload = {},
 
   return normalizeCloudflareTempEmailReceiveMailbox(state.email);
 }
+
+const cloudMailProvider = self.MultiPageBackgroundCloudMailProvider.createCloudMailProvider({
+  addLog,
+  buildCloudMailHeaders,
+  CLOUD_MAIL_DEFAULT_PAGE_SIZE,
+  CLOUD_MAIL_GENERATOR,
+  CLOUD_MAIL_PROVIDER,
+  getCloudMailTokenFromResponse,
+  getState,
+  joinCloudMailUrl,
+  normalizeCloudMailAddress,
+  normalizeCloudMailBaseUrl,
+  normalizeCloudMailDomain,
+  normalizeCloudMailDomains,
+  normalizeCloudMailMailApiMessages,
+  pickVerificationMessageWithTimeFallback,
+  setEmailState,
+  setPersistentSettings,
+  sleepWithStop,
+  throwIfStopped,
+});
+const {
+  getCloudMailConfig,
+  normalizeCloudMailReceiveMailbox,
+  fetchCloudMailAddress,
+  pollCloudMailVerificationCode,
+  resolveCloudMailPollTargetEmail,
+} = cloudMailProvider;
 
 function normalizeSub2ApiGroupNames(value = '') {
   const source = Array.isArray(value)
@@ -2454,6 +2506,19 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeCloudflareTempEmailDomain(value);
     case 'cloudflareTempEmailDomains':
       return normalizeCloudflareTempEmailDomains(value);
+    case 'cloudMailBaseUrl':
+      return normalizeCloudMailBaseUrl(value);
+    case 'cloudMailAdminEmail':
+      return String(value || '').trim();
+    case 'cloudMailAdminPassword':
+    case 'cloudMailToken':
+      return String(value || '');
+    case 'cloudMailReceiveMailbox':
+      return normalizeCloudMailReceiveMailbox(value);
+    case 'cloudMailDomain':
+      return normalizeCloudMailDomain(value);
+    case 'cloudMailDomains':
+      return normalizeCloudMailDomains(value);
     case 'hotmailAccounts':
       return normalizeHotmailAccounts(value);
     case 'mail2925Accounts':
@@ -2562,6 +2627,13 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       domains.unshift(payload.cloudflareTempEmailDomain);
     }
     payload.cloudflareTempEmailDomains = domains;
+  }
+  if (payload.cloudMailDomains) {
+    const domains = normalizeCloudMailDomains(payload.cloudMailDomains);
+    if (payload.cloudMailDomain && !domains.includes(payload.cloudMailDomain)) {
+      domains.unshift(payload.cloudMailDomain);
+    }
+    payload.cloudMailDomains = domains;
   }
   if (
     Object.prototype.hasOwnProperty.call(payload, 'sub2apiGroupName')
@@ -7231,6 +7303,7 @@ function getSourceLabel(source) {
     'hotmail-api': 'Hotmail（API对接/本地助手）',
     'luckmail-api': 'LuckMail（API 购邮）',
     'cloudflare-temp-email': 'Cloudflare Temp Email',
+    'cloudmail': 'Cloud Mail',
     'plus-checkout': 'Plus Checkout',
     'paypal-flow': 'PayPal 授权页',
   };
@@ -9239,6 +9312,7 @@ function getEmailGeneratorLabel(generator) {
   }
   if (generator === 'cloudflare') return 'Cloudflare 邮箱';
   if (generator === CLOUDFLARE_TEMP_EMAIL_GENERATOR) return 'Cloudflare Temp Email';
+  if (generator === CLOUD_MAIL_GENERATOR) return 'Cloud Mail';
   return 'Duck 邮箱';
 }
 const mail2925SessionManager = self.MultiPageBackgroundMail2925Session?.createMail2925SessionManager({
@@ -9412,6 +9486,11 @@ async function fetchDuckEmail(options = {}) {
 }
 
 async function fetchGeneratedEmail(state, options = {}) {
+  const currentState = state || await getState();
+  const generator = normalizeEmailGenerator(options.generator ?? currentState.emailGenerator);
+  if (generator === CLOUD_MAIL_GENERATOR) {
+    return fetchCloudMailAddress(currentState, options);
+  }
   return generatedEmailHelpers.fetchGeneratedEmail(state, options);
 }
 
@@ -10552,6 +10631,7 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   chrome,
   closeConflictingTabsForSource,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
+  CLOUD_MAIL_PROVIDER,
   completeStepFromBackground,
   confirmCustomVerificationStepBypassRequest: (step) => chrome.runtime.sendMessage({
     type: 'REQUEST_CUSTOM_VERIFICATION_BYPASS_CONFIRMATION',
@@ -10570,6 +10650,7 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   MAIL_2925_VERIFICATION_INTERVAL_MS,
   MAIL_2925_VERIFICATION_MAX_ATTEMPTS,
   pollCloudflareTempEmailVerificationCode,
+  pollCloudMailVerificationCode,
   pollHotmailVerificationCode,
   pollLuckmailVerificationCode,
   sendToContentScript,
@@ -10675,6 +10756,7 @@ const step4Executor = self.MultiPageBackgroundStep4?.createStep4Executor({
   isTabAlive,
   LUCKMAIL_PROVIDER,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
+  CLOUD_MAIL_PROVIDER,
   resolveVerificationStep: verificationFlowHelpers.resolveVerificationStep,
   reuseOrCreateTab,
   sendToContentScript,
@@ -10722,6 +10804,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   addLog,
   chrome,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
+  CLOUD_MAIL_PROVIDER,
   completeStepFromBackground,
   confirmCustomVerificationStepBypass: verificationFlowHelpers.confirmCustomVerificationStepBypass,
   ensureMail2925MailboxSession,
@@ -11138,6 +11221,9 @@ function getMailConfig(state) {
   }
   if (provider === CLOUDFLARE_TEMP_EMAIL_PROVIDER) {
     return { provider: CLOUDFLARE_TEMP_EMAIL_PROVIDER, label: 'Cloudflare Temp Email' };
+  }
+  if (provider === 'cloudmail') {
+    return { provider: 'cloudmail', label: 'Cloud Mail' };
   }
   if (provider === '163') {
     return { source: 'mail-163', url: 'https://mail.163.com/js6/main.jsp?df=mail163_letter#module=mbox.ListModule%7C%7B%22fid%22%3A1%2C%22order%22%3A%22date%22%2C%22desc%22%3Atrue%7D', label: '163 邮箱' };
