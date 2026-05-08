@@ -7676,12 +7676,20 @@ async function restartSignupPhonePasswordMismatchAttemptFromStep(step, restartCo
   } = getSignupPhonePasswordMismatchRestartPayload(preservedState);
   const emailSuffix = preservedEmail ? `当前邮箱：${preservedEmail}；` : '';
   const phoneSuffix = activeSignupPhoneNumber ? `当前手机号：${activeSignupPhoneNumber}；` : '';
+  const errorMessage = getErrorMessage(error);
+  const reasonLabel = /PHONE_RESEND_BANNED_NUMBER::|无法向此(?:电话|手机)号码发送短信|无法发送短信到此(?:电话|手机)号码|unable\s+to\s+send\s+(?:an?\s+)?(?:sms|text(?:\s+message)?)\s+to\s+(?:this|that)\s+(?:phone\s+)?number/i
+    .test(errorMessage)
+    ? '当前注册手机号无法接收短信'
+    : (/与此(?:电话|手机)号码相关联的帐户已存在|account\s+associated\s+with\s+this\s+phone\s+number\s+already\s+exists/i
+      .test(errorMessage)
+      ? '注册手机号异常'
+      : '手机号/密码不匹配');
   await addLog(
-    `步骤 ${step}：检测到手机号/密码不匹配，准备丢弃当前注册手机号并回到步骤 1 重新开始（第 ${restartCount} 次重开）。${phoneSuffix}${emailSuffix}原因：${getErrorMessage(error)}`,
+    `步骤 ${step}：检测到${reasonLabel}，准备丢弃当前注册手机号并回到步骤 1 重新开始（第 ${restartCount} 次重开）。${phoneSuffix}${emailSuffix}原因：${errorMessage}`,
     'warn'
   );
   await invalidateDownstreamAfterStepRestart(1, {
-    logLabel: `步骤 ${step} 检测到手机号/密码不匹配后准备回到步骤 1 重新获取手机号重试（第 ${restartCount} 次重开）`,
+    logLabel: `步骤 ${step} 检测到${reasonLabel}后准备回到步骤 1 重新获取手机号重试（第 ${restartCount} 次重开）`,
   });
   if (shouldClearSignupPhoneRuntime) {
     await addLog(`步骤 ${step}：已清空本轮注册手机号与接码订单，下一次重开将重新获取号码。`, 'warn');
@@ -10504,7 +10512,10 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
           throw err;
         }
         step4RestartCount += 1;
-        if (isSignupPhonePasswordMismatchFailure(err)) {
+        const isPhoneResendBanned = typeof phoneVerificationHelpers !== 'undefined'
+          && typeof phoneVerificationHelpers?.isPhoneResendBannedNumberError === 'function'
+          && phoneVerificationHelpers.isPhoneResendBannedNumberError(err);
+        if (isSignupPhonePasswordMismatchFailure(err) || isPhoneResendBanned) {
           await restartSignupPhonePasswordMismatchAttemptFromStep(4, step4RestartCount, err);
         } else {
           const preservedState = await getState();

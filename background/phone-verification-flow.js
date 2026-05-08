@@ -6288,6 +6288,7 @@
       completeSignupPhoneVerificationFlow,
       finalizeLoginPhoneActivationAfterSuccess,
       finalizeSignupPhoneActivationAfterSuccess,
+      isPhoneResendBannedNumberError,
       normalizeActivation,
       pollPhoneActivationCode,
       prepareLoginPhoneActivation,
