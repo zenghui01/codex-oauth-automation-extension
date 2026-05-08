@@ -10317,7 +10317,9 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
           throw err;
         }
         step4RestartCount += 1;
-        if (isSignupPhonePasswordMismatchFailure(err)) {
+        const isPhoneResendBanned = typeof isPhoneResendBannedNumberError === 'function'
+          && isPhoneResendBannedNumberError(err);
+        if (isSignupPhonePasswordMismatchFailure(err) || isPhoneResendBanned) {
           await restartSignupPhonePasswordMismatchAttemptFromStep(4, step4RestartCount, err);
         } else {
           const preservedState = await getState();
