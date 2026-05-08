@@ -742,9 +742,11 @@ function getErrorMessage(error) {
   return error?.message || String(error || '');
 }
 
-function isPhoneResendBannedNumberError(error) {
-  return String(error?.message || error || '').startsWith('PHONE_RESEND_BANNED_NUMBER::');
-}
+const phoneVerificationHelpers = {
+  isPhoneResendBannedNumberError(error) {
+    return String(error?.message || error || '').startsWith('PHONE_RESEND_BANNED_NUMBER::');
+  },
+};
 
 async function getLoginAuthStateFromContent() {
   return { state: 'password_page', url: 'https://auth.openai.com/log-in' };
@@ -771,7 +773,7 @@ return {
     {
       step: 1,
       options: {
-        logLabel: '步骤 4 检测到手机号/密码不匹配后准备回到步骤 1 重新获取手机号重试（第 1 次重开）',
+        logLabel: '步骤 4 检测到当前注册手机号无法接收短信后准备回到步骤 1 重新获取手机号重试（第 1 次重开）',
       },
     },
   ]);
