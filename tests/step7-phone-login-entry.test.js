@@ -184,6 +184,50 @@ test('step 7 treats unified OpenAI login page as email input despite phone optio
   assert.equal(api.getLoginPhoneInput(), null, 'phone option button must not turn email input into phone input');
 });
 
+test('step 7 clicks the generic other-account entry before phone entry', async () => {
+  const api = new Function(`
+const clicks = [];
+const genericEntry = { id: 'generic', textContent: '\\u767b\\u5f55\\u81f3\\u53e6\\u4e00\\u4e2a\\u5e10\\u6237' };
+const phoneEntry = { id: 'phone', textContent: '\\u4f7f\\u7528\\u7535\\u8bdd\\u53f7\\u7801\\u7ee7\\u7eed' };
+
+function normalizeStep6Snapshot(snapshot) { return snapshot; }
+function inspectLoginAuthState() {
+  return { state: 'entry_page', loginEntryTrigger: genericEntry, phoneEntryTrigger: phoneEntry };
+}
+function findLoginEntryTrigger() { return genericEntry; }
+function findLoginPhoneEntryTrigger() { return phoneEntry; }
+function isActionEnabled() { return true; }
+function getActionText(el) { return el.textContent || ''; }
+function log() {}
+async function humanPause() {}
+function simulateClick(el) { clicks.push(el.id); }
+async function waitForLoginEntryOpenTransition() { return { state: 'phone_entry_page' }; }
+async function switchFromEmailPageToPhoneLogin() { return { routed: 'switch-phone' }; }
+async function step6LoginFromEmailPage() { return { routed: 'email' }; }
+async function step6LoginFromPasswordPage() { return { routed: 'password' }; }
+async function step6LoginFromPhonePage() { return { routed: 'phone' }; }
+async function finalizeStep6VerificationReady() { return { routed: 'verification' }; }
+function createStep6OAuthConsentSuccessResult() { return { routed: 'oauth' }; }
+function createStep6AddEmailSuccessResult() { return { routed: 'add-email' }; }
+async function createStep6LoginTimeoutRecoveryTransition() { return { action: 'recoverable', result: { routed: 'recoverable' } }; }
+function createStep6RecoverableResult(reason, snapshot, options = {}) {
+  return { step6Outcome: 'recoverable', reason, state: snapshot?.state, message: options.message || '' };
+}
+
+${extractFunction('step6OpenLoginEntry')}
+
+return { clicks, step6OpenLoginEntry };
+  `)();
+
+  const result = await api.step6OpenLoginEntry(
+    { loginIdentifierType: 'phone', phoneNumber: '+441111111111' },
+    { state: 'entry_page', loginEntryTrigger: { id: 'generic', textContent: '\u767b\u5f55\u81f3\u53e6\u4e00\u4e2a\u5e10\u6237' }, phoneEntryTrigger: { id: 'phone', textContent: '\u4f7f\u7528\u7535\u8bdd\u53f7\u7801\u7ee7\u7eed' } }
+  );
+
+  assert.deepStrictEqual(api.clicks, ['generic']);
+  assert.equal(result.routed, 'phone');
+});
+
 test('step 7 detects username text input when usernameKind is phone_number', () => {
   const api = createPhoneLoginEntryApi({
     phoneUsernameKind: true,

@@ -5202,9 +5202,9 @@ async function step6OpenLoginEntry(payload, snapshot) {
   const visibleStep = Math.floor(Number(payload?.visibleStep) || 0) || 7;
   const currentSnapshot = normalizeStep6Snapshot(snapshot || inspectLoginAuthState());
   const preferPhoneLogin = String(payload?.loginIdentifierType || '').trim() === 'phone' || (!payload?.email && payload?.phoneNumber);
-  const trigger = preferPhoneLogin
-    ? (currentSnapshot.phoneEntryTrigger || findLoginPhoneEntryTrigger())
-    : (currentSnapshot.loginEntryTrigger || findLoginEntryTrigger());
+  const genericEntryTrigger = currentSnapshot.loginEntryTrigger || findLoginEntryTrigger();
+  const phoneEntryTrigger = currentSnapshot.phoneEntryTrigger || findLoginPhoneEntryTrigger();
+  const trigger = genericEntryTrigger || (preferPhoneLogin ? phoneEntryTrigger : null);
   if (!trigger || !isActionEnabled(trigger)) {
     return createStep6RecoverableResult('missing_login_entry_trigger', currentSnapshot, {
       message: preferPhoneLogin
