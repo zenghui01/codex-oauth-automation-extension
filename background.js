@@ -10729,7 +10729,7 @@ const signupFlowHelpers = self.MultiPageSignupFlowHelpers?.createSignupFlowHelpe
   },
   isSignupProfilePageUrl: (rawUrl) => {
     const parsed = parseUrlSafely(rawUrl);
-    return Boolean(parsed && isSignupPageHost(parsed.hostname) && /\/create-account\/profile(?:[/?#]|$)/i.test(parsed.pathname || ''));
+    return Boolean(parsed && isSignupPageHost(parsed.hostname) && /\/(?:create-account\/profile|u\/signup\/profile|signup\/profile)(?:[/?#]|$)/i.test(parsed.pathname || ''));
   },
   isRetryableContentScriptTransportError,
   isHotmailProvider,
