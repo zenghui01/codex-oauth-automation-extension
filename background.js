@@ -7743,6 +7743,17 @@ function isGpcTaskEndedFailure(error) {
   return /GPC_TASK_ENDED::/i.test(message);
 }
 
+function isGpcCheckoutRestartRequiredFailure(error) {
+  const message = getErrorMessage(error);
+  if (/PLUS_CHECKOUT_NON_FREE_TRIAL::|今日应付金额不是\s*0|没有免费试用资格/i.test(message)) {
+    return false;
+  }
+  if (/GPC_TASK_ENDED::/i.test(message)) {
+    return true;
+  }
+  return /GPC\s*API\s*请求超时|步骤\s*[67][\s\S]*GPC[\s\S]*(?:任务轮询超时|请求超时|超时|timeout|timed\s*out|卡死|无响应)|account\s+already\s+linked|GOPAY已经绑了订阅|(?:账号|账户|GoPay|GOPAY)[\s\S]*(?:已绑定|已经绑定|已绑|绑了订阅|绑定了订阅)|创建\s*GPC\s*订单失败[\s\S]*(?:任务已结束|任务结束|failed|expired|discarded|请求超时|timeout|timed\s*out)/i.test(message);
+}
+
 function isGoPayCheckoutRestartRequiredFailure(error) {
   const message = getErrorMessage(error);
   return /GOPAY_RESTART_FROM_STEP6::|GOPAY_RETRY_REQUIRED::/i.test(message);
@@ -10432,6 +10443,7 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
   const { targetRun, totalRuns, attemptRuns, continued = false } = context;
   let postStep7RestartCount = 0;
   let goPayCheckoutRestartCount = 0;
+  let gpcCheckoutRestartCount = 0;
   let step4RestartCount = 0;
   let currentStartStep = startStep;
   let continueCurrentAttempt = continued;
@@ -10523,6 +10535,26 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
     } catch (err) {
       if (isStopError(err)) {
         throw err;
+      }
+
+      const stepExecutionKey = typeof getStepExecutionKeyForState === 'function'
+        ? getStepExecutionKeyForState(step, latestState)
+        : '';
+      const isGpcCheckoutStep = normalizePlusPaymentMethod(latestState?.plusPaymentMethod) === PLUS_PAYMENT_METHOD_GPC_HELPER
+        || String(latestState?.plusCheckoutSource || '').trim() === PLUS_PAYMENT_METHOD_GPC_HELPER;
+      if (isGpcCheckoutStep
+        && (stepExecutionKey === 'plus-checkout-create' || stepExecutionKey === 'plus-checkout-billing')
+        && isGpcCheckoutRestartRequiredFailure(err)) {
+        gpcCheckoutRestartCount += 1;
+        await addLog(
+          `步骤 ${step}：检测到 GPC 任务失败/卡住，准备回到步骤 6 重新创建 GPC 任务（第 ${gpcCheckoutRestartCount} 次）。原因：${getErrorMessage(err)}`,
+          'warn'
+        );
+        await invalidateDownstreamAfterStepRestart(5, {
+          logLabel: `步骤 ${step} GPC 任务失败后准备回到步骤 6 重试（第 ${gpcCheckoutRestartCount} 次）`,
+        });
+        step = 6;
+        continue;
       }
 
       if (step === 8 && isGoPayCheckoutRestartRequiredFailure(err)) {

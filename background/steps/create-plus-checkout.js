@@ -257,11 +257,34 @@
         throw new Error('当前运行环境不支持 fetch，无法调用 GPC API。');
       }
       const controller = typeof AbortController === 'function' ? new AbortController() : null;
-      const timer = controller ? setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 30000)) : null;
+      const effectiveTimeoutMs = Math.max(1000, Number(timeoutMs) || 30000);
+      let didTimeout = false;
+      let timer = null;
+      const buildTimeoutError = () => new Error(`GPC API 请求超时（>${Math.round(effectiveTimeoutMs / 1000)} 秒）：${url}`);
+      const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          didTimeout = true;
+          reject(buildTimeoutError());
+          if (controller) {
+            controller.abort();
+          }
+        }, effectiveTimeoutMs);
+      });
       try {
-        const response = await fetcher(url, { ...options, ...(controller ? { signal: controller.signal } : {}) });
-        const data = await response.json().catch(() => ({}));
+        const response = await Promise.race([
+          fetcher(url, { ...options, ...(controller ? { signal: controller.signal } : {}) }),
+          timeoutPromise,
+        ]);
+        const data = await Promise.race([
+          response.json().catch(() => ({})),
+          timeoutPromise,
+        ]);
         return { response, data };
+      } catch (error) {
+        if (didTimeout || error?.name === 'AbortError') {
+          throw buildTimeoutError();
+        }
+        throw error;
       } finally {
         if (timer) clearTimeout(timer);
       }
