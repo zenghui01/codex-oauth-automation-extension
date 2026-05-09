@@ -7748,14 +7748,16 @@ function isGpcTaskEndedFailure(error) {
 }
 
 function isGpcCheckoutRestartRequiredFailure(error) {
+  const rawMessage = String(typeof error === 'string' ? error : error?.message || '');
   const message = getErrorMessage(error);
-  if (/PLUS_CHECKOUT_NON_FREE_TRIAL::|今日应付金额不是\s*0|没有免费试用资格/i.test(message)) {
+  const combinedMessage = `${rawMessage}\n${message}`;
+  if (/PLUS_CHECKOUT_NON_FREE_TRIAL::|今日应付金额不是\s*0|没有免费试用资格/i.test(combinedMessage)) {
     return false;
   }
-  if (/GPC_TASK_ENDED::/i.test(message)) {
+  if (/GPC_TASK_ENDED::/i.test(rawMessage)) {
     return true;
   }
-  return /GPC\s*API\s*请求超时|步骤\s*[67][\s\S]*GPC[\s\S]*(?:任务轮询超时|请求超时|超时|timeout|timed\s*out|卡死|无响应)|account\s+already\s+linked|GOPAY已经绑了订阅|(?:账号|账户|GoPay|GOPAY)[\s\S]*(?:已绑定|已经绑定|已绑|绑了订阅|绑定了订阅)|创建\s*GPC\s*订单失败[\s\S]*(?:任务已结束|任务结束|failed|expired|discarded|请求超时|timeout|timed\s*out)/i.test(message);
+  return /GPC\s*API\s*请求超时|GPC\s*任务状态超过\s*\d+\s*秒无进展|GPC[\s\S]*请重新创建任务|步骤\s*[67][\s\S]*GPC[\s\S]*(?:任务轮询超时|请求超时|超时|timeout|timed\s*out|卡死|无响应)|account\s+already\s+linked|GOPAY已经绑了订阅|(?:账号|账户|GoPay|GOPAY)[\s\S]*(?:已绑定|已经绑定|已绑|绑了订阅|绑定了订阅)|创建\s*GPC\s*订单失败[\s\S]*(?:任务已结束|任务结束|failed|expired|discarded|请求超时|timeout|timed\s*out)/i.test(message);
 }
 
 function isGoPayCheckoutRestartRequiredFailure(error) {

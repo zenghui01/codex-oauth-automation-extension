@@ -399,6 +399,36 @@ test('auto-run treats GPC account binding as recoverable step 6 restart', async 
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
 });
 
+test('auto-run restarts GPC checkout from step 6 when task status has no progress', async () => {
+  const plusGpcSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    10: { key: 'oauth-login' },
+    11: { key: 'fetch-login-code' },
+    12: { key: 'confirm-oauth' },
+    13: { key: 'platform-verify' },
+  };
+  const harness = createHarness({
+    startStep: 6,
+    failureStep: 7,
+    failureBudget: 1,
+    failureMessage: 'GPC_TASK_ENDED::GPC 任务状态超过 60 秒无进展（已创建），请重新创建任务。',
+    stepDefinitions: plusGpcSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed' },
+      plusPaymentMethod: 'gpc-helper',
+      plusCheckoutSource: 'gpc-helper',
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.steps, [6, 7, 6, 7, 10, 11, 12, 13]);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.ok(events.logs.some(({ message }) => /回到步骤 6 重新创建 GPC 任务/.test(message)));
+});
+
 test('auto-run does not restart GPC checkout when Plus account has no free-trial eligibility', async () => {
   const plusGpcSteps = {
     6: { key: 'plus-checkout-create' },
