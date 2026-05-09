@@ -10906,6 +10906,7 @@ const step2Executor = self.MultiPageBackgroundStep2?.createStep2Executor({
   resolveSignupEmailForFlow,
   sendToContentScriptResilient,
   SIGNUP_PAGE_INJECT_FILES,
+  waitForTabStableComplete,
 });
 const step3Executor = self.MultiPageBackgroundStep3?.createStep3Executor({
   addLog,
