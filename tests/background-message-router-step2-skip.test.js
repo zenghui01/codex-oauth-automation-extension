@@ -146,7 +146,7 @@ function createRouter(overrides = {}) {
     verifyHotmailAccount: async () => {},
     refreshGpcCardBalance: overrides.refreshGpcCardBalance || (async (state, options) => {
       events.balanceRefreshes.push({ state, options });
-      return { balance: '余额 3' };
+      return { balance: '余额 3', remainingUses: 3, autoModeEnabled: true, apiKeyStatus: 'active' };
     }),
   });
 
@@ -556,7 +556,7 @@ test('message router refreshes GPC balance through explicit sidepanel message', 
     },
   }, {});
 
-  assert.deepStrictEqual(response, { ok: true, balance: '余额 3' });
+  assert.deepStrictEqual(response, { ok: true, balance: '余额 3', remainingUses: 3, autoModeEnabled: true, apiKeyStatus: 'active' });
   assert.equal(events.balanceRefreshes.length, 1);
   assert.equal(events.balanceRefreshes[0].state.gopayHelperApiUrl, 'http://localhost:18473/');
   assert.equal(events.balanceRefreshes[0].state.gopayHelperApiKey, 'payload_api_key');

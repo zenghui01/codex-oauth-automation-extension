@@ -5,6 +5,8 @@
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
   const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
   const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.qlhazycoder.top';
+  const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
+  const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
   const ALLOWED_GPC_HELPER_REMOTE_HOST = 'gpc.qlhazycoder.top';
 
   function normalizePlusPaymentMethod(value = '') {
@@ -45,6 +47,85 @@
 
   function normalizeGoPayOtp(value = '') {
     return String(value || '').trim().replace(/[^\d]/g, '');
+  }
+
+  function normalizeGpcHelperPhoneMode(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === GPC_HELPER_PHONE_MODE_AUTO || normalized === 'builtin'
+      ? GPC_HELPER_PHONE_MODE_AUTO
+      : GPC_HELPER_PHONE_MODE_MANUAL;
+  }
+
+  function normalizeGpcRemainingUses(value) {
+    if (value === undefined || value === null || String(value).trim() === '') {
+      return null;
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : null;
+  }
+
+  function unwrapGpcBalancePayload(payload = {}) {
+    const data = unwrapGpcResponse(payload);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return data;
+    }
+    const hasBalanceFields = [
+      'remaining_uses',
+      'remainingUses',
+      'balance',
+      'remaining',
+      'uses',
+      'available_uses',
+      'availableUses',
+      'auto_mode_enabled',
+      'autoModeEnabled',
+      'auto_enabled',
+      'autoEnabled',
+      'status',
+      'card_status',
+      'cardStatus',
+    ].some((key) => Object.prototype.hasOwnProperty.call(data, key));
+    if (!hasBalanceFields && data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
+      return data.data;
+    }
+    return data;
+  }
+
+  function getGpcBalanceRemainingUses(payload = {}) {
+    const data = unwrapGpcBalancePayload(payload);
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+    return normalizeGpcRemainingUses(
+      data.remaining_uses
+      ?? data.remainingUses
+      ?? data.balance
+      ?? data.remaining
+      ?? data.uses
+      ?? data.available_uses
+      ?? data.availableUses
+    );
+  }
+
+  function isGpcAutoModeEnabled(payload = {}) {
+    const data = unwrapGpcBalancePayload(payload);
+    if (!data || typeof data !== 'object') {
+      return false;
+    }
+    const raw = data.auto_mode_enabled ?? data.autoModeEnabled ?? data.auto_enabled ?? data.autoEnabled;
+    if (typeof raw === 'boolean') {
+      return raw;
+    }
+    const normalized = String(raw ?? '').trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'enabled';
+  }
+
+  function getGpcApiKeyStatus(payload = {}) {
+    const data = unwrapGpcBalancePayload(payload);
+    if (!data || typeof data !== 'object') {
+      return '';
+    }
+    return String(data.status || data.card_status || data.cardStatus || '').trim();
   }
 
   function normalizeGpcOtpChannel(value = '') {
@@ -291,7 +372,7 @@
   }
 
   function formatGpcBalancePayload(payload = {}) {
-    const data = unwrapGpcResponse(payload);
+    const data = unwrapGpcBalancePayload(payload);
     if (!data || typeof data !== 'object') {
       return '';
     }
@@ -308,6 +389,11 @@
     const totalUses = data.total_uses ?? data.totalUses;
     const usedUses = data.used_uses ?? data.usedUses;
     const status = String(data.status || data.card_status || data.cardStatus || '').trim();
+    const hasAutoModeField = data.auto_mode_enabled !== undefined
+      || data.autoModeEnabled !== undefined
+      || data.auto_enabled !== undefined
+      || data.autoEnabled !== undefined;
+    const autoModeEnabled = isGpcAutoModeEnabled(data);
     const flowId = String(data.flow_id || data.flowId || '').trim();
     const parts = [];
     if (firstValue !== undefined) {
@@ -321,6 +407,9 @@
     if (status) {
       parts.push(`状态 ${status}`);
     }
+    if (hasAutoModeField) {
+      parts.push(`自动模式 ${autoModeEnabled ? '已开通' : '未开通'}`);
+    }
     if (flowId) {
       parts.push(`flow_id ${flowId}`);
     }
@@ -330,6 +419,8 @@
   return {
     DEFAULT_GOPAY_COUNTRY_CODE,
     DEFAULT_GPC_HELPER_API_URL,
+    GPC_HELPER_PHONE_MODE_AUTO,
+    GPC_HELPER_PHONE_MODE_MANUAL,
     PLUS_PAYMENT_METHOD_GPC_HELPER,
     PLUS_PAYMENT_METHOD_GOPAY,
     PLUS_PAYMENT_METHOD_PAYPAL,
@@ -348,8 +439,13 @@
     buildGpcTaskQueryUrl,
     extractGpcResponseErrorDetail,
     formatGpcBalancePayload,
+    getGpcApiKeyStatus,
+    getGpcBalanceRemainingUses,
     isGpcUnifiedResponseOk,
+    isGpcAutoModeEnabled,
     normalizeGpcHelperBaseUrl,
+    normalizeGpcHelperPhoneMode,
+    normalizeGpcRemainingUses,
     normalizeGpcTaskId,
     normalizeGoPayCountryCode,
     normalizeGoPayPhone,
@@ -358,6 +454,7 @@
     normalizeGoPayPin,
     normalizeGpcOtpChannel,
     normalizePlusPaymentMethod,
+    unwrapGpcBalancePayload,
     unwrapGpcResponse,
   };
 });

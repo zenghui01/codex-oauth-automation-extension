@@ -8,6 +8,8 @@
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
   const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
   const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.qlhazycoder.top';
+  const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
+  const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
 
   function createPlusCheckoutCreateExecutor(deps = {}) {
     const {
@@ -86,6 +88,17 @@
       return cleaned;
     }
 
+    function normalizeGpcHelperPhoneMode(value = '') {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      if (rootScope.GoPayUtils?.normalizeGpcHelperPhoneMode) {
+        return rootScope.GoPayUtils.normalizeGpcHelperPhoneMode(value);
+      }
+      const normalized = String(value || '').trim().toLowerCase();
+      return normalized === GPC_HELPER_PHONE_MODE_AUTO || normalized === 'builtin'
+        ? GPC_HELPER_PHONE_MODE_AUTO
+        : GPC_HELPER_PHONE_MODE_MANUAL;
+    }
+
     function normalizeGpcOtpChannel(value = '') {
       const rootScope = typeof self !== 'undefined' ? self : globalThis;
       if (rootScope.GoPayUtils?.normalizeGpcOtpChannel) {
@@ -143,6 +156,17 @@
       return buildGpcHelperApiUrl(apiUrl, '/api/gp/tasks');
     }
 
+    function buildGpcBalanceUrl(apiUrl = '') {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      if (rootScope.GoPayUtils?.buildGpcApiKeyBalanceUrl) {
+        return rootScope.GoPayUtils.buildGpcApiKeyBalanceUrl(apiUrl);
+      }
+      if (rootScope.GoPayUtils?.buildGpcCardBalanceUrl) {
+        return rootScope.GoPayUtils.buildGpcCardBalanceUrl(apiUrl);
+      }
+      return buildGpcHelperApiUrl(apiUrl, '/api/gp/balance');
+    }
+
     function unwrapGpcResponse(payload = {}) {
       const rootScope = typeof self !== 'undefined' ? self : globalThis;
       if (rootScope.GoPayUtils?.unwrapGpcResponse) {
@@ -174,6 +198,55 @@
         return rootScope.GoPayUtils.extractGpcResponseErrorDetail(payload, status);
       }
       return payload?.data?.detail || payload?.detail || payload?.message || payload?.error || `HTTP ${status || 0}`;
+    }
+
+    function getGpcRemainingUses(payload = {}) {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      if (rootScope.GoPayUtils?.getGpcBalanceRemainingUses) {
+        return rootScope.GoPayUtils.getGpcBalanceRemainingUses(payload);
+      }
+      const data = unwrapGpcResponse(payload);
+      const numeric = Number(data?.remaining_uses ?? data?.remainingUses ?? data?.balance ?? data?.remaining);
+      return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : null;
+    }
+
+    function isGpcAutoModeEnabled(payload = {}) {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      if (rootScope.GoPayUtils?.isGpcAutoModeEnabled) {
+        return rootScope.GoPayUtils.isGpcAutoModeEnabled(payload);
+      }
+      const data = unwrapGpcResponse(payload);
+      return data?.auto_mode_enabled === true || data?.autoModeEnabled === true;
+    }
+
+    async function assertGpcApiKeyReadyForCreate(state = {}, phoneMode = GPC_HELPER_PHONE_MODE_MANUAL, apiKey = '') {
+      const apiUrl = buildGpcBalanceUrl(state?.gopayHelperApiUrl);
+      if (!apiUrl) {
+        throw new Error('创建 GPC 订单失败：缺少 API 地址。');
+      }
+      const { response, data } = await fetchJsonWithTimeout(apiUrl, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'X-API-Key': apiKey,
+        },
+      }, 30000);
+      if (!response?.ok || !isGpcUnifiedResponseOk(data)) {
+        const detail = getGpcResponseErrorDetail(data, response?.status || 0);
+        throw new Error(`创建 GPC 订单失败：API Key 校验失败：${detail}`);
+      }
+      const balanceData = unwrapGpcResponse(data);
+      const remainingUses = getGpcRemainingUses(balanceData);
+      const status = String(balanceData?.status || balanceData?.card_status || balanceData?.cardStatus || '').trim().toLowerCase();
+      if (status && status !== 'active') {
+        throw new Error(`创建 GPC 订单失败：API Key 状态不可用（${status}）。`);
+      }
+      if (remainingUses !== null && remainingUses <= 0) {
+        throw new Error('创建 GPC 订单失败：API Key 剩余次数不足。');
+      }
+      if (phoneMode === GPC_HELPER_PHONE_MODE_AUTO && !isGpcAutoModeEnabled(balanceData)) {
+        throw new Error('创建 GPC 订单失败：当前 GPC API Key 未开通自动模式。');
+      }
     }
 
     async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 30000) {
@@ -226,25 +299,31 @@
       if (!apiUrl) {
         throw new Error('创建 GPC 订单失败：缺少 API 地址。');
       }
+      const phoneMode = normalizeGpcHelperPhoneMode(state?.gopayHelperPhoneMode || state?.phoneMode);
+      const isAutoMode = phoneMode === GPC_HELPER_PHONE_MODE_AUTO;
       const phoneNumber = String(state?.gopayHelperPhoneNumber || '').trim();
       const countryCode = normalizeHelperCountryCode(state?.gopayHelperCountryCode || '86');
       const pin = String(state?.gopayHelperPin || '').trim();
       const apiKey = resolveGpcHelperApiKey(state);
-      if (!phoneNumber) {
-        throw new Error('创建 GPC 订单失败：缺少手机号。');
+      if (!isAutoMode && !phoneNumber) {
+        throw new Error('创建 GPC 订单失败：手动模式缺少手机号。');
       }
-      if (!pin) {
-        throw new Error('创建 GPC 订单失败：缺少 PIN。');
+      if (!isAutoMode && !pin) {
+        throw new Error('创建 GPC 订单失败：手动模式缺少 PIN。');
       }
 
       throwIfStopped();
+      await assertGpcApiKeyReadyForCreate(state, phoneMode, apiKey);
+      throwIfStopped();
       const payload = {
         access_token: token,
-        phone_mode: 'manual',
-        country_code: countryCode,
-        phone_number: normalizeHelperPhoneNumber(phoneNumber, countryCode),
-        otp_channel: normalizeGpcOtpChannel(state?.gopayHelperOtpChannel),
+        phone_mode: phoneMode,
       };
+      if (!isAutoMode) {
+        payload.country_code = countryCode;
+        payload.phone_number = normalizeHelperPhoneNumber(phoneNumber, countryCode);
+        payload.otp_channel = normalizeGpcOtpChannel(state?.gopayHelperOtpChannel);
+      }
 
       const orderCreatedAt = Date.now();
       const { response, data } = await fetchJsonWithTimeout(apiUrl, {
@@ -273,6 +352,7 @@
         remoteStage: String(taskData?.remote_stage || taskData?.remoteStage || '').trim(),
         orderCreatedAt,
         responsePayload: taskData && typeof taskData === 'object' && !Array.isArray(taskData) ? taskData : null,
+        phoneMode: normalizeGpcHelperPhoneMode(taskData?.phone_mode || taskData?.phoneMode || phoneMode),
         country: 'ID',
         currency: 'IDR',
         checkoutSource: PLUS_PAYMENT_METHOD_GPC_HELPER,
@@ -308,6 +388,7 @@
         gopayHelperTaskStatus: result.taskStatus,
         gopayHelperStatusText: result.statusText,
         gopayHelperRemoteStage: result.remoteStage,
+        gopayHelperPhoneMode: result.phoneMode || normalizeGpcHelperPhoneMode(state?.gopayHelperPhoneMode || state?.phoneMode),
         gopayHelperTaskPayload: result.responsePayload,
         gopayHelperReferenceId: '',
         gopayHelperGoPayGuid: '',
@@ -318,7 +399,7 @@
         gopayHelperStartPayload: null,
         gopayHelperOrderCreatedAt: result.orderCreatedAt || Date.now(),
       });
-      await addLog(`步骤 6：GPC 任务已创建（task_id: ${result.taskId}），准备继续下一步。`, 'info');
+      await addLog(`步骤 6：GPC ${result.phoneMode === GPC_HELPER_PHONE_MODE_AUTO ? '自动' : '手动'}模式任务已创建（task_id: ${result.taskId}），准备继续下一步。`, 'info');
       await completeStepFromBackground(6, {
         plusCheckoutCountry: result.country || 'ID',
         plusCheckoutCurrency: result.currency || 'IDR',
