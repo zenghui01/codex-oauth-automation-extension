@@ -10448,6 +10448,28 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
   let currentStartStep = startStep;
   let continueCurrentAttempt = continued;
   const resolvedSignupMethod = await ensureResolvedSignupMethodForRun();
+  const normalizePlusPaymentMethodForRun = typeof normalizePlusPaymentMethod === 'function'
+    ? normalizePlusPaymentMethod
+    : (value) => (String(value || '').trim().toLowerCase() === 'gpc-helper' ? 'gpc-helper' : String(value || '').trim().toLowerCase());
+  const plusPaymentMethodGpcHelper = typeof PLUS_PAYMENT_METHOD_GPC_HELPER === 'string'
+    ? PLUS_PAYMENT_METHOD_GPC_HELPER
+    : 'gpc-helper';
+  const attachFailedStep = (error, step) => {
+    const failedStep = Math.floor(Number(step) || 0);
+    if (!error || typeof error !== 'object' || failedStep <= 0) {
+      return error;
+    }
+
+    if (!Number.isInteger(Number(error.failedStep)) || Number(error.failedStep) <= 0) {
+      try {
+        error.failedStep = failedStep;
+      } catch (_err) {
+        // Some host errors may be non-extensible; state-based inference still covers normal paths.
+      }
+    }
+
+    return error;
+  };
 
   while (true) {
 
@@ -10487,6 +10509,7 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
       try {
         await executeStepAndWait(3, AUTO_STEP_DELAYS[3]);
       } catch (err) {
+        attachFailedStep(err, 3);
         if (isStopError(err)) {
           throw err;
         }
@@ -10533,6 +10556,7 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
       await executeStepAndWait(step, AUTO_STEP_DELAYS[step]);
       step += 1;
     } catch (err) {
+      attachFailedStep(err, step);
       if (isStopError(err)) {
         throw err;
       }
@@ -10540,8 +10564,8 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
       const stepExecutionKey = typeof getStepExecutionKeyForState === 'function'
         ? getStepExecutionKeyForState(step, latestState)
         : '';
-      const isGpcCheckoutStep = normalizePlusPaymentMethod(latestState?.plusPaymentMethod) === PLUS_PAYMENT_METHOD_GPC_HELPER
-        || String(latestState?.plusCheckoutSource || '').trim() === PLUS_PAYMENT_METHOD_GPC_HELPER;
+      const isGpcCheckoutStep = normalizePlusPaymentMethodForRun(latestState?.plusPaymentMethod) === plusPaymentMethodGpcHelper
+        || String(latestState?.plusCheckoutSource || '').trim() === plusPaymentMethodGpcHelper;
       if (isGpcCheckoutStep
         && (stepExecutionKey === 'plus-checkout-create' || stepExecutionKey === 'plus-checkout-billing')
         && isGpcCheckoutRestartRequiredFailure(err)) {
