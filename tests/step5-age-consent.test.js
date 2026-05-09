@@ -54,9 +54,21 @@ function extractFunction(name) {
 function getStep5Bundle() {
   return [
     extractFunction('getStep5DirectCompletionPayload'),
+    extractFunction('isSignupProfilePageUrl'),
     extractFunction('isStep5AllConsentText'),
     extractFunction('findStep5AllConsentCheckbox'),
     extractFunction('isStep5CheckboxChecked'),
+    extractFunction('getStep5ProfilePathPatterns'),
+    extractFunction('getStep5AuthRetryPathPatterns'),
+    extractFunction('isStep5ProfilePageUrl'),
+    extractFunction('getStep5AuthRetryPageState'),
+    extractFunction('getStep5SubmitButton'),
+    extractFunction('waitForStep5SubmitButton'),
+    extractFunction('isStep5SubmitButtonClickable'),
+    extractFunction('isStep5ProfileStillVisible'),
+    extractFunction('getStep5PostSubmitSuccessState'),
+    extractFunction('installStep5NavigationCompletionReporter'),
+    extractFunction('waitForStep5SubmitOutcome'),
     extractFunction('step5_fillNameBirthday'),
   ].join('\n');
 }
@@ -73,6 +85,9 @@ const completeButton = {
   tagName: 'BUTTON',
   textContent: '\\u5b8c\\u6210\\u8d26\\u6237\\u521b\\u5efa',
   hidden: false,
+  getAttribute() {
+    return '';
+  },
 };
 const allConsentLabel = {
   hidden: false,
@@ -110,6 +125,7 @@ const document = {
         return null;
       case 'input[name="age"]':
         return ageInput;
+      case 'button[type="submit"], input[type="submit"]':
       case 'button[type="submit"]':
         return completeButton;
       default:
@@ -136,6 +152,8 @@ function log(message, level = 'info') {
   logs.push({ message, level });
 }
 
+function throwIfStopped() {}
+
 async function waitForElement() {
   return nameInput;
 }
@@ -155,6 +173,14 @@ function isVisibleElement(el) {
   return Boolean(el) && !el.hidden;
 }
 
+function isActionEnabled(el) {
+  return Boolean(el) && !el.disabled && el.getAttribute?.('aria-disabled') !== 'true';
+}
+
+function getActionText(el) {
+  return el.textContent || '';
+}
+
 async function setReactAriaBirthdaySelect() {
   throw new Error('setReactAriaBirthdaySelect should not run in age-mode test');
 }
@@ -168,6 +194,9 @@ function simulateClick(el) {
   if (el === allConsentLabel || el === allConsentCheckbox) {
     allConsentCheckbox.checked = true;
   }
+  if (el === completeButton) {
+    location.href = 'https://chatgpt.com/';
+  }
 }
 
 function reportComplete(step, payload) {
@@ -177,6 +206,17 @@ function reportComplete(step, payload) {
 function normalizeInlineText(text) {
   return String(text || '').replace(/\\s+/g, ' ').trim();
 }
+
+function getSignupAuthRetryPathPatterns() { return []; }
+function getAuthTimeoutErrorPageState() { return null; }
+async function recoverCurrentAuthRetryPage() { throw new Error('should not recover retry page'); }
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function createAuthMaxCheckAttemptsError() { return new Error('max_check_attempts'); }
+function getStep5ErrorText() { return ''; }
+function isStep5Ready() { return /^https:\\/\\/auth\\.openai\\.com\\//.test(location.href); }
+function isLikelyLoggedInChatgptHomeUrl() { return /^https:\\/\\/chatgpt\\.com\\//.test(location.href); }
+function isOAuthConsentPage() { return false; }
+function isAddPhonePageReady() { return false; }
 
 ${getStep5Bundle()}
 
@@ -205,9 +245,11 @@ return {
 
   const snapshot = api.snapshot();
   assert.deepStrictEqual(result, {
-    skippedPostSubmitCheck: true,
-    directProceedToStep6: true,
+    profileSubmitted: true,
+    postSubmitChecked: true,
     ageMode: true,
+    outcome: 'logged_in_home',
+    url: 'https://chatgpt.com/',
   });
   assert.equal(snapshot.nameValue, 'Mia Harris');
   assert.equal(snapshot.ageValue, '19');
@@ -220,9 +262,11 @@ return {
     {
       step: 5,
       payload: {
-        skippedPostSubmitCheck: true,
-        directProceedToStep6: true,
+        profileSubmitted: true,
+        postSubmitChecked: true,
         ageMode: true,
+        outcome: 'logged_in_home',
+        url: 'https://chatgpt.com/',
       },
     },
   ]);
@@ -291,6 +335,7 @@ const document = {
         return null;
       case 'input[name="age"]':
         return ageInput;
+      case 'button[type="submit"], input[type="submit"]':
       case 'button[type="submit"]':
         return completeButton;
       default:
@@ -311,6 +356,7 @@ const document = {
 
 const location = { href: 'https://auth.openai.com/u/signup/profile' };
 function log() {}
+function throwIfStopped() {}
 async function waitForElement() { return nameInput; }
 async function humanPause() {}
 async function sleep() {}
@@ -321,9 +367,22 @@ async function setReactAriaBirthdaySelect() { throw new Error('setReactAriaBirth
 async function waitForElementByText() { throw new Error('waitForElementByText should not run in this test'); }
 function simulateClick(el) {
   operationEvents.push(\`simulate-click:\${activeOperationLabel || 'outside'}:\${el.textContent || el.tagName || 'element'}\`);
+  if (el === completeButton) {
+    location.href = 'https://chatgpt.com/';
+  }
 }
 function reportComplete() {}
 function normalizeInlineText(text) { return String(text || '').replace(/\\s+/g, ' ').trim(); }
+function getSignupAuthRetryPathPatterns() { return []; }
+function getAuthTimeoutErrorPageState() { return null; }
+async function recoverCurrentAuthRetryPage() { throw new Error('should not recover retry page'); }
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function createAuthMaxCheckAttemptsError() { return new Error('max_check_attempts'); }
+function getStep5ErrorText() { return ''; }
+function isStep5Ready() { return /^https:\\/\\/auth\\.openai\\.com\\//.test(location.href); }
+function isLikelyLoggedInChatgptHomeUrl() { return /^https:\\/\\/chatgpt\\.com\\//.test(location.href); }
+function isOAuthConsentPage() { return false; }
+function isAddPhonePageReady() { return false; }
 
 ${getStep5Bundle()}
 

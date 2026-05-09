@@ -155,6 +155,8 @@ const LOGIN_EXTERNAL_IDP_PATTERN = /google|microsoft|apple|sso|single\s+sign[-\s
 const LOGIN_CODE_ONLY_ACTION_PATTERN = /one[-\s]*time|passcode|use\s+(?:a\s+)?code|验证码|一次性/i;
 
 const RESEND_VERIFICATION_CODE_PATTERN = /重新发送(?:验证码)?|再次发送(?:验证码)?|重发(?:验证码)?|未收到(?:验证码|邮件)|resend(?:\s+code)?|send\s+(?:a\s+)?new\s+code|send\s+(?:it\s+)?again|request\s+(?:a\s+)?new\s+code|didn'?t\s+receive/i;
+const PHONE_RESEND_SERVER_ERROR_PREFIX = 'PHONE_RESEND_SERVER_ERROR::';
+const CONTACT_VERIFICATION_SERVER_ERROR_PATTERN = /this\s+page\s+isn['’]?t\s+working|currently\s+unable\s+to\s+handle\s+this\s+request|http\s+error\s+500|500\s+internal\s+server\s+error/i;
 
 function isVisibleElement(el) {
   if (!el) return false;
@@ -258,6 +260,27 @@ function isEmailVerificationPage() {
   return /\/email-verification(?:[/?#]|$)/i.test(location.pathname || '');
 }
 
+function getContactVerificationServerErrorText() {
+  const path = String(location?.pathname || '');
+  if (!/\/contact-verification(?:[/?#]|$)/i.test(path)) {
+    return '';
+  }
+  const text = String(getPageTextSnapshot?.() || document?.body?.textContent || '').replace(/\s+/g, ' ').trim();
+  const title = String(document?.title || '').replace(/\s+/g, ' ').trim();
+  const combined = `${title} ${text}`.trim();
+  if (!CONTACT_VERIFICATION_SERVER_ERROR_PATTERN.test(combined)) {
+    return '';
+  }
+  return combined || 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.';
+}
+
+function throwIfContactVerificationServerError() {
+  const serverErrorText = getContactVerificationServerErrorText();
+  if (serverErrorText) {
+    throw new Error(`${PHONE_RESEND_SERVER_ERROR_PREFIX}${serverErrorText}`);
+  }
+}
+
 async function resendVerificationCode(step, timeout = 45000) {
   const performOperationWithDelay = typeof getOperationDelayRunner === 'function'
     ? getOperationDelayRunner()
@@ -276,6 +299,7 @@ async function resendVerificationCode(step, timeout = 45000) {
 
   while (Date.now() - start < timeout) {
     throwIfStopped();
+    throwIfContactVerificationServerError();
 
     // Check for 405 error page and recover by clicking "Try again"
     if (is405MethodNotAllowedPage()) {
@@ -302,6 +326,7 @@ async function resendVerificationCode(step, timeout = 45000) {
         loggedWaiting = false;
         continue;
       }
+      throwIfContactVerificationServerError();
 
       return {
         resent: true,
@@ -317,6 +342,7 @@ async function resendVerificationCode(step, timeout = 45000) {
     await sleep(250);
   }
 
+  throwIfContactVerificationServerError();
   throw new Error('无法点击重新发送验证码按钮。URL: ' + location.href);
 }
 
@@ -986,6 +1012,8 @@ async function waitForSignupEntryState(options = {}) {
     logDiagnostics = false,
   } = options;
   const start = Date.now();
+  const maxSignupEntryClickRetries = 5;
+  const maxSignupEntryClickAttempts = maxSignupEntryClickRetries + 1;
   let lastTriggerClickAt = 0;
   let clickAttempts = 0;
   let lastState = '';
@@ -1042,12 +1070,21 @@ async function waitForSignupEntryState(options = {}) {
       }
 
       if (Date.now() - lastTriggerClickAt >= 1500) {
+        if (clickAttempts >= maxSignupEntryClickAttempts) {
+          log(`步骤 ${step}：官网注册入口已完成 ${maxSignupEntryClickRetries} 次重试，页面仍未进入邮箱输入页，停止重试。`, 'warn');
+          return snapshot;
+        }
         lastTriggerClickAt = Date.now();
         clickAttempts += 1;
+        const retryAttempt = clickAttempts - 1;
         if (logDiagnostics) {
-          log(`步骤 ${step}：正在点击官网注册入口（第 ${clickAttempts} 次）："${getActionText(snapshot.signupTrigger).slice(0, 80)}"`);
+          log(`步骤 ${step}：正在点击官网注册入口（第 ${clickAttempts}/${maxSignupEntryClickAttempts} 次）："${getActionText(snapshot.signupTrigger).slice(0, 80)}"`);
         }
-        log('步骤 2：正在点击官网注册入口...');
+        log(retryAttempt > 0
+          ? `步骤 ${step}：上次点击后仍未进入邮箱输入页，等待 3 秒后重试点击官网注册入口（重试 ${retryAttempt}/${maxSignupEntryClickRetries}）...`
+          : `步骤 ${step}：已找到官网注册入口，等待 3 秒后点击...`);
+        await sleep(3000);
+        throwIfStopped();
         await humanPause(350, 900);
         await performOperationWithDelay({ stepKey: 'signup-entry', kind: 'click', label: 'open-signup-entry' }, async () => {
           simulateClick(snapshot.signupTrigger);
@@ -2282,7 +2319,10 @@ async function waitForSignupPhoneEntryState(options = {}) {
     step = 2,
   } = options;
   const start = Date.now();
+  const maxSignupEntryClickRetries = 5;
+  const maxSignupEntryClickAttempts = maxSignupEntryClickRetries + 1;
   let lastTriggerClickAt = 0;
+  let clickAttempts = 0;
   let lastSwitchToPhoneAt = 0;
   let lastMoreOptionsClickAt = 0;
   let slowSnapshotLogged = false;
@@ -2328,8 +2368,18 @@ async function waitForSignupPhoneEntryState(options = {}) {
 
     if (snapshot.state === 'entry_home' && snapshot.signupTrigger) {
       if (Date.now() - lastTriggerClickAt >= 1500) {
+        if (clickAttempts >= maxSignupEntryClickAttempts) {
+          log(`步骤 ${step}：官网注册入口已完成 ${maxSignupEntryClickRetries} 次重试，页面仍未进入手机号输入页，停止重试。`, 'warn');
+          return snapshot;
+        }
         lastTriggerClickAt = Date.now();
-        log(`步骤 ${step}：正在点击官网注册入口...`);
+        clickAttempts += 1;
+        const retryAttempt = clickAttempts - 1;
+        log(retryAttempt > 0
+          ? `步骤 ${step}：上次点击后仍未进入手机号输入页，等待 3 秒后重试点击官网注册入口（重试 ${retryAttempt}/${maxSignupEntryClickRetries}）...`
+          : `步骤 ${step}：已找到官网注册入口，等待 3 秒后点击...`);
+        await sleep(3000);
+        throwIfStopped();
         await humanPause(350, 900);
         await performOperationWithDelay({ stepKey: 'signup-phone-entry', kind: 'click', label: 'open-signup-entry' }, async () => {
           simulateClick(snapshot.signupTrigger);
@@ -2735,7 +2785,7 @@ function isSignupProfilePageUrl(rawUrl = location.href) {
     if (!['auth.openai.com', 'auth0.openai.com', 'accounts.openai.com'].includes(host)) {
       return false;
     }
-    return /\/create-account\/profile(?:[/?#]|$)/i.test(String(parsed.pathname || ''));
+    return /\/(?:create-account\/profile|u\/signup\/profile|signup\/profile)(?:[/?#]|$)/i.test(String(parsed.pathname || ''));
   } catch {
     return false;
   }
@@ -4109,6 +4159,7 @@ function serializeLoginAuthState(snapshot) {
     url: snapshot?.url || location.href,
     path: snapshot?.path || location.pathname || '',
     displayedEmail: snapshot?.displayedEmail || '',
+    verificationErrorText: getVerificationErrorText(),
     retryEnabled: Boolean(snapshot?.retryEnabled),
     titleMatched: Boolean(snapshot?.titleMatched),
     detailMatched: Boolean(snapshot?.detailMatched),
@@ -6266,13 +6317,22 @@ function getSerializableRect(el) {
 // Step 5: Fill Name & Birthday / Age
 // ============================================================
 
-function getStep5DirectCompletionPayload({ isAgeMode = false } = {}) {
+function getStep5DirectCompletionPayload({ isAgeMode = false, navigationStarted = false, outcome = null } = {}) {
   const payload = {
-    skippedPostSubmitCheck: true,
-    directProceedToStep6: true,
+    profileSubmitted: true,
+    postSubmitChecked: true,
   };
   if (isAgeMode) {
     payload.ageMode = true;
+  }
+  if (navigationStarted) {
+    payload.navigationStarted = true;
+  }
+  if (outcome?.state) {
+    payload.outcome = outcome.state;
+  }
+  if (outcome?.url) {
+    payload.url = outcome.url;
   }
   return payload;
 }
@@ -6320,6 +6380,252 @@ async function waitForCombinedSignupVerificationProfilePage(timeout = 2500) {
   }
 
   return isCombinedSignupVerificationProfilePage();
+}
+
+function getStep5ProfilePathPatterns() {
+  return [
+    /\/create-account\/profile(?:[/?#]|$)/i,
+    /\/u\/signup\/profile(?:[/?#]|$)/i,
+    /\/signup\/profile(?:[/?#]|$)/i,
+  ];
+}
+
+function getStep5AuthRetryPathPatterns() {
+  const signupPatterns = typeof getSignupAuthRetryPathPatterns === 'function'
+    ? getSignupAuthRetryPathPatterns()
+    : [];
+  return [
+    ...signupPatterns,
+    ...getStep5ProfilePathPatterns(),
+  ];
+}
+
+function isStep5ProfilePageUrl(rawUrl = location.href) {
+  return isSignupProfilePageUrl(rawUrl);
+}
+
+function getStep5AuthRetryPageState() {
+  if (typeof getAuthTimeoutErrorPageState === 'function') {
+    return getAuthTimeoutErrorPageState({
+      pathPatterns: getStep5AuthRetryPathPatterns(),
+    });
+  }
+
+  if (typeof getCurrentAuthRetryPageState === 'function') {
+    return getCurrentAuthRetryPageState('signup');
+  }
+
+  return null;
+}
+
+function getStep5SubmitButton() {
+  const direct = document.querySelector('button[type="submit"], input[type="submit"]');
+  if (direct && isVisibleElement(direct)) {
+    return direct;
+  }
+
+  const candidates = document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]');
+  return Array.from(candidates).find((el) => {
+    if (!isVisibleElement(el)) return false;
+    const text = typeof getActionText === 'function'
+      ? getActionText(el)
+      : [
+        el?.textContent,
+        el?.value,
+        el?.getAttribute?.('aria-label'),
+        el?.getAttribute?.('title'),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return /完成|创建|create|continue|finish|done|agree/i.test(text);
+  }) || null;
+}
+
+async function waitForStep5SubmitButton(timeout = 5000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+    const button = getStep5SubmitButton();
+    if (button) {
+      return button;
+    }
+    await sleep(150);
+  }
+
+  return null;
+}
+
+function isStep5SubmitButtonClickable(button) {
+  return Boolean(button)
+    && isVisibleElement(button)
+    && !button.disabled
+    && button.getAttribute?.('aria-disabled') !== 'true';
+}
+
+function isStep5ProfileStillVisible() {
+  if (isStep5ProfilePageUrl()) {
+    return true;
+  }
+
+  return typeof isStep5Ready === 'function' ? isStep5Ready() : false;
+}
+
+function getStep5PostSubmitSuccessState() {
+  if (getStep5AuthRetryPageState()) {
+    return null;
+  }
+
+  if (isLikelyLoggedInChatgptHomeUrl()) {
+    return {
+      state: 'logged_in_home',
+      url: location.href,
+    };
+  }
+
+  if (typeof isOAuthConsentPage === 'function' && isOAuthConsentPage()) {
+    return {
+      state: 'oauth_consent',
+      url: location.href,
+    };
+  }
+
+  if (typeof isAddPhonePageReady === 'function' && isAddPhonePageReady()) {
+    return {
+      state: 'add_phone',
+      url: location.href,
+    };
+  }
+
+  if (!isStep5ProfileStillVisible()) {
+    return {
+      state: 'left_profile',
+      url: location.href,
+    };
+  }
+
+  return null;
+}
+
+function installStep5NavigationCompletionReporter(completeOnce) {
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+    return () => {};
+  }
+
+  const onNavigationStarted = () => {
+    completeOnce({
+      navigationStarted: true,
+      outcome: {
+        state: 'navigation_started',
+        url: location.href,
+      },
+    });
+  };
+
+  window.addEventListener('pagehide', onNavigationStarted, { once: true });
+  window.addEventListener('beforeunload', onNavigationStarted, { once: true });
+
+  return () => {
+    window.removeEventListener('pagehide', onNavigationStarted);
+    window.removeEventListener('beforeunload', onNavigationStarted);
+  };
+}
+
+async function waitForStep5SubmitOutcome(options = {}) {
+  const {
+    timeoutMs = 45000,
+    maxAuthRetryRecoveries = 2,
+    maxSubmitClicks = 3,
+    retryClickIntervalMs = 3500,
+  } = options;
+  const start = Date.now();
+  let authRetryRecoveryCount = 0;
+  let submitClickCount = 1;
+  let lastSubmitClickAt = Date.now();
+  let lastStep5Error = '';
+
+  while (Date.now() - start < timeoutMs) {
+    throwIfStopped();
+
+    const retryState = getStep5AuthRetryPageState();
+    if (retryState?.userAlreadyExistsBlocked) {
+      throw createSignupUserAlreadyExistsError();
+    }
+    if (retryState?.maxCheckAttemptsBlocked) {
+      throw createAuthMaxCheckAttemptsError();
+    }
+    if (retryState) {
+      if (authRetryRecoveryCount >= maxAuthRetryRecoveries) {
+        throw new Error(`步骤 5：资料提交后连续进入认证重试页 ${maxAuthRetryRecoveries} 次，页面仍未恢复。URL: ${location.href}`);
+      }
+      authRetryRecoveryCount += 1;
+      log(`步骤 5：资料提交后进入认证重试页，正在自动恢复（${authRetryRecoveryCount}/${maxAuthRetryRecoveries}）...`, 'warn');
+      await recoverCurrentAuthRetryPage({
+        flow: 'signup',
+        logLabel: '步骤 5：资料提交后检测到认证重试页，正在点击“重试”恢复',
+        maxClickAttempts: 2,
+        pathPatterns: getStep5AuthRetryPathPatterns(),
+        step: 5,
+        timeoutMs: 12000,
+      });
+      lastSubmitClickAt = Date.now();
+      continue;
+    }
+
+    const successState = getStep5PostSubmitSuccessState();
+    if (successState) {
+      return successState;
+    }
+
+    const step5Error = typeof getStep5ErrorText === 'function' ? getStep5ErrorText() : '';
+    if (step5Error) {
+      lastStep5Error = step5Error;
+    }
+
+    if (
+      isStep5ProfileStillVisible()
+      && submitClickCount < maxSubmitClicks
+      && Date.now() - lastSubmitClickAt >= retryClickIntervalMs
+    ) {
+      const submitButton = getStep5SubmitButton();
+      if (isStep5SubmitButtonClickable(submitButton)) {
+        submitClickCount += 1;
+        log(`步骤 5：资料提交后仍停留在资料页，正在重新点击“完成帐户创建”（第 ${submitClickCount}/${maxSubmitClicks} 次）...`, 'warn');
+        await humanPause(350, 900);
+        simulateClick(submitButton);
+        lastSubmitClickAt = Date.now();
+        await sleep(1000);
+        continue;
+      }
+    }
+
+    await sleep(250);
+  }
+
+  const finalRetryState = getStep5AuthRetryPageState();
+  if (finalRetryState?.userAlreadyExistsBlocked) {
+    throw createSignupUserAlreadyExistsError();
+  }
+  if (finalRetryState?.maxCheckAttemptsBlocked) {
+    throw createAuthMaxCheckAttemptsError();
+  }
+  if (finalRetryState) {
+    throw new Error(`步骤 5：资料提交后仍停留在认证重试页，自动恢复未完成。URL: ${location.href}`);
+  }
+
+  const finalSuccessState = getStep5PostSubmitSuccessState();
+  if (finalSuccessState) {
+    return finalSuccessState;
+  }
+
+  const finalStep5Error = (typeof getStep5ErrorText === 'function' ? getStep5ErrorText() : '') || lastStep5Error;
+  if (finalStep5Error) {
+    throw new Error(`步骤 5：资料提交后页面返回错误：${finalStep5Error}。URL: ${location.href}`);
+  }
+
+  throw new Error(`步骤 5：资料提交后未检测到页面跳转或恢复成功（已点击提交 ${submitClickCount}/${maxSubmitClicks} 次）。URL: ${location.href}`);
 }
 
 async function step5_fillNameBirthday(payload) {
@@ -6558,7 +6864,7 @@ async function step5_fillNameBirthday(payload) {
 
   // Click "完成帐户创建" button
   await sleep(500);
-  const completeBtn = document.querySelector('button[type="submit"]')
+  const completeBtn = await waitForStep5SubmitButton(5000)
     || await waitForElementByText('button', /完成|create|continue|finish|done|agree/i, 5000).catch(() => null);
   if (!completeBtn) {
     throw new Error('未找到“完成帐户创建”按钮。URL: ' + location.href);
@@ -6566,22 +6872,42 @@ async function step5_fillNameBirthday(payload) {
 
   const isAgeMode = !birthdayMode && Boolean(ageInput);
   if (isAgeMode) {
-    log('步骤 5：当前为年龄输入模式，点击“完成帐户创建”后将直接完成当前步骤。', 'warn');
+    log('步骤 5：当前为年龄输入模式，点击“完成帐户创建”后将等待页面结果。', 'info');
   }
+
+  let reportedCompletionPayload = null;
+  function completeStep5Once(extra = {}) {
+    if (reportedCompletionPayload) {
+      return reportedCompletionPayload;
+    }
+
+    const completionPayload = getStep5DirectCompletionPayload({
+      isAgeMode,
+      navigationStarted: Boolean(extra.navigationStarted),
+      outcome: extra.outcome || null,
+    });
+    reportedCompletionPayload = completionPayload;
+    reportComplete(5, completionPayload);
+    return completionPayload;
+  }
+
+  const cleanupNavigationReporter = installStep5NavigationCompletionReporter(completeStep5Once);
 
   await humanPause(500, 1300);
   await performOperationWithDelay({ stepKey: 'fill-profile', kind: 'submit', label: 'submit-profile' }, async () => {
     simulateClick(completeBtn);
   });
+  log('步骤 5：已点击“完成帐户创建”，正在等待页面跳转、重试页或提交结果。');
 
-  const completionPayload = getStep5DirectCompletionPayload({ isAgeMode });
-  reportComplete(5, completionPayload);
+  try {
+    const outcome = await waitForStep5SubmitOutcome();
+    cleanupNavigationReporter();
 
-  if (isAgeMode) {
-    log('步骤 5：年龄模式已点击“完成帐户创建”，当前步骤直接完成，不再等待页面结果。', 'warn');
+    const completionPayload = completeStep5Once({ outcome });
+    log(`步骤 5：资料提交结果已确认（${outcome.state || 'success'}），准备继续后续步骤。`, 'ok');
     return completionPayload;
+  } catch (error) {
+    cleanupNavigationReporter();
+    throw error;
   }
-
-  log('步骤 5：已点击“完成帐户创建”，当前步骤直接完成，不再等待页面结果。');
-  return completionPayload;
 }

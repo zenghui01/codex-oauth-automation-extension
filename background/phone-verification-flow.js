@@ -94,6 +94,7 @@
     const PHONE_RESTART_STEP7_ERROR_PREFIX = 'PHONE_RESTART_STEP7::';
     const PHONE_RESEND_THROTTLED_ERROR_PREFIX = 'PHONE_RESEND_THROTTLED::';
     const PHONE_RESEND_BANNED_NUMBER_ERROR_PREFIX = 'PHONE_RESEND_BANNED_NUMBER::';
+    const PHONE_RESEND_SERVER_ERROR_PREFIX = 'PHONE_RESEND_SERVER_ERROR::';
     const PHONE_ROUTE_405_RECOVERY_FAILED_ERROR_PREFIX = 'PHONE_ROUTE_405_RECOVERY_FAILED::';
     const PHONE_MANUAL_FREE_REUSE_ERROR_PREFIX = 'PHONE_MANUAL_FREE_REUSE::';
     const PHONE_AUTO_FREE_REUSE_PREPARE_ERROR_PREFIX = 'PHONE_AUTO_FREE_REUSE_PREPARE::';
@@ -1385,6 +1386,25 @@
         return true;
       }
       return /无法向此电话号码发送短信|无法向此手机号发送短信|无法发送短信到此电话号码|无法发送短信到此手机号|can(?:not|'t)\s+send\s+(?:an?\s+)?(?:sms|text(?:\s+message)?)\s+to\s+(?:this|that)\s+(?:phone\s+)?number|unable\s+to\s+send\s+(?:an?\s+)?(?:sms|text(?:\s+message)?)\s+to\s+(?:this|that)\s+(?:phone\s+)?number/i.test(message);
+    }
+
+    function isPhoneResendServerError(error) {
+      const message = String(error?.message || error || '').trim();
+      if (!message) {
+        return false;
+      }
+      if (message.startsWith(PHONE_RESEND_SERVER_ERROR_PREFIX)) {
+        return true;
+      }
+      return /this\s+page\s+isn['’]?t\s+working|currently\s+unable\s+to\s+handle\s+this\s+request|http\s+error\s+500|500\s+internal\s+server\s+error/i.test(message);
+    }
+
+    function buildPhoneResendServerError(error) {
+      const message = String(error?.message || error || '').trim();
+      if (message.startsWith(PHONE_RESEND_SERVER_ERROR_PREFIX)) {
+        return new Error(message);
+      }
+      return new Error(`${PHONE_RESEND_SERVER_ERROR_PREFIX}${message || 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.'}`);
     }
 
     function shouldTreatResendThrottledAsBanned(state = {}) {
@@ -4300,6 +4320,13 @@
             message: error.message,
           };
         }
+        if (isPhoneResendServerError(error)) {
+          return {
+            hasError: true,
+            reason: 'resend_server_error',
+            message: error.message,
+          };
+        }
         if (isPhoneMaxUsageExceededFlowError(error)) {
           return {
             hasError: true,
@@ -4971,6 +4998,9 @@
                 if (pageError?.reason === 'phone_max_usage_exceeded') {
                   throw buildPhoneMaxUsageExceededError(pageError.message);
                 }
+                if (pageError?.reason === 'resend_server_error') {
+                  throw buildPhoneResendServerError(pageError.message);
+                }
                 if (pageError?.reason === 'resend_throttled') {
                   if (shouldTreatResendThrottledAsBanned(state)) {
                     throw buildHighRiskResendThrottledError(pageError.message);
@@ -5026,6 +5056,18 @@
                 code: '',
                 replaceNumber: true,
                 reason: 'phone_max_usage_exceeded',
+              };
+            }
+            if (isPhoneResendServerError(error)) {
+              await addLog(
+                `步骤 9：重发短信后进入 contact-verification 500 页面，立即更换号码。${error.message}`,
+                'warn'
+              );
+              await clearPhoneRuntimeCountdown();
+              return {
+                code: '',
+                replaceNumber: true,
+                reason: 'resend_server_error',
               };
             }
             if (isPhoneResendThrottledError(error)) {
@@ -5142,6 +5184,18 @@
                   reason: shouldTreatResendThrottledAsBanned(state)
                     ? 'resend_throttled_high_risk_banned'
                     : 'resend_throttled',
+                };
+              }
+              if (isPhoneResendServerError(resendError)) {
+                await addLog(
+                  `步骤 9：重发短信后进入 contact-verification 500 页面，立即更换号码。${resendError.message}`,
+                  'warn'
+                );
+                await clearPhoneRuntimeCountdown();
+                return {
+                  code: '',
+                  replaceNumber: true,
+                  reason: 'resend_server_error',
                 };
               }
               await addLog(`步骤 9：点击手机验证码页面重发按钮失败。${resendError.message}`, 'warn');
@@ -5382,6 +5436,9 @@
                   if (isStopRequestedError(resendError)) {
                     throw resendError;
                   }
+                  if (isPhoneResendServerError(resendError)) {
+                    throw buildPhoneResendServerError(resendError);
+                  }
                   await addLog(`步骤 4：注册手机验证码页面重发失败，将继续轮询短信。${resendError.message}`, 'warn', {
                     step: 4,
                     stepKey: 'fetch-signup-code',
@@ -5418,6 +5475,9 @@
               } catch (resendError) {
                 if (isStopRequestedError(resendError)) {
                   throw resendError;
+                }
+                if (isPhoneResendServerError(resendError)) {
+                  throw buildPhoneResendServerError(resendError);
                 }
                 await addLog(`步骤 4：验证码被拒后点击重发失败。${resendError.message}`, 'warn', {
                   step: 4,
@@ -5621,6 +5681,9 @@
                   if (isStopRequestedError(resendError)) {
                     throw resendError;
                   }
+                  if (isPhoneResendServerError(resendError)) {
+                    throw buildPhoneResendServerError(resendError);
+                  }
                   await addLog(`步骤 ${visibleStep}：登录手机验证码页面重发失败，将继续轮询短信。${resendError.message}`, 'warn', {
                     step: visibleStep,
                     stepKey: 'fetch-login-code',
@@ -5655,6 +5718,9 @@
               } catch (resendError) {
                 if (isStopRequestedError(resendError)) {
                   throw resendError;
+                }
+                if (isPhoneResendServerError(resendError)) {
+                  throw buildPhoneResendServerError(resendError);
                 }
                 await addLog(`步骤 ${visibleStep}：登录手机验证码被拒后点击重发失败。${resendError.message}`, 'warn', {
                   step: visibleStep,

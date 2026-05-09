@@ -547,7 +547,12 @@ test('verification flow keeps step 8 successful when code submit transport fails
     pollCloudflareTempEmailVerificationCode: async () => ({}),
     pollHotmailVerificationCode: async () => ({}),
     pollLuckmailVerificationCode: async () => ({}),
-    sendToContentScript: async () => ({}),
+    sendToContentScript: async (_source, message) => {
+      if (message.type === 'FILL_CODE') {
+        throw new Error('message channel is closed before a response was received');
+      }
+      return {};
+    },
     sendToContentScriptResilient: async (_source, message) => {
       if (message.type === 'FILL_CODE') {
         throw new Error('message channel is closed before a response was received');
@@ -1379,6 +1384,151 @@ test('verification flow uses resilient signup-page transport when submitting ver
   assert.equal(resilientCalls[0].message.type, 'FILL_CODE');
   assert.equal(resilientCalls[0].message.payload.code, '654321');
   assert.ok(resilientCalls[0].options.timeoutMs >= 30000);
+});
+
+test('verification flow does not replay step 8 code submit after transient auth-page transport failure', async () => {
+  const directMessages = [];
+  const resilientMessages = [];
+
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeStepFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isRetryableContentScriptTransportError: (error) => /did not respond/i.test(String(error?.message || error || '')),
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    sendToContentScript: async (_source, message) => {
+      directMessages.push(message.type);
+      if (message.type === 'FILL_CODE') {
+        throw new Error('步骤 8：页面通信异常 did not respond in 30s');
+      }
+      return {};
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      resilientMessages.push(message.type);
+      if (message.type === 'GET_LOGIN_AUTH_STATE') {
+        return {
+          state: 'verification_page',
+          verificationErrorText: '代码不正确',
+          url: 'https://auth.openai.com/email-verification',
+        };
+      }
+      throw new Error('FILL_CODE should not be replayed through resilient transport');
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  const result = await helpers.submitVerificationCode(8, '510725', { completionStep: 11 });
+
+  assert.deepStrictEqual(result, {
+    invalidCode: true,
+    errorText: '代码不正确',
+    url: 'https://auth.openai.com/email-verification',
+  });
+  assert.deepStrictEqual(directMessages, ['FILL_CODE']);
+  assert.deepStrictEqual(resilientMessages, ['GET_LOGIN_AUTH_STATE']);
+});
+
+test('verification flow requests a new code immediately after Cloudflare Temp Email code is rejected', async () => {
+  const events = [];
+  const pollPayloads = [];
+  const completed = [];
+
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeStepFromBackground: async (_step, payload) => {
+      completed.push(payload);
+    },
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async (_step, _state, payload) => {
+      pollPayloads.push(payload);
+      const code = pollPayloads.length === 1 ? '111111' : '222222';
+      events.push(['poll', code]);
+      return { code, emailTimestamp: pollPayloads.length };
+    },
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    sendToContentScript: async (_source, message) => {
+      if (message.type === 'RESEND_VERIFICATION_CODE') {
+        events.push(['resend', message.step]);
+        return {};
+      }
+      if (message.type === 'FILL_CODE') {
+        events.push(['submit', message.payload.code]);
+        return message.payload.code === '111111'
+          ? { invalidCode: true, errorText: '代码不正确' }
+          : { success: true };
+      }
+      return {};
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  await helpers.resolveVerificationStep(
+    8,
+    {
+      email: 'user@example.com',
+      loginVerificationRequestedAt: Date.now(),
+      verificationResendCount: 1,
+    },
+    { provider: 'cloudflare-temp-email', label: 'Cloudflare Temp Email' },
+    {
+      completionStep: 11,
+      lastResendAt: Date.now(),
+      resendIntervalMs: 25000,
+    }
+  );
+
+  assert.deepStrictEqual(events, [
+    ['poll', '111111'],
+    ['submit', '111111'],
+    ['resend', 8],
+    ['poll', '222222'],
+    ['submit', '222222'],
+  ]);
+  assert.deepStrictEqual(pollPayloads[1].excludeCodes, ['111111']);
+  assert.equal(completed[0].code, '222222');
 });
 
 test('verification flow forwards optional signup profile payload when submitting signup verification code', async () => {

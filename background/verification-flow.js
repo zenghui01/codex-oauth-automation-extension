@@ -159,7 +159,7 @@
         if (!['auth.openai.com', 'auth0.openai.com', 'accounts.openai.com'].includes(host)) {
           return false;
         }
-        return /\/create-account\/profile(?:[/?#]|$)/i.test(String(parsed.pathname || ''));
+        return /\/(?:create-account\/profile|u\/signup\/profile|signup\/profile)(?:[/?#]|$)/i.test(String(parsed.pathname || ''));
       } catch {
         return false;
       }
@@ -249,11 +249,21 @@
 
           const authState = String(result?.state || '').trim();
           const authUrl = String(result?.url || '').trim();
+          const verificationErrorText = String(result?.verificationErrorText || '').trim();
           lastSnapshot = {
             state: authState || 'unknown',
             url: authUrl,
           };
 
+          if (authState === 'verification_page' && verificationErrorText) {
+            return {
+              success: false,
+              reason: 'invalid_code',
+              invalidCode: true,
+              errorText: verificationErrorText,
+              url: authUrl,
+            };
+          }
           if (authState === 'oauth_consent_page') {
             return {
               success: true,
@@ -1080,7 +1090,8 @@
         },
       };
       let result;
-      if (typeof sendToContentScriptResilient === 'function') {
+      const shouldAvoidReplaySubmit = step === 8;
+      if (typeof sendToContentScriptResilient === 'function' && !shouldAvoidReplaySubmit) {
         try {
           result = await sendToContentScriptResilient('signup-page', message, {
             timeoutMs: Math.max(baseResponseTimeoutMs + 15000, 30000),
@@ -1116,6 +1127,56 @@
               timeoutMs: 9000,
               pollIntervalMs: 300,
             });
+            if (fallback.success) {
+              if (fallback.addPhonePage) {
+                await addLog('验证码提交后通信中断，但页面已进入手机号验证页，按提交成功继续。', 'warn', {
+                  step: completionStep,
+                  stepKey: 'fetch-login-code',
+                });
+              } else {
+                await addLog('验证码提交后通信中断，但页面已进入 OAuth 授权页，按提交成功继续。', 'warn', {
+                  step: completionStep,
+                  stepKey: 'fetch-login-code',
+                });
+              }
+              return {
+                success: true,
+                assumed: true,
+                transportRecovered: true,
+                addPhonePage: Boolean(fallback.addPhonePage),
+                url: fallback.url || '',
+              };
+            }
+            if (fallback.restartStep7) {
+              const urlPart = fallback.url ? ` URL: ${fallback.url}` : '';
+              throw new Error(`STEP8_RESTART_STEP7::步骤 ${completionStep}：验证码提交后认证页进入登录超时报错页，请回到步骤 ${authLoginStep} 重新开始。${urlPart}`.trim());
+            }
+          }
+          throw err;
+        }
+      } else if (shouldAvoidReplaySubmit) {
+        try {
+          result = await sendToContentScript('signup-page', message, {
+            responseTimeoutMs: baseResponseTimeoutMs,
+          });
+        } catch (err) {
+          if (isRetryableVerificationTransportError(err)) {
+            await addLog('认证页正在切换，等待页面重新就绪后继续确认验证码提交结果...', 'warn', {
+              step: completionStep,
+              stepKey: 'fetch-login-code',
+            });
+            const fallback = await detectStep8PostSubmitFallback({
+              step,
+              timeoutMs: 9000,
+              pollIntervalMs: 300,
+            });
+            if (fallback.invalidCode) {
+              return {
+                invalidCode: true,
+                errorText: fallback.errorText || '验证码被拒绝。',
+                url: fallback.url || '',
+              };
+            }
             if (fallback.success) {
               if (fallback.addPhonePage) {
                 await addLog('验证码提交后通信中断，但页面已进入手机号验证页，按提交成功继续。', 'warn', {
@@ -1287,20 +1348,8 @@
               continue;
             }
 
-            const remainingBeforeResendMs = resendIntervalMs > 0 && lastResendAt > 0
-              ? Math.max(0, resendIntervalMs - (Date.now() - lastResendAt))
-              : 0;
-            if (remainingBeforeResendMs > 0) {
-              await addLog(
-                `步骤 ${step}：提交失败后距离下次重新发送验证码还差 ${Math.ceil(remainingBeforeResendMs / 1000)} 秒，先继续刷新邮箱（${attempt + 1}/${maxSubmitAttempts}）...`,
-                'warn'
-              );
-              await sleepWithStop(Math.min(remainingBeforeResendMs, 2000));
-              continue;
-            }
-
             if (remainingAutomaticResendCount <= 0) {
-              await addLog(`步骤 ${step}：已达到自动重新发送验证码次数上限，将直接使用当前时间窗口继续重试。`, 'warn');
+              await addLog(`步骤 ${step}：已达到自动重新发送验证码次数上限，将排除已拒绝验证码并继续轮询新邮件。`, 'warn');
               continue;
             }
 
