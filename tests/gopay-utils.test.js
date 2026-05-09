@@ -87,7 +87,7 @@ test('GoPay utils formats balance and maps linked-account errors', () => {
       message: 'ok',
       data: { remaining_uses: 0, total_uses: 3, used_uses: 3, status: 'active', auto_mode_enabled: false },
     }),
-    '余额 0/3，已用 3，状态 active，自动模式 未开通'
+    '余额 0/3，已用 3，状态 active'
   );
   assert.equal(
     api.formatGpcBalancePayload({
@@ -95,7 +95,7 @@ test('GoPay utils formats balance and maps linked-account errors', () => {
       message: 'ok',
       data: { remaining_uses: 998, total_uses: 1000, used_uses: 2, status: 'active', auto_mode_enabled: true },
     }),
-    '余额 998/1000，已用 2，状态 active，自动模式 已开通'
+    '余额 998/1000，已用 2，状态 active'
   );
   assert.equal(api.getGpcBalanceRemainingUses({ data: { remaining_uses: 998 } }), 998);
   assert.equal(api.isGpcAutoModeEnabled({ data: { auto_mode_enabled: true } }), true);

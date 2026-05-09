@@ -962,6 +962,8 @@ async function waitForSignupEntryState(options = {}) {
     logDiagnostics = false,
   } = options;
   const start = Date.now();
+  const maxSignupEntryClickRetries = 5;
+  const maxSignupEntryClickAttempts = maxSignupEntryClickRetries + 1;
   let lastTriggerClickAt = 0;
   let clickAttempts = 0;
   let lastState = '';
@@ -1016,12 +1018,19 @@ async function waitForSignupEntryState(options = {}) {
       }
 
       if (Date.now() - lastTriggerClickAt >= 1500) {
+        if (clickAttempts >= maxSignupEntryClickAttempts) {
+          log(`步骤 ${step}：官网注册入口已完成 ${maxSignupEntryClickRetries} 次重试，页面仍未进入邮箱输入页，停止重试。`, 'warn');
+          return snapshot;
+        }
         lastTriggerClickAt = Date.now();
         clickAttempts += 1;
+        const retryAttempt = clickAttempts - 1;
         if (logDiagnostics) {
-          log(`步骤 ${step}：正在点击官网注册入口（第 ${clickAttempts} 次）："${getActionText(snapshot.signupTrigger).slice(0, 80)}"`);
+          log(`步骤 ${step}：正在点击官网注册入口（第 ${clickAttempts}/${maxSignupEntryClickAttempts} 次）："${getActionText(snapshot.signupTrigger).slice(0, 80)}"`);
         }
-        log('步骤 2：已找到官网注册入口，等待 3 秒后点击...');
+        log(retryAttempt > 0
+          ? `步骤 ${step}：上次点击后仍未进入邮箱输入页，等待 3 秒后重试点击官网注册入口（重试 ${retryAttempt}/${maxSignupEntryClickRetries}）...`
+          : `步骤 ${step}：已找到官网注册入口，等待 3 秒后点击...`);
         await sleep(3000);
         throwIfStopped();
         simulateClick(snapshot.signupTrigger);
@@ -2204,7 +2213,10 @@ async function waitForSignupPhoneEntryState(options = {}) {
     step = 2,
   } = options;
   const start = Date.now();
+  const maxSignupEntryClickRetries = 5;
+  const maxSignupEntryClickAttempts = maxSignupEntryClickRetries + 1;
   let lastTriggerClickAt = 0;
+  let clickAttempts = 0;
   let lastSwitchToPhoneAt = 0;
   let lastMoreOptionsClickAt = 0;
   let slowSnapshotLogged = false;
@@ -2246,8 +2258,16 @@ async function waitForSignupPhoneEntryState(options = {}) {
 
     if (snapshot.state === 'entry_home' && snapshot.signupTrigger) {
       if (Date.now() - lastTriggerClickAt >= 1500) {
+        if (clickAttempts >= maxSignupEntryClickAttempts) {
+          log(`步骤 ${step}：官网注册入口已完成 ${maxSignupEntryClickRetries} 次重试，页面仍未进入手机号输入页，停止重试。`, 'warn');
+          return snapshot;
+        }
         lastTriggerClickAt = Date.now();
-        log(`步骤 ${step}：已找到官网注册入口，等待 3 秒后点击...`);
+        clickAttempts += 1;
+        const retryAttempt = clickAttempts - 1;
+        log(retryAttempt > 0
+          ? `步骤 ${step}：上次点击后仍未进入手机号输入页，等待 3 秒后重试点击官网注册入口（重试 ${retryAttempt}/${maxSignupEntryClickRetries}）...`
+          : `步骤 ${step}：已找到官网注册入口，等待 3 秒后点击...`);
         await sleep(3000);
         throwIfStopped();
         simulateClick(snapshot.signupTrigger);

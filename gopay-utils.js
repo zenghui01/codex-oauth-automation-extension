@@ -389,11 +389,6 @@
     const totalUses = data.total_uses ?? data.totalUses;
     const usedUses = data.used_uses ?? data.usedUses;
     const status = String(data.status || data.card_status || data.cardStatus || '').trim();
-    const hasAutoModeField = data.auto_mode_enabled !== undefined
-      || data.autoModeEnabled !== undefined
-      || data.auto_enabled !== undefined
-      || data.autoEnabled !== undefined;
-    const autoModeEnabled = isGpcAutoModeEnabled(data);
     const flowId = String(data.flow_id || data.flowId || '').trim();
     const parts = [];
     if (firstValue !== undefined) {
@@ -406,9 +401,6 @@
     }
     if (status) {
       parts.push(`状态 ${status}`);
-    }
-    if (hasAutoModeField) {
-      parts.push(`自动模式 ${autoModeEnabled ? '已开通' : '未开通'}`);
     }
     if (flowId) {
       parts.push(`flow_id ${flowId}`);
