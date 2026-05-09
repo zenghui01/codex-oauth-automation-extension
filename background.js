@@ -456,6 +456,11 @@ function normalizePlusPaymentMethod(value = '') {
   return normalized === PLUS_PAYMENT_METHOD_GOPAY ? PLUS_PAYMENT_METHOD_GOPAY : PLUS_PAYMENT_METHOD_PAYPAL;
 }
 
+function normalizeGpcHelperPhoneMode(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'auto' || normalized === 'builtin' ? 'auto' : 'manual';
+}
+
 function normalizeContributionModeSource(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   return normalized === CONTRIBUTION_SOURCE_SUB2API
@@ -634,6 +639,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   gopayHelperApiUrl: DEFAULT_GPC_HELPER_API_URL,
   gopayHelperApiKey: '',
   gopayHelperCardKey: '',
+  gopayHelperPhoneMode: 'manual',
   gopayHelperPhoneNumber: '',
   gopayHelperCountryCode: '+86',
   gopayHelperPin: '',
@@ -665,6 +671,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   gopayHelperBalancePayload: null,
   gopayHelperBalanceUpdatedAt: 0,
   gopayHelperBalanceError: '',
+  gopayHelperRemainingUses: 0,
+  gopayHelperAutoModeEnabled: false,
+  gopayHelperApiKeyStatus: '',
   autoRunSkipFailures: false,
   autoRunFallbackThreadIntervalMinutes: 0,
   oauthFlowTimeoutEnabled: true,
@@ -2330,6 +2339,10 @@ function normalizePersistentSettingValue(key, value) {
       return self.GoPayUtils?.normalizeGoPayPin
         ? self.GoPayUtils.normalizeGoPayPin(value)
         : String(value || '');
+    case 'gopayHelperPhoneMode':
+      return self.GoPayUtils?.normalizeGpcHelperPhoneMode
+        ? self.GoPayUtils.normalizeGpcHelperPhoneMode(value)
+        : (String(value || '').trim().toLowerCase() === 'auto' || String(value || '').trim().toLowerCase() === 'builtin' ? 'auto' : 'manual');
     case 'gopayHelperPhoneNumber':
       return self.GoPayUtils?.normalizeGoPayPhone
         ? self.GoPayUtils.normalizeGoPayPhone(value)
@@ -2404,6 +2417,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'gopayHelperFailureDetail':
     case 'gopayHelperBalance':
     case 'gopayHelperBalanceError':
+    case 'gopayHelperApiKeyStatus':
       return String(value || '').trim();
     case 'gopayHelperBalancePayload':
     case 'gopayHelperStartPayload':
@@ -2412,10 +2426,12 @@ function normalizePersistentSettingValue(key, value) {
     case 'gopayHelperBalanceUpdatedAt':
     case 'gopayHelperApiInputWaitSeconds':
     case 'gopayHelperOtpInvalidCount':
+    case 'gopayHelperRemainingUses':
       return Math.max(0, Number(value) || 0);
     case 'autoRunSkipFailures':
     case 'oauthFlowTimeoutEnabled':
     case 'gopayHelperLocalSmsHelperEnabled':
+    case 'gopayHelperAutoModeEnabled':
     case 'autoRunDelayEnabled':
     case 'step6CookieCleanupEnabled':
     case 'phoneVerificationEnabled':
@@ -9953,12 +9969,27 @@ async function refreshGpcApiKeyBalance(state = {}, options = {}) {
   const balancePayload = self.GoPayUtils?.unwrapGpcResponse
     ? self.GoPayUtils.unwrapGpcResponse(payload)
     : (payload?.data && typeof payload === 'object' ? payload.data : payload);
+  const balanceData = balancePayload && typeof balancePayload === 'object' && !Array.isArray(balancePayload)
+    ? balancePayload
+    : {};
+  const remainingUses = self.GoPayUtils?.getGpcBalanceRemainingUses
+    ? self.GoPayUtils.getGpcBalanceRemainingUses(balanceData)
+    : Math.max(0, Number(balanceData.remaining_uses ?? balanceData.remainingUses ?? balanceData.balance ?? balanceData.remaining) || 0);
+  const autoModeEnabled = self.GoPayUtils?.isGpcAutoModeEnabled
+    ? self.GoPayUtils.isGpcAutoModeEnabled(balanceData)
+    : Boolean(balanceData.auto_mode_enabled ?? balanceData.autoModeEnabled);
+  const apiKeyStatus = self.GoPayUtils?.getGpcApiKeyStatus
+    ? self.GoPayUtils.getGpcApiKeyStatus(balanceData)
+    : String(balanceData.status || balanceData.card_status || balanceData.cardStatus || '').trim();
   const balanceText = formatGpcApiKeyBalancePayload(payload) || rawText || '未知';
   const updates = {
     gopayHelperBalance: balanceText,
-    gopayHelperBalancePayload: balancePayload && typeof balancePayload === 'object' && !Array.isArray(balancePayload) ? balancePayload : { raw: String(balancePayload || '') },
+    gopayHelperBalancePayload: Object.keys(balanceData).length > 0 ? balanceData : { raw: String(balancePayload || '') },
     gopayHelperBalanceUpdatedAt: Date.now(),
     gopayHelperBalanceError: '',
+    gopayHelperRemainingUses: Math.max(0, Number(remainingUses) || 0),
+    gopayHelperAutoModeEnabled: Boolean(autoModeEnabled),
+    gopayHelperApiKeyStatus: apiKeyStatus,
   };
   const flowId = String(balancePayload?.flow_id || balancePayload?.flowId || '').trim();
   if (flowId) {
@@ -9987,7 +10018,15 @@ async function refreshGpcApiKeyBalance(state = {}, options = {}) {
       : `GPC 余额查询成功：${balanceText}`,
     'info'
   );
-  return { balance: balanceText, payload, updatedAt: updates.gopayHelperBalanceUpdatedAt };
+  return {
+    balance: balanceText,
+    payload,
+    data: updates.gopayHelperBalancePayload,
+    remainingUses: updates.gopayHelperRemainingUses,
+    autoModeEnabled: updates.gopayHelperAutoModeEnabled,
+    apiKeyStatus: updates.gopayHelperApiKeyStatus,
+    updatedAt: updates.gopayHelperBalanceUpdatedAt,
+  };
 }
 
 const refreshGpcCardBalance = refreshGpcApiKeyBalance;

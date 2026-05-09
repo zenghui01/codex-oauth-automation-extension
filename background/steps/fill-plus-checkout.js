@@ -11,7 +11,27 @@
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
   const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
   const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.qlhazycoder.top';
+  const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
+  const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
   const GPC_TASK_POLL_INTERVAL_MS = 3000;
+  const GPC_REMOTE_STAGE_LABELS = {
+    auto_otp_wait: '等待自动 OTP',
+    checkout_order_start: '创建订单',
+    checkout_start: '创建订单',
+    completed: '充值完成',
+    gopay_validate_pin: '校验 PIN',
+    otp_ready: '等待 PIN',
+    otp_submitted_local: 'OTP 已提交',
+    payment_processing: '支付处理中',
+    pin_submitted_local: 'PIN 已提交',
+    sms_otp_wait: '等待短信 OTP',
+    whatsapp_otp_wait: '等待 WhatsApp OTP',
+  };
+  const GPC_WAITING_FOR_LABELS = {
+    auto_otp: '自动 OTP',
+    otp: 'OTP',
+    pin: 'PIN',
+  };
   const PAYMENT_METHOD_CONFIGS = {
     [PLUS_PAYMENT_METHOD_PAYPAL]: {
       id: PLUS_PAYMENT_METHOD_PAYPAL,
@@ -110,6 +130,56 @@
         return PLUS_PAYMENT_METHOD_GPC_HELPER;
       }
       return normalized === PLUS_PAYMENT_METHOD_GOPAY ? PLUS_PAYMENT_METHOD_GOPAY : PLUS_PAYMENT_METHOD_PAYPAL;
+    }
+
+    function normalizeGpcHelperPhoneMode(value = '') {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      if (rootScope.GoPayUtils?.normalizeGpcHelperPhoneMode) {
+        return rootScope.GoPayUtils.normalizeGpcHelperPhoneMode(value);
+      }
+      const normalized = String(value || '').trim().toLowerCase();
+      return normalized === GPC_HELPER_PHONE_MODE_AUTO || normalized === 'builtin'
+        ? GPC_HELPER_PHONE_MODE_AUTO
+        : GPC_HELPER_PHONE_MODE_MANUAL;
+    }
+
+    function formatGpcRemoteStageLabel(stage = '') {
+      const normalized = String(stage || '').trim().toLowerCase();
+      if (!normalized) {
+        return '';
+      }
+      return GPC_REMOTE_STAGE_LABELS[normalized] || normalized;
+    }
+
+    function formatGpcWaitingForLabel(waitingFor = '') {
+      const normalized = String(waitingFor || '').trim().toLowerCase();
+      if (!normalized) {
+        return '';
+      }
+      return GPC_WAITING_FOR_LABELS[normalized] || normalized.toUpperCase();
+    }
+
+    function formatGpcTaskStatusLog(task = {}) {
+      const statusText = String(task?.status_text || task?.statusText || '').trim();
+      const status = String(task?.status || '').trim();
+      const remoteStage = String(task?.remote_stage || task?.remoteStage || '').trim();
+      const stageText = formatGpcRemoteStageLabel(remoteStage);
+      const waitingForText = formatGpcWaitingForLabel(task?.api_waiting_for || task?.apiWaitingFor || '');
+      const mainText = stageText || statusText || status || '处理中';
+      const parts = [`步骤 7：GPC 任务状态：${mainText}`];
+      if (waitingForText && !mainText.includes(waitingForText)) {
+        parts.push(`，等待 ${waitingForText}`);
+      }
+      return parts.join('');
+    }
+
+    function getGpcHelperPhoneMode(state = {}, task = null) {
+      return normalizeGpcHelperPhoneMode(
+        task?.phone_mode
+        || task?.phoneMode
+        || state?.gopayHelperPhoneMode
+        || state?.phoneMode
+      );
     }
 
     function getPaymentMethodConfig(method = PLUS_PAYMENT_METHOD_PAYPAL) {
@@ -299,7 +369,7 @@
       task.task_id = String(task.task_id || task.taskId || '').trim();
       task.status = String(task.status || '').trim().toLowerCase();
       task.status_text = String(task.status_text || task.statusText || '').trim();
-      task.phone_mode = String(task.phone_mode || task.phoneMode || '').trim().toLowerCase();
+      task.phone_mode = normalizeGpcHelperPhoneMode(task.phone_mode || task.phoneMode || '');
       task.remote_stage = String(task.remote_stage || task.remoteStage || '').trim().toLowerCase();
       task.api_waiting_for = String(task.api_waiting_for || task.apiWaitingFor || '').trim().toLowerCase();
       task.api_input_deadline_at = String(task.api_input_deadline_at || task.apiInputDeadlineAt || '').trim();
@@ -318,6 +388,7 @@
         gopayHelperTaskId: task.task_id,
         gopayHelperTaskStatus: task.status,
         gopayHelperStatusText: task.status_text,
+        gopayHelperPhoneMode: task.phone_mode,
         gopayHelperRemoteStage: task.remote_stage,
         gopayHelperApiWaitingFor: task.api_waiting_for,
         gopayHelperApiInputDeadlineAt: task.api_input_deadline_at,
@@ -675,12 +746,16 @@
       });
     }
 
-    function isGpcTaskOtpWait(task = {}) {
-      return task?.phone_mode === 'manual' && task?.api_waiting_for === 'otp';
+    function isGpcTaskManualMode(task = {}, state = {}) {
+      return getGpcHelperPhoneMode(state, task) === GPC_HELPER_PHONE_MODE_MANUAL;
     }
 
-    function isGpcTaskPinWait(task = {}) {
-      return task?.phone_mode === 'manual'
+    function isGpcTaskOtpWait(task = {}, state = {}) {
+      return isGpcTaskManualMode(task, state) && task?.api_waiting_for === 'otp';
+    }
+
+    function isGpcTaskPinWait(task = {}, state = {}) {
+      return isGpcTaskManualMode(task, state)
         && (task?.api_waiting_for === 'pin' || task?.status === 'otp_ready');
     }
 
@@ -840,27 +915,25 @@
         throw new Error('步骤 7：GPC 模式缺少 API Key。');
       }
 
+      const configuredPhoneMode = normalizeGpcHelperPhoneMode(state?.gopayHelperPhoneMode || state?.phoneMode || GPC_HELPER_PHONE_MODE_MANUAL);
       const rawPin = String(state?.gopayHelperPin || '').trim();
       const pinDigits = rawPin.replace(/[^\d]/g, '');
       const pin = normalizeSixDigitPin(rawPin);
-      if (!pin) {
+      if (configuredPhoneMode === GPC_HELPER_PHONE_MODE_MANUAL && !pin) {
         if (taskId && apiUrl && apiKey) {
           await stopGpcTaskBestEffort(apiUrl, taskId, apiKey, 'PIN 配置错误');
         }
         throw new Error(pinDigits
           ? '步骤 7：GPC PIN 必须是 6 位数字，请检查侧边栏配置。'
-          : '步骤 7：GPC 模式缺少 PIN 配置。');
+          : '步骤 7：GPC 手动模式缺少 PIN 配置。');
       }
 
-      await addLog(`步骤 7：GPC 模式开始轮询任务（task_id: ${taskId}）...`, 'info');
+      await addLog(`步骤 7：GPC ${configuredPhoneMode === GPC_HELPER_PHONE_MODE_AUTO ? '自动' : '手动'}模式开始轮询任务（task_id: ${taskId}）...`, 'info');
       try {
         while (Date.now() <= deadline) {
           throwIfStopped();
           const task = await fetchGpcTaskStatus(apiUrl, taskId, apiKey);
-          const statusText = task?.status_text || task?.status || '处理中';
-          const remoteStage = task?.remote_stage || '';
-          const waitingFor = task?.api_waiting_for || '';
-          await addLog(`步骤 7：GPC 任务状态：${statusText}${remoteStage ? `（${remoteStage}）` : ''}${waitingFor ? `，等待 ${waitingFor.toUpperCase()}` : ''}`, 'info');
+          await addLog(formatGpcTaskStatusLog(task), 'info');
 
           if (task.status === 'completed') {
             terminalReached = true;
@@ -879,7 +952,7 @@
             throw buildGpcTaskEndedError(task, 'GPC 任务已结束，请重新创建任务。');
           }
 
-          if (isGpcTaskOtpWait(task)) {
+          if (isGpcTaskOtpWait(task, state)) {
             if (isGpcTaskInputDeadlineExpired(task)) {
               throw buildGpcInputDeadlineError(task, 'OTP');
             }
@@ -940,7 +1013,7 @@
             otpLastSubmittedAt = Date.now();
             lastSubmittedOtp = normalizedOtp;
             await addLog('步骤 7：OTP 已提交，继续等待 GPC 任务状态更新。', 'ok');
-          } else if (isGpcTaskPinWait(task) && !pinSubmitted) {
+          } else if (isGpcTaskPinWait(task, state) && !pinSubmitted) {
             if (isGpcTaskInputDeadlineExpired(task)) {
               throw buildGpcInputDeadlineError(task, 'PIN');
             }
