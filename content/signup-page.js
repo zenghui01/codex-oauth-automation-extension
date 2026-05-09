@@ -1021,8 +1021,9 @@ async function waitForSignupEntryState(options = {}) {
         if (logDiagnostics) {
           log(`步骤 ${step}：正在点击官网注册入口（第 ${clickAttempts} 次）："${getActionText(snapshot.signupTrigger).slice(0, 80)}"`);
         }
-        log('步骤 2：正在点击官网注册入口...');
-        await humanPause(350, 900);
+        log('步骤 2：已找到官网注册入口，等待 3 秒后点击...');
+        await sleep(3000);
+        throwIfStopped();
         simulateClick(snapshot.signupTrigger);
       }
     }
@@ -2246,8 +2247,9 @@ async function waitForSignupPhoneEntryState(options = {}) {
     if (snapshot.state === 'entry_home' && snapshot.signupTrigger) {
       if (Date.now() - lastTriggerClickAt >= 1500) {
         lastTriggerClickAt = Date.now();
-        log(`步骤 ${step}：正在点击官网注册入口...`);
-        await humanPause(350, 900);
+        log(`步骤 ${step}：已找到官网注册入口，等待 3 秒后点击...`);
+        await sleep(3000);
+        throwIfStopped();
         simulateClick(snapshot.signupTrigger);
       }
       await sleep(250);
