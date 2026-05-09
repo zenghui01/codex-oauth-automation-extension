@@ -12042,6 +12042,29 @@ function throwIfStep8SettledOrStopped(isSettled = false) {
   }
 }
 
+function isStep9AuthCallbackWaitPageUrl(rawUrl) {
+  if (!rawUrl) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    const hostname = String(parsed.hostname || '').toLowerCase();
+    if (!['auth.openai.com', 'auth0.openai.com', 'accounts.openai.com'].includes(hostname)) {
+      return false;
+    }
+    const pathname = String(parsed.pathname || '');
+    return /\/api\/oauth\/oauth2\/auth(?:[/?#]|$)/i.test(pathname)
+      || /\/oauth\/oauth2\/auth(?:[/?#]|$)/i.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function shouldDeferStep9CallbackTimeout(details = {}) {
+  const tabId = details?.tabId;
+  if (!Number.isInteger(tabId)) return false;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  return isStep9AuthCallbackWaitPageUrl(tab?.url || '');
+}
+
 async function ensureStep8SignupPageReady(tabId, options = {}) {
   const visibleStep = Math.floor(Number(options.visibleStep || options.logStep || options.step) || 0);
   await ensureContentScriptReadyOnTab('signup-page', tabId, {
@@ -12496,6 +12519,7 @@ const step9Executor = self.MultiPageBackgroundStep9?.createStep9Executor({
   setStep8TabUpdatedListener,
   setWebNavCommittedListener,
   setWebNavListener,
+  shouldDeferStep9CallbackTimeout,
   sleepWithStop,
   STEP8_CLICK_RETRY_DELAY_MS,
   STEP8_MAX_ROUNDS,
