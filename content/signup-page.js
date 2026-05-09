@@ -147,6 +147,8 @@ const LOGIN_EXTERNAL_IDP_PATTERN = /google|microsoft|apple|sso|single\s+sign[-\s
 const LOGIN_CODE_ONLY_ACTION_PATTERN = /one[-\s]*time|passcode|use\s+(?:a\s+)?code|验证码|一次性/i;
 
 const RESEND_VERIFICATION_CODE_PATTERN = /重新发送(?:验证码)?|再次发送(?:验证码)?|重发(?:验证码)?|未收到(?:验证码|邮件)|resend(?:\s+code)?|send\s+(?:a\s+)?new\s+code|send\s+(?:it\s+)?again|request\s+(?:a\s+)?new\s+code|didn'?t\s+receive/i;
+const PHONE_RESEND_SERVER_ERROR_PREFIX = 'PHONE_RESEND_SERVER_ERROR::';
+const CONTACT_VERIFICATION_SERVER_ERROR_PATTERN = /this\s+page\s+isn['’]?t\s+working|currently\s+unable\s+to\s+handle\s+this\s+request|http\s+error\s+500|500\s+internal\s+server\s+error/i;
 
 function isVisibleElement(el) {
   if (!el) return false;
@@ -250,6 +252,27 @@ function isEmailVerificationPage() {
   return /\/email-verification(?:[/?#]|$)/i.test(location.pathname || '');
 }
 
+function getContactVerificationServerErrorText() {
+  const path = String(location?.pathname || '');
+  if (!/\/contact-verification(?:[/?#]|$)/i.test(path)) {
+    return '';
+  }
+  const text = String(getPageTextSnapshot?.() || document?.body?.textContent || '').replace(/\s+/g, ' ').trim();
+  const title = String(document?.title || '').replace(/\s+/g, ' ').trim();
+  const combined = `${title} ${text}`.trim();
+  if (!CONTACT_VERIFICATION_SERVER_ERROR_PATTERN.test(combined)) {
+    return '';
+  }
+  return combined || 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.';
+}
+
+function throwIfContactVerificationServerError() {
+  const serverErrorText = getContactVerificationServerErrorText();
+  if (serverErrorText) {
+    throw new Error(`${PHONE_RESEND_SERVER_ERROR_PREFIX}${serverErrorText}`);
+  }
+}
+
 async function resendVerificationCode(step, timeout = 45000) {
   if (step === 8) {
     await waitForLoginVerificationPageReady(10000, step);
@@ -261,6 +284,7 @@ async function resendVerificationCode(step, timeout = 45000) {
 
   while (Date.now() - start < timeout) {
     throwIfStopped();
+    throwIfContactVerificationServerError();
 
     // Check for 405 error page and recover by clicking "Try again"
     if (is405MethodNotAllowedPage()) {
@@ -285,6 +309,7 @@ async function resendVerificationCode(step, timeout = 45000) {
         loggedWaiting = false;
         continue;
       }
+      throwIfContactVerificationServerError();
 
       return {
         resent: true,
@@ -300,6 +325,7 @@ async function resendVerificationCode(step, timeout = 45000) {
     await sleep(250);
   }
 
+  throwIfContactVerificationServerError();
   throw new Error('无法点击重新发送验证码按钮。URL: ' + location.href);
 }
 

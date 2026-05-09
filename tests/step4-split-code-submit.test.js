@@ -166,6 +166,59 @@ return {
   assert.deepStrictEqual(snapshot.clicks, ['Continue']);
 });
 
+test('resendVerificationCode reports contact-verification HTTP 500 after resend click', async () => {
+  const api = new Function(`
+const PHONE_RESEND_SERVER_ERROR_PREFIX = 'PHONE_RESEND_SERVER_ERROR::';
+const CONTACT_VERIFICATION_SERVER_ERROR_PATTERN = /this\\s+page\\s+isn['’]?t\\s+working|currently\\s+unable\\s+to\\s+handle\\s+this\\s+request|http\\s+error\\s+500|500\\s+internal\\s+server\\s+error/i;
+const logs = [];
+const location = {
+  href: 'https://auth.openai.com/email-verification',
+  pathname: '/email-verification',
+};
+const document = {
+  title: 'Verify your email',
+  body: { textContent: 'Enter the verification code.' },
+};
+function throwIfStopped() {}
+function log(message, level = 'info') { logs.push({ message, level }); }
+function findResendVerificationCodeTrigger() { return { textContent: 'Resend code' }; }
+function isActionEnabled() { return true; }
+async function humanPause() {}
+function simulateClick() {
+  location.href = 'https://auth.openai.com/contact-verification';
+  location.pathname = '/contact-verification';
+  document.title = "This page isn't working";
+  document.body.textContent = 'auth.openai.com is currently unable to handle this request. HTTP ERROR 500';
+}
+async function sleep() {}
+function is405MethodNotAllowedPage() { return false; }
+async function handle405ResendError() {}
+function getActionText(element) { return element?.textContent || ''; }
+function getPageTextSnapshot() { return document.body.textContent; }
+
+${extractFunction('getContactVerificationServerErrorText')}
+${extractFunction('throwIfContactVerificationServerError')}
+${extractFunction('resendVerificationCode')}
+
+return {
+  async run() {
+    try {
+      await resendVerificationCode(4, 1000);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: String(error?.message || error), logs };
+    }
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /^PHONE_RESEND_SERVER_ERROR::This page isn't working/);
+  assert.equal(result.message.includes('PHONE_RESEND_SERVER_ERROR::PHONE_RESEND_SERVER_ERROR::'), false);
+});
+
 test('fillVerificationCode does not short-circuit on mixed email-verification profile page before verification exits', async () => {
   const api = new Function(`
 const logs = [];
