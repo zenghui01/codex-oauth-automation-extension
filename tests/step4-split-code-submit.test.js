@@ -1124,9 +1124,10 @@ return {
   assert.equal(result.logs.some(({ message }) => /检测到密码页报错/.test(message)), true);
 });
 
-test('fillSignupEmailAndContinue waits for submit operation delay before returning', async () => {
+test('fillSignupEmailAndContinue reports before deferred submit while submit still waits for operation delay', async () => {
   const api = new Function(`
 const events = [];
+const scheduled = [];
 let releaseSubmitDelay;
 const submitDelay = new Promise((resolve) => { releaseSubmitDelay = resolve; });
 const emailInput = { value: '' };
@@ -1135,7 +1136,8 @@ const location = { href: 'https://auth.openai.com/u/signup' };
 const window = {
   setTimeout(callback, ms) {
     events.push(\`timer:\${ms}\`);
-    return 1;
+    scheduled.push(callback);
+    return scheduled.length;
   },
   CodexOperationDelay: {
     async performOperationWithDelay(metadata, operation) {
@@ -1170,6 +1172,11 @@ ${extractFunction('fillSignupEmailAndContinue')}
 
 return {
   events,
+  scheduledCount() { return scheduled.length; },
+  async flushDeferredSubmit() {
+    if (!scheduled.length) throw new Error('missing deferred submit');
+    await scheduled[0]();
+  },
   releaseSubmitDelay() { releaseSubmitDelay(); },
   run() { return fillSignupEmailAndContinue('ada@example.com', 2); },
 };
@@ -1183,31 +1190,50 @@ return {
   });
 
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(settled, false, 'email submit must not return before submit delay resolves');
-  assert.equal(api.events.includes('delay:submit-signup-email:pending'), true);
-  assert.equal(api.events.includes('run:resolved'), false);
-
-  api.releaseSubmitDelay();
+  assert.equal(settled, true, 'email submit must return before deferred submit can navigate');
   const result = await tracked;
   assert.equal(result.submitted, true);
+  assert.equal(api.scheduledCount(), 1);
   assert.deepStrictEqual(api.events, [
     'operation:signup-email:start',
     'fill:ada@example.com',
     'operation:signup-email:end',
     'delay:signup-email:2000',
-    'sleep:120',
+    'timer:120',
+    'run:resolved',
+  ]);
+
+  let flushed = false;
+  const flush = api.flushDeferredSubmit().then(() => {
+    flushed = true;
+    api.events.push('flush:resolved');
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(api.events.includes('operation:submit-signup-email:start'), true);
+  assert.equal(api.events.includes('delay:submit-signup-email:pending'), true);
+  assert.equal(flushed, false, 'deferred email submit callback must wait for submit delay before resolving');
+  api.releaseSubmitDelay();
+  await flush;
+  assert.deepStrictEqual(api.events, [
+    'operation:signup-email:start',
+    'fill:ada@example.com',
+    'operation:signup-email:end',
+    'delay:signup-email:2000',
+    'timer:120',
+    'run:resolved',
     'operation:submit-signup-email:start',
     'click:Continue',
     'operation:submit-signup-email:end',
     'delay:submit-signup-email:pending',
     'delay:submit-signup-email:2000',
-    'run:resolved',
+    'flush:resolved',
   ]);
 });
 
-test('submitSignupPhoneNumberAndContinue waits for submit operation delay before returning', async () => {
+test('submitSignupPhoneNumberAndContinue reports before deferred submit while submit still waits for operation delay', async () => {
   const api = new Function(`
 const events = [];
+const scheduled = [];
 let releaseSubmitDelay;
 const submitDelay = new Promise((resolve) => { releaseSubmitDelay = resolve; });
 const phoneInput = { value: '' };
@@ -1216,7 +1242,8 @@ const location = { href: 'https://auth.openai.com/u/signup/phone' };
 const window = {
   setTimeout(callback, ms) {
     events.push(\`timer:\${ms}\`);
-    return 1;
+    scheduled.push(callback);
+    return scheduled.length;
   },
   CodexOperationDelay: {
     async performOperationWithDelay(metadata, operation) {
@@ -1258,6 +1285,11 @@ ${extractFunction('submitSignupPhoneNumberAndContinue')}
 
 return {
   events,
+  scheduledCount() { return scheduled.length; },
+  async flushDeferredSubmit() {
+    if (!scheduled.length) throw new Error('missing deferred submit');
+    await scheduled[0]();
+  },
   releaseSubmitDelay() { releaseSubmitDelay(); },
   run() { return submitSignupPhoneNumberAndContinue({ phoneNumber: '+15551234567' }); },
 };
@@ -1271,25 +1303,43 @@ return {
   });
 
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(settled, false, 'phone submit must not return before submit delay resolves');
-  assert.equal(api.events.includes('delay:submit-signup-phone:pending'), true);
-  assert.equal(api.events.includes('run:resolved'), false);
-
-  api.releaseSubmitDelay();
+  assert.equal(settled, true, 'phone submit must return before deferred submit can navigate');
   const result = await tracked;
   assert.equal(result.submitted, true);
+  assert.equal(api.scheduledCount(), 1);
   assert.deepStrictEqual(api.events, [
     'operation:signup-phone-number:start',
     'fill:5551234567',
     'operation:signup-phone-number:end',
     'delay:signup-phone-number:2000',
-    'sleep:120',
+    'timer:120',
+    'run:resolved',
+  ]);
+
+  let flushed = false;
+  const flush = api.flushDeferredSubmit().then(() => {
+    flushed = true;
+    api.events.push('flush:resolved');
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(api.events.includes('operation:submit-signup-phone:start'), true);
+  assert.equal(api.events.includes('delay:submit-signup-phone:pending'), true);
+  assert.equal(flushed, false, 'deferred phone submit callback must wait for submit delay before resolving');
+  api.releaseSubmitDelay();
+  await flush;
+  assert.deepStrictEqual(api.events, [
+    'operation:signup-phone-number:start',
+    'fill:5551234567',
+    'operation:signup-phone-number:end',
+    'delay:signup-phone-number:2000',
+    'timer:120',
+    'run:resolved',
     'operation:submit-signup-phone:start',
     'click:Continue',
     'operation:submit-signup-phone:end',
     'delay:submit-signup-phone:pending',
     'delay:submit-signup-phone:2000',
-    'run:resolved',
+    'flush:resolved',
   ]);
 });
 

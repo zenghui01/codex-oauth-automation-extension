@@ -1206,18 +1206,18 @@ async function fillSignupEmailAndContinue(email, step) {
   }
 
   log(`步骤 ${step}：邮箱已准备提交，正在前往密码页...`);
-  try {
-    await sleep(120);
-    throwIfStopped();
-    await performOperationWithDelay({ stepKey: step === 2 ? 'signup-entry' : 'fill-password', kind: 'submit', label: 'submit-signup-email' }, async () => {
-      simulateClick(continueButton);
-    });
-  } catch (error) {
-    if (!isStopError(error)) {
-      console.error('[MultiPage:signup-page] signup email submit failed:', error?.message || error);
+  window.setTimeout(async () => {
+    try {
+      throwIfStopped();
+      await performOperationWithDelay({ stepKey: step === 2 ? 'signup-entry' : 'fill-password', kind: 'submit', label: 'submit-signup-email' }, async () => {
+        simulateClick(continueButton);
+      });
+    } catch (error) {
+      if (!isStopError(error)) {
+        console.error('[MultiPage:signup-page] deferred signup email submit failed:', error?.message || error);
+      }
     }
-    throw error;
-  }
+  }, 120);
 
   return {
     submitted: true,
@@ -2472,18 +2472,18 @@ async function submitSignupPhoneNumberAndContinue(payload = {}) {
   }
 
   log('步骤 2：手机号已准备提交，正在前往下一页...');
-  try {
-    await sleep(120);
-    throwIfStopped();
-    await performOperationWithDelay({ stepKey: 'signup-phone-entry', kind: 'submit', label: 'submit-signup-phone' }, async () => {
-      simulateClick(continueButton);
-    });
-  } catch (error) {
-    if (!isStopError(error)) {
-      console.error('[MultiPage:signup-page] signup phone submit failed:', error?.message || error);
+  window.setTimeout(async () => {
+    try {
+      throwIfStopped();
+      await performOperationWithDelay({ stepKey: 'signup-phone-entry', kind: 'submit', label: 'submit-signup-phone' }, async () => {
+        simulateClick(continueButton);
+      });
+    } catch (error) {
+      if (!isStopError(error)) {
+        console.error('[MultiPage:signup-page] deferred signup phone submit failed:', error?.message || error);
+      }
     }
-    throw error;
-  }
+  }, 120);
 
   return {
     submitted: true,
