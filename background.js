@@ -10898,6 +10898,7 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
   DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS,
   DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS,
   DEFAULT_PHONE_CODE_POLL_ROUNDS,
+  readAuthTabSnapshot,
   ensureStep8SignupPageReady,
   navigateAuthTabToAddPhone: async (tabId, options = {}) => {
     const visibleStep = Math.floor(Number(options.visibleStep || options.step) || 0) || 9;
@@ -12202,6 +12203,26 @@ async function ensureStep8SignupPageReady(tabId, options = {}) {
     logStep: visibleStep > 0 ? visibleStep : null,
     logStepKey: options.logStepKey || '',
   });
+}
+
+async function readAuthTabSnapshot(tabId) {
+  if (!Number.isInteger(tabId)) {
+    return null;
+  }
+  try {
+    const executionResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'ISOLATED',
+      func: () => ({
+        url: String(location.href || ''),
+        title: String(document.title || ''),
+        text: String(document.body?.innerText || document.documentElement?.innerText || '').trim(),
+      }),
+    });
+    return executionResults?.[0]?.result || null;
+  } catch {
+    return null;
+  }
 }
 
 async function getStep8PageState(tabId, responseTimeoutMs = 1500, visibleStep = 9) {

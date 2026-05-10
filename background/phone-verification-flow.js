@@ -11,6 +11,7 @@
       getOAuthFlowStepTimeoutMs,
       getState,
       requestStop = null,
+      readAuthTabSnapshot = null,
       sendToContentScript,
       sendToContentScriptResilient,
       navigateAuthTabToAddPhone = null,
@@ -1405,6 +1406,44 @@
         return new Error(message);
       }
       return new Error(`${PHONE_RESEND_SERVER_ERROR_PREFIX}${message || 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.'}`);
+    }
+
+    function getPhoneResendServerErrorFromSnapshot(snapshot = {}) {
+      const rawUrl = String(snapshot?.url || snapshot?.href || '').trim();
+      if (!/\/contact-verification(?:[/?#]|$)/i.test(rawUrl)) {
+        return '';
+      }
+      const combined = [
+        snapshot?.text,
+        snapshot?.bodyText,
+        snapshot?.title,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!isPhoneResendServerError(combined)) {
+        return '';
+      }
+      return combined || 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.';
+    }
+
+    async function readPhoneResendServerErrorFromAuthTab(tabId) {
+      if (typeof readAuthTabSnapshot !== 'function') {
+        return '';
+      }
+      try {
+        return getPhoneResendServerErrorFromSnapshot(await readAuthTabSnapshot(tabId));
+      } catch (_) {
+        return '';
+      }
+    }
+
+    async function throwPhoneResendServerErrorIfAuthTabShowsIt(tabId) {
+      const serverErrorText = await readPhoneResendServerErrorFromAuthTab(tabId);
+      if (serverErrorText) {
+        throw buildPhoneResendServerError(serverErrorText);
+      }
     }
 
     function shouldTreatResendThrottledAsBanned(state = {}) {
@@ -5457,6 +5496,7 @@
                   if (isPhoneResendServerError(resendError)) {
                     throw buildPhoneResendServerError(resendError);
                   }
+                  await throwPhoneResendServerErrorIfAuthTabShowsIt(tabId);
                   await addLog(`步骤 4：注册手机验证码页面重发失败，将继续轮询短信。${resendError.message}`, 'warn', {
                     step: 4,
                     stepKey: 'fetch-signup-code',
@@ -5497,6 +5537,7 @@
                 if (isPhoneResendServerError(resendError)) {
                   throw buildPhoneResendServerError(resendError);
                 }
+                await throwPhoneResendServerErrorIfAuthTabShowsIt(tabId);
                 await addLog(`步骤 4：验证码被拒后点击重发失败。${resendError.message}`, 'warn', {
                   step: 4,
                   stepKey: 'fetch-signup-code',
