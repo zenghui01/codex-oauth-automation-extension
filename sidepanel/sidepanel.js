@@ -2065,6 +2065,23 @@ function syncLatestState(nextState) {
   renderAccountRecords(latestState);
 }
 
+let accountRunHistoryRefreshTimer = null;
+
+function scheduleAccountRunHistoryRefresh(delayMs = 150) {
+  if (accountRunHistoryRefreshTimer) {
+    clearTimeout(accountRunHistoryRefreshTimer);
+  }
+  accountRunHistoryRefreshTimer = setTimeout(() => {
+    accountRunHistoryRefreshTimer = null;
+    chrome.runtime.sendMessage({ type: 'GET_STATE', source: 'sidepanel' }).then(state => {
+      syncLatestState(state);
+      syncAutoRunState(state);
+      updateStatusDisplay(latestState);
+      updateButtonStates();
+    }).catch(() => { });
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
 function normalizeOperationDelayEnabled(value) {
   return typeof value === 'boolean' ? value : true;
 }
@@ -13380,6 +13397,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       appendLog(message.payload);
       if (message.payload.level === 'error') {
         showToast(message.payload.message, 'error');
+        scheduleAccountRunHistoryRefresh();
       }
       break;
 
@@ -14135,6 +14153,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       applyAutoRunStatus(message.payload);
       updateStatusDisplay(latestState);
       updateButtonStates();
+      if (!['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying', 'waiting_interval'].includes(message.payload.phase)) {
+        scheduleAccountRunHistoryRefresh();
+      }
       break;
     }
   }
