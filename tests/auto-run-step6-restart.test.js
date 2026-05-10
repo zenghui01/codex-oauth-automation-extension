@@ -56,7 +56,10 @@ const bundle = [
   extractFunction('isAddPhoneAuthFailure'),
   extractFunction('isAddPhoneAuthUrl'),
   extractFunction('isAddPhoneAuthState'),
+  extractFunction('isPlusCheckoutNonFreeTrialFailure'),
   extractFunction('isGpcCheckoutRestartRequiredFailure'),
+  extractFunction('isPlusCheckoutRestartStep'),
+  extractFunction('isPlusCheckoutRestartRequiredFailure'),
   extractFunction('getLatestLogTimestamp'),
   extractFunction('buildAutoRunStepIdleRestartError'),
   extractFunction('isAutoRunStepIdleRestartError'),
@@ -528,6 +531,70 @@ test('auto-run restarts Plus/GPC transient platform verify exchange failures fro
   assert.deepStrictEqual(events.steps, [10, 11, 12, 13, 12, 13]);
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [11]);
   assert.ok(events.logs.some(({ message }) => /步骤 13：.*回到步骤 12 重新开始授权流程/.test(message)));
+});
+
+test('auto-run restarts Plus checkout from step 6 when checkout creation fails', async () => {
+  const plusPaypalSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    8: { key: 'paypal-approve' },
+    9: { key: 'plus-checkout-return' },
+    10: { key: 'oauth-login' },
+    11: { key: 'fetch-login-code' },
+    12: { key: 'confirm-oauth' },
+    13: { key: 'platform-verify' },
+  };
+  const harness = createHarness({
+    startStep: 6,
+    failureStep: 6,
+    failureBudget: 1,
+    failureMessage: '步骤 6：创建 Plus Checkout 失败：checkout request failed',
+    stepDefinitions: plusPaypalSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'paypal',
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.steps, [6, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.ok(events.logs.some(({ message }) => /回到步骤 6 重新创建 Plus Checkout/.test(message)));
+});
+
+test('auto-run restarts Plus checkout from step 6 when billing fails for non-free-trial reasons', async () => {
+  const plusPaypalSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    8: { key: 'paypal-approve' },
+    9: { key: 'plus-checkout-return' },
+    10: { key: 'oauth-login' },
+    11: { key: 'fetch-login-code' },
+    12: { key: 'confirm-oauth' },
+    13: { key: 'platform-verify' },
+  };
+  const harness = createHarness({
+    startStep: 6,
+    failureStep: 7,
+    failureBudget: 1,
+    failureMessage: '步骤 7：账单地址 iframe 无法注入，请重新创建 checkout。',
+    stepDefinitions: plusPaypalSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'paypal',
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.steps, [6, 7, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.ok(events.logs.some(({ message }) => /回到步骤 6 重新创建 Plus Checkout/.test(message)));
 });
 
 test('auto-run restarts GPC checkout from step 6 when step 7 task polling stalls', async () => {
