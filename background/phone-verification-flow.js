@@ -1421,12 +1421,13 @@
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim();
+      const titleText = String(snapshot?.title || '').replace(/\s+/g, ' ').trim();
       if (!bodyText) {
-        return 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.';
+        return isPhoneResendServerError(titleText) ? (titleText || 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.') : '';
       }
       const combined = [
         bodyText,
-        snapshot?.title,
+        titleText,
       ]
         .filter(Boolean)
         .join(' ')

@@ -5974,7 +5974,8 @@ test('signup phone verification cancels activation when resend lands on contact-
   assert.equal(requests.filter((request) => request.searchParams.get('action') === 'getStatus').length, 1);
 });
 
-test('signup phone verification treats contact-verification URL-only snapshot as resend server error', async () => {
+test('signup phone verification does not treat contact-verification URL-only snapshot as resend server error', async () => {
+  let resendAttempted = false;
   let currentState = {
     heroSmsApiKey: 'demo-key',
     heroSmsCountryId: 52,
@@ -6008,13 +6009,28 @@ test('signup phone verification treats contact-verification URL-only snapshot as
       throw new Error(`Unexpected HeroSMS action: ${action}`);
     },
     getState: async () => ({ ...currentState }),
-    readAuthTabSnapshot: async () => ({
-      url: 'https://auth.openai.com/contact-verification',
-      title: 'auth.openai.com',
-      text: '',
-    }),
+    readAuthTabSnapshot: async () => (
+      resendAttempted
+        ? {
+            url: 'https://auth.openai.com/contact-verification',
+            title: 'auth.openai.com',
+            text: '',
+          }
+        : {
+            url: 'https://auth.openai.com/phone-verification',
+            title: 'Verify your phone',
+            text: 'Enter the code sent to your phone.',
+          }
+    ),
     sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
       if (message.type === 'RESEND_VERIFICATION_CODE') {
+        resendAttempted = true;
         throw new Error('Could not establish connection. Receiving end does not exist.');
       }
       throw new Error(`Unexpected content-script message: ${message.type}`);
@@ -6029,7 +6045,8 @@ test('signup phone verification treats contact-verification URL-only snapshot as
   await assert.rejects(
     () => helpers.completeSignupPhoneVerificationFlow(1, { state: currentState }),
     (error) => {
-      assert.match(error.message, /^PHONE_RESEND_SERVER_ERROR::OpenAI contact-verification page returned HTTP ERROR 500 after resend\./);
+      assert.doesNotMatch(error.message, /^PHONE_RESEND_SERVER_ERROR::/);
+      assert.match(error.message, /等待手机验证码超时/);
       return true;
     }
   );
