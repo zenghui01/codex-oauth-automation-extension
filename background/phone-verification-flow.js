@@ -1459,7 +1459,7 @@
 
     function isAuthContentScriptUnreachableError(error) {
       const message = String(error?.message || error || '').trim();
-      return /Receiving end does not exist|Could not establish connection|Frame with ID \d+ is showing error page/i.test(message);
+      return /Receiving end does not exist|Could not establish connection|Frame with ID \d+ is showing error page|等待认证页状态检查超时/i.test(message);
     }
 
     function buildPhoneRestartStep7Error(phoneNumber = '') {
@@ -4011,29 +4011,46 @@
 
     async function readPhonePageState(tabId, timeoutMs = 10000) {
       const visibleStep = normalizeLogStep(activePhoneVerificationLogStep) || 9;
-      await ensureStep8SignupPageReady(tabId, {
-        timeoutMs,
-        logMessage: '步骤 9：等待认证页脚本恢复后继续手机号验证。',
-        visibleStep,
-        logStepKey: 'phone-verification',
+      const deadlineMs = Math.max(1, Math.floor(Number(timeoutMs) || 0));
+      let timeoutId = null;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`步骤 ${visibleStep}：等待认证页状态检查超时。`));
+        }, deadlineMs);
       });
-      const result = await sendToContentScriptResilient('signup-page', {
-        type: 'STEP8_GET_STATE',
-        source: 'background',
-        payload: { visibleStep },
-      }, {
-        timeoutMs,
-        responseTimeoutMs: timeoutMs,
-        retryDelayMs: 600,
-        logMessage: '步骤 9：认证页正在切换，等待后重新检查手机号验证状态...',
-        logStep: visibleStep,
-        logStepKey: 'phone-verification',
-      });
+      const readPromise = (async () => {
+        await ensureStep8SignupPageReady(tabId, {
+          timeoutMs: deadlineMs,
+          logMessage: '步骤 9：等待认证页脚本恢复后继续手机号验证。',
+          visibleStep,
+          logStepKey: 'phone-verification',
+        });
+        const result = await sendToContentScriptResilient('signup-page', {
+          type: 'STEP8_GET_STATE',
+          source: 'background',
+          payload: { visibleStep },
+        }, {
+          timeoutMs: deadlineMs,
+          responseTimeoutMs: deadlineMs,
+          retryDelayMs: 600,
+          logMessage: '步骤 9：认证页正在切换，等待后重新检查手机号验证状态...',
+          logStep: visibleStep,
+          logStepKey: 'phone-verification',
+        });
 
-      if (result?.error) {
-        throw new Error(result.error);
+        if (result?.error) {
+          throw new Error(result.error);
+        }
+        return result || {};
+      })();
+
+      try {
+        return await Promise.race([readPromise, timeoutPromise]);
+      } finally {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
       }
-      return result || {};
     }
 
     function resolveCountryCandidatesForProvider(state = {}, providerId = normalizePhoneSmsProvider(state?.phoneSmsProvider)) {
@@ -5388,13 +5405,14 @@
       return withPhoneVerificationLogContext({ step: 4, stepKey: 'fetch-signup-code' }, async () => {
         let state = options?.state || await getState();
         const activation = normalizeActivation(options?.activation || state?.signupPhoneActivation);
+        const pageStateCheckTimeoutMs = Math.max(1, Math.floor(Number(options?.pageStateCheckTimeoutMs) || 5000));
         if (!activation) {
           throw new Error('步骤 4：未找到当前注册手机号激活记录，请重新执行步骤 2。');
         }
 
         const assertSignupPhoneStillApplicable = async (phaseLabel) => {
           try {
-            const pageState = await readPhonePageState(tabId, 5000);
+            const pageState = await readPhonePageState(tabId, pageStateCheckTimeoutMs);
             if (isSignupEmailVerificationPageState(pageState)) {
               throw buildSignupPhoneStaleEmailVerificationError(pageState);
             }
