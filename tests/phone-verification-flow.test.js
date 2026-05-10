@@ -5891,6 +5891,7 @@ test('signup phone verification cancels activation when resend lands on contact-
 test('signup phone verification cancels activation when resend lands on contact-verification 500 page but content script drops', async () => {
   const requests = [];
   const tabSnapshots = [];
+  let resendAttempted = false;
   let currentState = {
     heroSmsApiKey: 'demo-key',
     heroSmsCountryId: 52,
@@ -5927,6 +5928,13 @@ test('signup phone verification cancels activation when resend lands on contact-
     getState: async () => ({ ...currentState }),
     readAuthTabSnapshot: async () => {
       tabSnapshots.push('read');
+      if (!resendAttempted) {
+        return {
+          url: 'https://auth.openai.com/phone-verification',
+          title: 'Verify your phone',
+          text: 'Enter the code sent to your phone.',
+        };
+      }
       return {
         url: 'https://auth.openai.com/contact-verification',
         title: 'auth.openai.com',
@@ -5934,7 +5942,14 @@ test('signup phone verification cancels activation when resend lands on contact-
       };
     },
     sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
       if (message.type === 'RESEND_VERIFICATION_CODE') {
+        resendAttempted = true;
         throw new Error('Could not establish connection. Receiving end does not exist.');
       }
       throw new Error(`Unexpected content-script message: ${message.type}`);
@@ -5957,6 +5972,161 @@ test('signup phone verification cancels activation when resend lands on contact-
   assert.equal(tabSnapshots.length >= 1, true);
   assert.equal(currentState.signupPhoneActivation, null);
   assert.equal(requests.filter((request) => request.searchParams.get('action') === 'getStatus').length, 1);
+});
+
+test('signup phone verification treats contact-verification URL-only snapshot as resend server error', async () => {
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    heroSmsCountryId: 52,
+    heroSmsCountryLabel: 'Thailand',
+    verificationResendCount: 0,
+    phoneCodeWaitSeconds: 60,
+    phoneCodeTimeoutWindows: 2,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 1,
+    signupPhoneActivation: {
+      activationId: '930002',
+      phoneNumber: '66953330004',
+      provider: 'hero-sms',
+      countryId: 52,
+      countryLabel: 'Thailand',
+    },
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      const id = parsedUrl.searchParams.get('id');
+      if (action === 'getStatus') {
+        return { ok: true, text: async () => 'STATUS_WAIT_CODE' };
+      }
+      if (action === 'setStatus') {
+        return { ok: true, text: async () => `STATUS_UPDATED:${id}` };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({ ...currentState }),
+    readAuthTabSnapshot: async () => ({
+      url: 'https://auth.openai.com/contact-verification',
+      title: 'auth.openai.com',
+      text: '',
+    }),
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'RESEND_VERIFICATION_CODE') {
+        throw new Error('Could not establish connection. Receiving end does not exist.');
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => helpers.completeSignupPhoneVerificationFlow(1, { state: currentState }),
+    (error) => {
+      assert.match(error.message, /^PHONE_RESEND_SERVER_ERROR::OpenAI contact-verification page returned HTTP ERROR 500 after resend\./);
+      return true;
+    }
+  );
+
+  assert.equal(currentState.signupPhoneActivation, null);
+});
+
+test('signup phone verification fails when contact-verification 500 appears after successful resend', async () => {
+  const messages = [];
+  let pageStateReads = 0;
+  let resendCalls = 0;
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    heroSmsCountryId: 52,
+    heroSmsCountryLabel: 'Thailand',
+    verificationResendCount: 0,
+    phoneCodeWaitSeconds: 60,
+    phoneCodeTimeoutWindows: 2,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 1,
+    signupPhoneActivation: {
+      activationId: '930003',
+      phoneNumber: '66953330005',
+      provider: 'hero-sms',
+      countryId: 52,
+      countryLabel: 'Thailand',
+    },
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      const id = parsedUrl.searchParams.get('id');
+      if (action === 'getStatus') {
+        return { ok: true, text: async () => 'STATUS_WAIT_CODE' };
+      }
+      if (action === 'setStatus') {
+        return { ok: true, text: async () => `STATUS_UPDATED:${id}` };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({ ...currentState }),
+    readAuthTabSnapshot: async () => ({
+      url: 'https://auth.openai.com/contact-verification',
+      title: "This page isn't working",
+      text: 'auth.openai.com is currently unable to handle this request. HTTP ERROR 500',
+    }),
+    sendToContentScriptResilient: async (_source, message) => {
+      messages.push(message.type);
+      if (message.type === 'STEP8_GET_STATE') {
+        pageStateReads += 1;
+        if (pageStateReads <= 2) {
+          return {
+            phoneVerificationPage: true,
+            url: 'https://auth.openai.com/phone-verification',
+          };
+        }
+        throw new Error('Could not establish connection. Receiving end does not exist.');
+      }
+      if (message.type === 'RESEND_VERIFICATION_CODE') {
+        resendCalls += 1;
+        return {
+          resent: true,
+          buttonText: 'Resend code',
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => helpers.completeSignupPhoneVerificationFlow(1, { state: currentState }),
+    (error) => {
+      assert.match(error.message, /^PHONE_RESEND_SERVER_ERROR::/);
+      assert.match(error.message, /HTTP ERROR 500/);
+      assert.match(error.message, /This page isn't working/);
+      return true;
+    }
+  );
+
+  assert.equal(resendCalls, 1);
+  assert.deepStrictEqual(messages, [
+    'STEP8_GET_STATE',
+    'STEP8_GET_STATE',
+    'RESEND_VERIFICATION_CODE',
+    'STEP8_GET_STATE',
+  ]);
+  assert.equal(currentState.signupPhoneActivation, null);
 });
 
 test('phone verification helper skips page resend for 5sim timeouts and rotates number directly', async () => {

@@ -12209,6 +12209,17 @@ async function readAuthTabSnapshot(tabId) {
   if (!Number.isInteger(tabId)) {
     return null;
   }
+  let tabSnapshot = null;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    tabSnapshot = {
+      url: String(tab?.url || ''),
+      title: String(tab?.title || ''),
+      text: '',
+    };
+  } catch {
+    tabSnapshot = null;
+  }
   try {
     const executionResults = await chrome.scripting.executeScript({
       target: { tabId },
@@ -12219,9 +12230,9 @@ async function readAuthTabSnapshot(tabId) {
         text: String(document.body?.innerText || document.documentElement?.innerText || '').trim(),
       }),
     });
-    return executionResults?.[0]?.result || null;
+    return executionResults?.[0]?.result || tabSnapshot;
   } catch {
-    return null;
+    return tabSnapshot;
   }
 }
 

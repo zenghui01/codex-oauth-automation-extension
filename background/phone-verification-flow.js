@@ -1413,9 +1413,19 @@
       if (!/\/contact-verification(?:[/?#]|$)/i.test(rawUrl)) {
         return '';
       }
-      const combined = [
+      const bodyText = [
         snapshot?.text,
         snapshot?.bodyText,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!bodyText) {
+        return 'OpenAI contact-verification page returned HTTP ERROR 500 after resend.';
+      }
+      const combined = [
+        bodyText,
         snapshot?.title,
       ]
         .filter(Boolean)
@@ -5460,6 +5470,7 @@
             if (isStopRequestedError(error) || isStaleSignupPhoneEmailVerificationError(error)) {
               throw error;
             }
+            await throwPhoneResendServerErrorIfAuthTabShowsIt(tabId);
             await addLog(
               `步骤 4：检查注册手机号页面状态（${phaseLabel}）失败，将继续等待短信。${error.message}`,
               'warn',
