@@ -418,6 +418,118 @@ test('auto-run restarts from confirm-oauth step after transient step10 token_exc
   assert.ok(events.logs.some(({ message }) => /回到步骤 9 重新开始授权流程/.test(message)));
 });
 
+test('auto-run restarts Plus/GPC oauth-login aggregate entry-open failure from step 10', async () => {
+  const plusGpcSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    10: { key: 'oauth-login' },
+    11: { key: 'fetch-login-code' },
+    12: { key: 'confirm-oauth' },
+    13: { key: 'platform-verify' },
+  };
+  const harness = createHarness({
+    startStep: 10,
+    failureStep: 10,
+    failureBudget: 1,
+    failureMessage: '步骤 10：判断失败后已重试 2 次，仍未成功。最后原因：点击登录入口后仍未进入手机号/邮箱/密码/验证码页。',
+    authState: { state: 'entry_page', url: 'https://auth.openai.com/log-in' },
+    stepDefinitions: plusGpcSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed', 6: 'completed', 7: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'gpc-helper',
+      plusCheckoutSource: 'gpc-helper',
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.steps, [10, 10, 11, 12, 13]);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [9]);
+  assert.ok(events.logs.some(({ message }) => /回到步骤 10 重新开始授权流程/.test(message)));
+  assert.ok(!events.logs.some(({ message }) => /停止自动回到步骤 10 重开/.test(message)));
+});
+
+test('auto-run restarts Plus/GPC fetch-code and confirm-oauth failures from oauth-login step 10', async () => {
+  const plusGpcSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    10: { key: 'oauth-login' },
+    11: { key: 'fetch-login-code' },
+    12: { key: 'confirm-oauth' },
+    13: { key: 'platform-verify' },
+  };
+
+  for (const scenario of [
+    {
+      failureStep: 11,
+      failureMessage: '步骤 11：无法获取新的登录验证码。',
+      expectedSteps: [10, 11, 10, 11, 12, 13],
+    },
+    {
+      failureStep: 12,
+      failureMessage: '步骤 12：长时间未进入 OAuth 同意页，无法定位“继续”按钮。',
+      expectedSteps: [10, 11, 12, 10, 11, 12, 13],
+    },
+  ]) {
+    const harness = createHarness({
+      startStep: 10,
+      failureStep: scenario.failureStep,
+      failureBudget: 1,
+      failureMessage: scenario.failureMessage,
+      authState: { state: 'password_page', url: 'https://auth.openai.com/log-in' },
+      stepDefinitions: plusGpcSteps,
+      finalOAuthChainStartStep: 10,
+      customState: {
+        stepStatuses: { 3: 'completed', 6: 'completed', 7: 'completed' },
+        plusModeEnabled: true,
+        plusPaymentMethod: 'gpc-helper',
+        plusCheckoutSource: 'gpc-helper',
+      },
+    });
+
+    const events = await harness.run();
+
+    assert.deepStrictEqual(events.steps, scenario.expectedSteps);
+    assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [9]);
+    assert.ok(events.logs.some(({ message }) => new RegExp(`步骤 ${scenario.failureStep}：.*回到步骤 10 重新开始授权流程`).test(message)));
+  }
+});
+
+test('auto-run restarts Plus/GPC transient platform verify exchange failures from confirm-oauth step 12', async () => {
+  const plusGpcSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    10: { key: 'oauth-login' },
+    11: { key: 'fetch-login-code' },
+    12: { key: 'confirm-oauth' },
+    13: { key: 'platform-verify' },
+  };
+  const harness = createHarness({
+    startStep: 10,
+    failureStep: 13,
+    failureBudget: 1,
+    failureMessage: 'token exchange failed at https://auth.openai.com/oauth/token: token_exchange_user_error: Invalid request. Please try again later.',
+    authState: { state: 'oauth_consent_page', url: 'https://auth.openai.com/sign-in-with-chatgpt/codex/consent' },
+    stepDefinitions: plusGpcSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed', 6: 'completed', 7: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'gpc-helper',
+      plusCheckoutSource: 'gpc-helper',
+      panelMode: 'sub2api',
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.steps, [10, 11, 12, 13, 12, 13]);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [11]);
+  assert.ok(events.logs.some(({ message }) => /步骤 13：.*回到步骤 12 重新开始授权流程/.test(message)));
+});
+
 test('auto-run restarts GPC checkout from step 6 when step 7 task polling stalls', async () => {
   const plusGpcSteps = {
     6: { key: 'plus-checkout-create' },
@@ -481,6 +593,36 @@ test('auto-run treats GPC account binding as recoverable step 6 restart', async 
 
   assert.deepStrictEqual(events.steps, [6, 7, 6, 7, 10, 11, 12, 13]);
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+});
+
+test('auto-run restarts GPC checkout from step 6 when accessToken cannot be read', async () => {
+  const plusGpcSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    10: { key: 'oauth-login' },
+    11: { key: 'fetch-login-code' },
+    12: { key: 'confirm-oauth' },
+    13: { key: 'platform-verify' },
+  };
+  const harness = createHarness({
+    startStep: 6,
+    failureStep: 6,
+    failureBudget: 1,
+    failureMessage: '步骤 6：GPC 模式获取 accessToken 失败。',
+    stepDefinitions: plusGpcSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed' },
+      plusPaymentMethod: 'gpc-helper',
+      plusCheckoutSource: 'gpc-helper',
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.steps, [6, 6, 7, 10, 11, 12, 13]);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.ok(events.logs.some(({ message }) => /回到步骤 6 重新创建 GPC 任务/.test(message)));
 });
 
 test('auto-run restarts GPC checkout from step 6 when task status has no progress', async () => {
