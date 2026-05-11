@@ -7775,7 +7775,7 @@ async function ensureGpcApiKeyReadyForStart(options = {}) {
     return false;
   }
 
-  if (selectedMode === GPC_HELPER_PHONE_MODE_AUTO && !balanceState.gopayHelperAutoModeEnabled) {
+  if (selectedMode === GPC_HELPER_PHONE_MODE_AUTO && isGpcAutoModePermissionDenied(balanceState)) {
     if (typeof selectGpcHelperPhoneMode !== 'undefined' && selectGpcHelperPhoneMode) {
       selectGpcHelperPhoneMode.value = GPC_HELPER_PHONE_MODE_MANUAL;
     }
@@ -11805,15 +11805,22 @@ btnGpcHelperBalance?.addEventListener('click', async () => {
       gopayHelperAutoModeEnabled: getGpcAutoModeEnabledFromResponse(response),
       gopayHelperApiKeyStatus: response?.apiKeyStatus || response?.data?.status || response?.payload?.data?.status || response?.payload?.status || '',
     };
+    const nextAutoModePermission = getGpcAutoModePermissionFromPayload(nextState.gopayHelperBalancePayload);
+    const nextAutoModeDenied = nextAutoModePermission === false;
+    const nextAutoModeConfirmed = nextAutoModePermission === true || nextState.gopayHelperAutoModeEnabled;
     const selectedModeBeforeBalanceState = getSelectedGpcHelperPhoneMode();
     syncLatestState(nextState);
-    if (!nextState.gopayHelperAutoModeEnabled && selectedModeBeforeBalanceState === GPC_HELPER_PHONE_MODE_AUTO) {
+    if (nextAutoModeDenied && selectedModeBeforeBalanceState === GPC_HELPER_PHONE_MODE_AUTO) {
       selectGpcHelperPhoneMode.value = GPC_HELPER_PHONE_MODE_MANUAL;
       syncLatestState({ gopayHelperPhoneMode: GPC_HELPER_PHONE_MODE_MANUAL });
       await saveSettings({ silent: true, force: true }).catch(() => {});
       showToast('当前 API Key 未开通自动模式，已切回手动模式。', 'warn');
+    } else if (nextAutoModeDenied) {
+      showToast('GPC 余额已更新，当前 API Key 只能使用手动模式。', 'success');
+    } else if (nextAutoModeConfirmed) {
+      showToast('GPC 余额已更新，自动模式可用。', 'success');
     } else {
-      showToast(nextState.gopayHelperAutoModeEnabled ? 'GPC 余额已更新，自动模式可用。' : 'GPC 余额已更新，当前 API Key 只能使用手动模式。', 'success');
+      showToast('GPC 余额已更新，当前接口未返回自动模式权限，已保留所选模式。', 'success');
     }
     updatePlusModeUI();
   } catch (error) {
