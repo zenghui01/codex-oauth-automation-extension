@@ -20,6 +20,7 @@
       isSignupPasswordPageUrl,
       isSignupPhoneVerificationPageUrl = null,
       isSignupProfilePageUrl = null,
+      persistRegistrationEmailState = null,
       reuseOrCreateTab,
       sendToContentScriptResilient,
       setEmailState,
@@ -328,8 +329,17 @@
       if (resolvedEmail === state.email && !options?.preserveAccountIdentity) {
         return;
       }
-      const preservedPhoneIdentity = getPreservedPhoneIdentityForEmailResolution(state, options);
       const generatedEmailAlreadyPersisted = Boolean(options?.generatedEmailAlreadyPersisted);
+      if (typeof persistRegistrationEmailState === 'function') {
+        if (!generatedEmailAlreadyPersisted) {
+          await persistRegistrationEmailState(state, resolvedEmail, {
+            source: 'flow',
+            preserveAccountIdentity: Boolean(options?.preserveAccountIdentity),
+          });
+        }
+        return;
+      }
+      const preservedPhoneIdentity = getPreservedPhoneIdentityForEmailResolution(state, options);
       if (preservedPhoneIdentity && typeof setState === 'function') {
         if (!generatedEmailAlreadyPersisted && resolvedEmail !== state.email) {
           await setEmailState(resolvedEmail, { source: 'flow' });

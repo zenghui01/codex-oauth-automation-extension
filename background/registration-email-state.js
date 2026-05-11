@@ -65,6 +65,45 @@
       };
     }
 
+    function getPreservedPhoneIdentity(state = {}) {
+      const accountIdentifierType = String(state?.accountIdentifierType || '').trim().toLowerCase();
+      const signupPhoneNumber = normalizeEmailValue(
+        state?.signupPhoneNumber
+        || (accountIdentifierType === 'phone' ? state?.accountIdentifier : '')
+        || state?.signupPhoneCompletedActivation?.phoneNumber
+        || state?.signupPhoneActivation?.phoneNumber
+        || ''
+      );
+      if (accountIdentifierType !== 'phone' && !signupPhoneNumber) {
+        return null;
+      }
+      return {
+        accountIdentifierType: 'phone',
+        accountIdentifier: signupPhoneNumber || normalizeEmailValue(state?.accountIdentifier),
+        signupPhoneNumber,
+        signupPhoneActivation: state?.signupPhoneActivation || null,
+        signupPhoneCompletedActivation: state?.signupPhoneCompletedActivation || null,
+        signupPhoneVerificationRequestedAt: state?.signupPhoneVerificationRequestedAt ?? null,
+        signupPhoneVerificationPurpose: String(state?.signupPhoneVerificationPurpose || '').trim(),
+      };
+    }
+
+    function buildFlowRegistrationEmailStateUpdates(state = {}, options = {}) {
+      const registrationEmailUpdates = buildRegistrationEmailStateUpdates(state, options);
+      if (!Boolean(options?.preserveAccountIdentity)) {
+        return registrationEmailUpdates;
+      }
+      const preservedPhoneIdentity = getPreservedPhoneIdentity(state);
+      if (!preservedPhoneIdentity) {
+        return registrationEmailUpdates;
+      }
+      return {
+        ...registrationEmailUpdates,
+        phoneNumber: '',
+        ...preservedPhoneIdentity,
+      };
+    }
+
     function getRegistrationEmailBaseline(state = {}, options = {}) {
       const currentState = getRegistrationEmailState(state);
       const preferredEmail = normalizeEmailValue(options.preferredEmail);
@@ -74,9 +113,11 @@
 
     return {
       DEFAULT_REGISTRATION_EMAIL_STATE: cloneDefaultRegistrationEmailState(),
+      buildFlowRegistrationEmailStateUpdates,
       buildRegistrationEmailStateUpdates,
       getRegistrationEmailBaseline,
       getRegistrationEmailState,
+      getPreservedPhoneIdentity,
       normalizeRegistrationEmailState,
     };
   }

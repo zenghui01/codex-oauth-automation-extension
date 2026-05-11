@@ -56,3 +56,80 @@ test('registration email baseline prefers the current UI email over preserved ru
 
   assert.equal(baseline, 'visible@duck.com');
 });
+
+test('flow registration email state can preserve phone identity while updating the runtime email', () => {
+  const api = loadRegistrationEmailStateApi();
+  const helpers = api.createRegistrationEmailStateHelpers();
+
+  const updates = helpers.buildFlowRegistrationEmailStateUpdates({
+    email: '',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+447780579093',
+    signupPhoneNumber: '+447780579093',
+    signupPhoneActivation: {
+      activationId: 'active-1',
+      phoneNumber: '+447780579093',
+    },
+    signupPhoneCompletedActivation: {
+      activationId: 'done-1',
+      phoneNumber: '+447780579093',
+    },
+    signupPhoneVerificationRequestedAt: 12345,
+    signupPhoneVerificationPurpose: 'login',
+  }, {
+    currentEmail: 'fresh@example.com',
+    preserveAccountIdentity: true,
+    source: 'flow',
+  });
+
+  assert.deepStrictEqual(updates, {
+    email: 'fresh@example.com',
+    registrationEmailState: {
+      current: 'fresh@example.com',
+      previous: 'fresh@example.com',
+      source: 'flow',
+      updatedAt: updates.registrationEmailState.updatedAt,
+    },
+    phoneNumber: '',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+447780579093',
+    signupPhoneNumber: '+447780579093',
+    signupPhoneActivation: {
+      activationId: 'active-1',
+      phoneNumber: '+447780579093',
+    },
+    signupPhoneCompletedActivation: {
+      activationId: 'done-1',
+      phoneNumber: '+447780579093',
+    },
+    signupPhoneVerificationRequestedAt: 12345,
+    signupPhoneVerificationPurpose: 'login',
+  });
+  assert.ok(updates.registrationEmailState.updatedAt > 0);
+});
+
+test('flow registration email state falls back to email identity updates when no phone identity exists', () => {
+  const api = loadRegistrationEmailStateApi();
+  const helpers = api.createRegistrationEmailStateHelpers();
+
+  const updates = helpers.buildFlowRegistrationEmailStateUpdates({
+    email: '',
+    accountIdentifierType: 'email',
+    accountIdentifier: 'old@example.com',
+  }, {
+    currentEmail: 'fresh@example.com',
+    preserveAccountIdentity: true,
+    source: 'flow',
+  });
+
+  assert.deepStrictEqual(updates, {
+    email: 'fresh@example.com',
+    registrationEmailState: {
+      current: 'fresh@example.com',
+      previous: 'fresh@example.com',
+      source: 'flow',
+      updatedAt: updates.registrationEmailState.updatedAt,
+    },
+  });
+  assert.ok(updates.registrationEmailState.updatedAt > 0);
+});

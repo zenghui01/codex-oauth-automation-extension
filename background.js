@@ -255,6 +255,24 @@ function getRegistrationEmailBaseline(state = {}, options = {}) {
   return preferredEmail || currentState.current || currentState.previous || fallbackEmail || '';
 }
 
+function buildFlowRegistrationEmailStateUpdates(state = {}, options = {}) {
+  if (registrationEmailStateHelpers?.buildFlowRegistrationEmailStateUpdates) {
+    return registrationEmailStateHelpers.buildFlowRegistrationEmailStateUpdates(state, options);
+  }
+  return buildRegistrationEmailStateUpdates(state, options);
+}
+
+function getPreservedPhoneIdentity(state = {}) {
+  if (registrationEmailStateHelpers?.getPreservedPhoneIdentity) {
+    return registrationEmailStateHelpers.getPreservedPhoneIdentity(state);
+  }
+  return null;
+}
+
+function statePatchHasChanges(state = {}, patch = {}) {
+  return Object.keys(patch).some((key) => JSON.stringify(state?.[key] ?? null) !== JSON.stringify(patch[key] ?? null));
+}
+
 const LOG_PREFIX = '[MultiPage:bg]';
 const DUCK_AUTOFILL_URL = 'https://duckduckgo.com/email/settings/autofill';
 const ICLOUD_SETUP_URLS = [
@@ -2234,6 +2252,7 @@ const cloudMailProvider = self.MultiPageBackgroundCloudMailProvider.createCloudM
   normalizeCloudMailDomain,
   normalizeCloudMailDomains,
   normalizeCloudMailMailApiMessages,
+  persistRegistrationEmailState,
   pickVerificationMessageWithTimeFallback,
   setEmailState,
   setPersistentSettings,
@@ -3007,6 +3026,44 @@ async function setEmailState(email, options = {}) {
     await appendManualAccountRunRecordIfNeeded(recordStatus, latestState, recordReason);
     await resumeAutoRunIfWaitingForEmail();
   }
+}
+
+async function persistRegistrationEmailState(state = null, email, options = {}) {
+  const currentState = state && typeof state === 'object' && !Array.isArray(state)
+    ? state
+    : await getState();
+  const normalizedEmail = String(email || '').trim() || null;
+  const currentEmail = String(currentState?.email || '').trim() || null;
+  if (!Boolean(options?.preserveAccountIdentity)) {
+    if (normalizedEmail === currentEmail) {
+      return;
+    }
+    await setEmailState(normalizedEmail, options);
+    return;
+  }
+
+  const updates = normalizedEmail === currentEmail
+    ? (() => {
+        const preservedPhoneIdentity = getPreservedPhoneIdentity(currentState);
+        return preservedPhoneIdentity
+          ? {
+              phoneNumber: '',
+              ...preservedPhoneIdentity,
+            }
+          : {};
+      })()
+    : buildFlowRegistrationEmailStateUpdates(currentState, {
+        currentEmail: normalizedEmail,
+        preservePrevious: Boolean(options?.preservePrevious),
+        preserveAccountIdentity: true,
+        source: options?.source || '',
+      });
+
+  if (!Object.keys(updates).length || !statePatchHasChanges(currentState, updates)) {
+    return;
+  }
+  await setState(updates);
+  broadcastDataUpdate(updates);
 }
 
 async function setSignupPhoneStateSilently(phoneNumber) {
@@ -6645,6 +6702,16 @@ async function fetchIcloudHideMyEmail(options = {}) {
     throwIfStopped();
     const generateNew = Boolean(options?.generateNew);
     const preferredHost = String(options?.hostPreference || options?.preferredHost || '').trim();
+    const persistSelectedIcloudEmail = async (email) => {
+      if (typeof persistRegistrationEmailState === 'function') {
+        await persistRegistrationEmailState(options?.state || null, email, {
+          source: options?.source || '',
+          preserveAccountIdentity: Boolean(options?.preserveAccountIdentity),
+        });
+        return;
+      }
+      await setEmailState(email, options?.source ? { source: options.source } : {});
+    };
     await addLog('iCloud：正在加载别名列表并校验当前浏览器登录状态...', 'info');
 
     const { serviceUrl, setupUrl } = await resolveIcloudPremiumMailService(
@@ -6664,7 +6731,7 @@ async function fetchIcloudHideMyEmail(options = {}) {
     if (!generateNew) {
       const reusableAlias = pickReusableIcloudAlias(existingAliases);
       if (reusableAlias) {
-        await setEmailState(reusableAlias.email);
+        await persistSelectedIcloudEmail(reusableAlias.email);
         await addLog(`iCloud：复用未使用别名 ${reusableAlias.email}`, 'ok');
         broadcastIcloudAliasesChanged({ reason: 'selected', email: reusableAlias.email });
         return reusableAlias.email;
@@ -6790,7 +6857,7 @@ async function fetchIcloudHideMyEmail(options = {}) {
         }
       }
 
-      await setEmailState(alias);
+      await persistSelectedIcloudEmail(alias);
       await addLog(`iCloud：已创建并保留新别名 ${alias}`, 'ok');
       broadcastIcloudAliasesChanged({ reason: 'created', email: alias });
       return alias;
@@ -6801,7 +6868,7 @@ async function fetchIcloudHideMyEmail(options = {}) {
 
       const reusableAlias = pickReusableIcloudAlias(existingAliases);
       if (reusableAlias) {
-        await setEmailState(reusableAlias.email);
+        await persistSelectedIcloudEmail(reusableAlias.email);
         await addLog(
           `iCloud：当前网络/上下文波动，暂无法创建新别名，已临时回退复用 ${reusableAlias.email}。`,
           'warn'
@@ -9833,6 +9900,7 @@ const generatedEmailHelpers = self.MultiPageGeneratedEmailHelpers?.createGenerat
   normalizeCloudflareTempEmailAddress,
   normalizeEmailGenerator,
   isGeneratedAliasProvider,
+  persistRegistrationEmailState,
   reuseOrCreateTab,
   sendToContentScript,
   setEmailState,
@@ -11148,6 +11216,7 @@ const signupFlowHelpers = self.MultiPageSignupFlowHelpers?.createSignupFlowHelpe
   isLuckmailProvider,
   isSignupPasswordPageUrl,
   isTabAlive,
+  persistRegistrationEmailState,
   reuseOrCreateTab,
   sendToContentScriptResilient,
   setEmailState,
