@@ -7068,6 +7068,15 @@ function isSignupEntryHost(hostname = '') {
   return ['chatgpt.com', 'chat.openai.com'].includes(hostname);
 }
 
+function isLikelyLoggedInChatgptHomeUrl(rawUrl) {
+  const parsed = parseUrlSafely(rawUrl);
+  if (!parsed) return false;
+  if (!isSignupEntryHost(String(parsed.hostname || '').toLowerCase())) {
+    return false;
+  }
+  return !/^\/(?:auth\/|create-account\/|email-verification|log-in|add-phone)(?:[/?#]|$)/i.test(parsed.pathname || '');
+}
+
 function isSignupPasswordPageUrl(rawUrl) {
   if (typeof navigationUtils !== 'undefined' && navigationUtils?.isSignupPasswordPageUrl) {
     return navigationUtils.isSignupPasswordPageUrl(rawUrl);
@@ -9542,6 +9551,7 @@ async function executeStep(step, options = {}) {
  */
 async function executeStepAndWait(step, delayAfter = 2000) {
   throwIfStopped();
+  let completionPayload = null;
 
   const delaySeconds = normalizeAutoStepDelaySeconds((await getState()).autoStepDelaySeconds, null);
   if (delaySeconds > 0) {
@@ -9570,7 +9580,7 @@ async function executeStepAndWait(step, delayAfter = 2000) {
     await addLog(`自动运行：步骤 ${step} 已执行返回，当前状态为 ${latestState.stepStatuses?.[step] || 'pending'}，准备继续后续步骤。`, 'info');
   } else if (doesStepUseCompletionSignal(step, executionState)) {
     await addLog(`自动运行：步骤 ${step} 已发起，正在等待完成信号（超时 ${AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS / 1000} 秒）。`, 'info');
-    await executeStepViaCompletionSignal(step, AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS);
+    completionPayload = await executeStepViaCompletionSignal(step, AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS);
     await addLog(`自动运行：步骤 ${step} 已收到完成信号，准备继续后续步骤。`, 'info');
   } else {
     await executeStep(step);
@@ -9586,6 +9596,13 @@ async function executeStepAndWait(step, delayAfter = 2000) {
         stableMs: 1000,
         initialDelayMs: 800,
       });
+      try {
+        await validateStep5PostCompletion(signupTabId, completionPayload || {});
+      } catch (step5ValidationError) {
+        await setStepStatus(5, 'failed');
+        await addLog(`失败：${getErrorMessage(step5ValidationError)}`, 'error', { step: 5 });
+        throw step5ValidationError;
+      }
     }
   }
 
@@ -11067,7 +11084,7 @@ const signupFlowHelpers = self.MultiPageSignupFlowHelpers?.createSignupFlowHelpe
   },
   isSignupProfilePageUrl: (rawUrl) => {
     const parsed = parseUrlSafely(rawUrl);
-    return Boolean(parsed && isSignupPageHost(parsed.hostname) && /\/(?:create-account\/profile|u\/signup\/profile|signup\/profile)(?:[/?#]|$)/i.test(parsed.pathname || ''));
+    return Boolean(parsed && isSignupPageHost(parsed.hostname) && /\/(?:create-account\/profile|u\/signup\/profile|signup\/profile|about-you)(?:[/?#]|$)/i.test(parsed.pathname || ''));
   },
   isRetryableContentScriptTransportError,
   isHotmailProvider,
@@ -12142,6 +12159,134 @@ async function getLoginAuthStateFromContent(options = {}) {
   }
 
   return result || {};
+}
+
+async function getStep5SubmitStateFromContent(options = {}) {
+  const result = await sendToContentScriptResilient(
+    'signup-page',
+    {
+      type: 'GET_STEP5_SUBMIT_STATE',
+      source: 'background',
+      payload: {},
+    },
+    {
+      timeoutMs: options.timeoutMs ?? 15000,
+      retryDelayMs: options.retryDelayMs ?? 600,
+      responseTimeoutMs: options.responseTimeoutMs ?? (options.timeoutMs ?? 15000),
+      logMessage: options.logMessage || '步骤 5：资料页正在切换，等待页面恢复后确认提交结果...',
+      logStep: 5,
+      logStepKey: options.logStepKey || 'fill-profile',
+    }
+  );
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+
+  return result || {};
+}
+
+async function recoverStep5SubmitRetryPageOnTab(options = {}) {
+  const result = await sendToContentScriptResilient(
+    'signup-page',
+    {
+      type: 'RECOVER_STEP5_SUBMIT_RETRY_PAGE',
+      source: 'background',
+      payload: {
+        timeoutMs: options.timeoutMs ?? 12000,
+        maxClickAttempts: options.maxClickAttempts ?? 2,
+      },
+    },
+    {
+      timeoutMs: options.timeoutMs ?? 15000,
+      retryDelayMs: options.retryDelayMs ?? 600,
+      responseTimeoutMs: options.responseTimeoutMs ?? (options.timeoutMs ?? 15000),
+      logMessage: options.logMessage || '步骤 5：资料提交后正在尝试恢复认证重试页...',
+      logStep: 5,
+      logStepKey: options.logStepKey || 'fill-profile',
+    }
+  );
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+
+  return result || {};
+}
+
+async function validateStep5PostCompletion(tabId, completionPayload = {}) {
+  if (!Number.isInteger(tabId)) {
+    throw new Error('步骤 5：缺少有效的资料页标签页，无法确认提交后的最终状态。');
+  }
+
+  const maxAuthRetryRecoveries = Math.max(1, Number(completionPayload?.maxAuthRetryRecoveries) || 2);
+  let authRetryRecoveryCount = 0;
+
+  while (true) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const currentUrl = String(tab?.url || completionPayload?.url || '').trim();
+    if (currentUrl && isLikelyLoggedInChatgptHomeUrl(currentUrl)) {
+      return {
+        successState: 'logged_in_home',
+        url: currentUrl,
+      };
+    }
+
+    const pageState = await getStep5SubmitStateFromContent({
+      timeoutMs: 15000,
+      responseTimeoutMs: 15000,
+      retryDelayMs: 500,
+      logMessage: '步骤 5：资料提交已触发页面跳转，正在确认最终页面状态...',
+    });
+
+    if (pageState.userAlreadyExistsBlocked) {
+      throw new Error('SIGNUP_USER_ALREADY_EXISTS::步骤 5：检测到 user_already_exists，当前轮将直接停止。');
+    }
+    if (pageState.maxCheckAttemptsBlocked) {
+      throw new Error('AUTH_MAX_CHECK_ATTEMPTS::max_check_attempts on step 5 auth retry page; restart the current auth step without clicking Retry.');
+    }
+
+    if (pageState.retryPage) {
+      if (authRetryRecoveryCount >= maxAuthRetryRecoveries) {
+        throw new Error(`步骤 5：资料提交后连续进入认证重试页 ${maxAuthRetryRecoveries} 次，页面仍未恢复。URL: ${pageState.url || currentUrl || 'unknown'}`);
+      }
+      authRetryRecoveryCount += 1;
+      await addLog(`步骤 5：提交完成信号后检测到认证重试页，正在自动恢复（${authRetryRecoveryCount}/${maxAuthRetryRecoveries}）...`, 'warn', {
+        step: 5,
+        stepKey: 'fill-profile',
+      });
+      await recoverStep5SubmitRetryPageOnTab({
+        timeoutMs: 15000,
+        retryDelayMs: 600,
+        logMessage: '步骤 5：资料提交后的认证重试页正在恢复，等待“重试”按钮重新就绪...',
+      });
+      await waitForTabStableComplete(tabId, {
+        timeoutMs: 30000,
+        retryDelayMs: 300,
+        stableMs: 1000,
+        initialDelayMs: 300,
+      }).catch(() => null);
+      continue;
+    }
+
+    if (pageState.successState === 'logged_in_home' || pageState.successState === 'oauth_consent' || pageState.successState === 'add_phone') {
+      return pageState;
+    }
+
+    if (pageState.errorText) {
+      throw new Error(`步骤 5：资料提交后页面返回错误：${pageState.errorText}。URL: ${pageState.url || currentUrl || 'unknown'}`);
+    }
+
+    if (pageState.profileVisible) {
+      throw new Error(`步骤 5：资料提交完成信号已收到，但页面仍停留在资料页，当前流程将直接报错。URL: ${pageState.url || currentUrl || 'unknown'}`);
+    }
+
+    if (pageState.unknownAuthPage) {
+      throw new Error(`步骤 5：资料提交后进入未识别的认证页，无法确认成功。URL: ${pageState.url || currentUrl || 'unknown'}`);
+    }
+
+    throw new Error(`步骤 5：资料提交后未能确认最终状态。URL: ${pageState.url || currentUrl || 'unknown'}`);
+  }
 }
 
 async function ensureStep8VerificationPageReady(options = {}) {
