@@ -78,6 +78,64 @@ test('generated email helper falls back to normal generator when 2925 is in rece
   ]);
 });
 
+test('generated email helper forwards the previous email to Duck generation as a comparison baseline', async () => {
+  const api = loadGeneratedEmailHelpersApi();
+  const requests = [];
+
+  const helpers = api.createGeneratedEmailHelpers({
+    addLog: async () => {},
+    buildGeneratedAliasEmail: () => {
+      throw new Error('should not build alias');
+    },
+    buildCloudflareTempEmailHeaders: () => ({}),
+    CLOUDFLARE_TEMP_EMAIL_GENERATOR: 'cloudflare-temp-email',
+    DUCK_AUTOFILL_URL: 'https://duckduckgo.com/email',
+    fetch: async () => ({ ok: true, text: async () => '{}' }),
+    fetchIcloudHideMyEmail: async () => {
+      throw new Error('should not use icloud generator');
+    },
+    getCloudflareTempEmailAddressFromResponse: () => '',
+    getCloudflareTempEmailConfig: () => ({ baseUrl: '', adminAuth: '', domain: '' }),
+    getState: async () => ({
+      email: 'Previous@Duck.com',
+      emailGenerator: 'duck',
+      mailProvider: 'gmail',
+    }),
+    ensureMail2925AccountForFlow: async () => {
+      throw new Error('should not allocate 2925 account');
+    },
+    joinCloudflareTempEmailUrl: () => '',
+    normalizeCloudflareDomain: () => '',
+    normalizeCloudflareTempEmailAddress: () => '',
+    normalizeEmailGenerator: (value) => String(value || '').trim().toLowerCase(),
+    isGeneratedAliasProvider: () => false,
+    reuseOrCreateTab: async () => {},
+    sendToContentScript: async (_source, message) => {
+      requests.push(message);
+      return { email: 'fresh@duck.com', generated: true };
+    },
+    setEmailState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const email = await helpers.fetchGeneratedEmail({
+    email: 'Previous@Duck.com',
+    emailGenerator: 'duck',
+    mailProvider: 'gmail',
+  }, {
+    generator: 'duck',
+    generateNew: true,
+  });
+
+  assert.equal(email, 'fresh@duck.com');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].type, 'FETCH_DUCK_EMAIL');
+  assert.deepEqual(requests[0].payload, {
+    generateNew: true,
+    previousEmail: 'previous@duck.com',
+  });
+});
+
 test('generated email helper can read the requested address from custom email pool', async () => {
   const api = loadGeneratedEmailHelpersApi();
   const events = [];

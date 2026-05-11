@@ -166,9 +166,16 @@
       return address;
     }
 
+    function normalizeEmailForComparison(value) {
+      return String(value || '').trim().toLowerCase();
+    }
+
     async function fetchDuckEmail(options = {}) {
       throwIfStopped();
-      const { generateNew = true } = options;
+      const {
+        generateNew = true,
+        previousEmail = '',
+      } = options;
 
       await addLog(`Duck 邮箱：正在打开自动填充设置（${generateNew ? '生成新地址' : '复用当前地址'}）...`);
       await reuseOrCreateTab('duck-mail', DUCK_AUTOFILL_URL);
@@ -176,7 +183,10 @@
       const result = await sendToContentScript('duck-mail', {
         type: 'FETCH_DUCK_EMAIL',
         source: 'background',
-        payload: { generateNew },
+        payload: {
+          generateNew,
+          previousEmail: normalizeEmailForComparison(previousEmail),
+        },
       });
 
       if (result?.error) {
@@ -301,7 +311,12 @@
       if (generator === CLOUDFLARE_TEMP_EMAIL_GENERATOR) {
         return fetchCloudflareTempEmailAddress(mergedState, options);
       }
-      return fetchDuckEmail(options);
+      return fetchDuckEmail({
+        ...options,
+        previousEmail: options.previousEmail !== undefined
+          ? options.previousEmail
+          : mergedState.email,
+      });
     }
 
     return {
