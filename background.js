@@ -7758,7 +7758,7 @@ function isPhoneSmsPlatformRateLimitFailure(error) {
 
 function isPlusCheckoutNonFreeTrialFailure(error) {
   const message = getErrorMessage(error);
-  return /PLUS_CHECKOUT_NON_FREE_TRIAL::|今日应付金额不是\s*0|没有免费试用资格/i.test(message);
+  return /PLUS_CHECKOUT_NON_FREE_TRIAL::|今日应付金额不是\s*0|没有免费试用资格|该账号已经开通过\s*ChatGPT\s*订阅套餐，不能重复订阅(?:。)?(?:（\s*checkout_order\s*）|\(\s*checkout_order\s*\))?/i.test(message);
 }
 
 function isGpcTaskEndedFailure(error) {
