@@ -134,6 +134,9 @@ test('sidepanel Plus UI hides PayPal account selector while GoPay is selected', 
     extractFunction('getSelectedPlusPaymentMethod'),
     extractFunction('normalizeGpcHelperPhoneModeValue'),
     extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
     extractFunction('hasGpcAutoModePermissionField'),
     extractFunction('isGpcAutoModePermissionDenied'),
     extractFunction('normalizeGpcOtpChannelValue'),
@@ -217,6 +220,9 @@ test('sidepanel Plus UI shows GPC fields and purchase button only for GPC', () =
     extractFunction('getSelectedPlusPaymentMethod'),
     extractFunction('normalizeGpcHelperPhoneModeValue'),
     extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
     extractFunction('hasGpcAutoModePermissionField'),
     extractFunction('isGpcAutoModePermissionDenied'),
     extractFunction('normalizeGpcOtpChannelValue'),
@@ -310,6 +316,9 @@ test('sidepanel hides GPC auto mode selector when API Key has no auto permission
     extractFunction('getSelectedPlusPaymentMethod'),
     extractFunction('normalizeGpcHelperPhoneModeValue'),
     extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
     extractFunction('hasGpcAutoModePermissionField'),
     extractFunction('isGpcAutoModePermissionDenied'),
     extractFunction('normalizeGpcOtpChannelValue'),
@@ -353,12 +362,104 @@ return { updatePlusModeUI, selectGpcHelperPhoneMode, plusPaymentMethodCaption, r
   assert.match(api.plusPaymentMethodCaption.textContent, /手动/);
 });
 
+test('sidepanel keeps selected GPC auto mode when persisted permission survives stop refresh', () => {
+  const bundle = [
+    extractFunction('normalizePlusPaymentMethod'),
+    extractFunction('getSelectedPlusPaymentMethod'),
+    extractFunction('normalizeGpcHelperPhoneModeValue'),
+    extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
+    extractFunction('hasGpcAutoModePermissionField'),
+    extractFunction('isGpcAutoModePermissionDenied'),
+    extractFunction('normalizeGpcOtpChannelValue'),
+    extractFunction('updatePlusModeUI'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = {
+  plusPaymentMethod: 'gpc-helper',
+  gopayHelperPhoneMode: 'auto',
+  gopayHelperAutoModeEnabled: true,
+  gopayHelperBalancePayload: { auto_mode_enabled: true },
+};
+let currentPlusPaymentMethod = 'gpc-helper';
+const inputPlusModeEnabled = { checked: true };
+const selectPlusPaymentMethod = { value: 'gpc-helper', style: { display: 'none' } };
+const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
+const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
+const plusPaymentMethodCaption = { textContent: '' };
+const rowPayPalAccount = { style: { display: '' } };
+const rowPlusPaymentMethod = { style: { display: 'none' } };
+const rowGpcHelperApi = { style: { display: 'none' } };
+const rowGpcHelperCardKey = { style: { display: 'none' } };
+const rowGpcHelperPhoneMode = { style: { display: 'none' } };
+const selectGpcHelperPhoneMode = { value: 'auto' };
+const rowGpcHelperCountryCode = { style: { display: 'none' } };
+const rowGpcHelperPhone = { style: { display: 'none' } };
+const rowGpcHelperOtpChannel = { style: { display: 'none' } };
+const selectGpcHelperOtpChannel = { value: 'whatsapp' };
+const rowGpcHelperLocalSmsEnabled = { style: { display: 'none' } };
+const inputGpcHelperLocalSmsEnabled = { checked: false };
+const rowGpcHelperLocalSmsUrl = { style: { display: 'none' } };
+const rowGpcHelperPin = { style: { display: 'none' } };
+${bundle}
+function syncLatestState(nextState) { latestState = { ...latestState, ...nextState }; }
+return {
+  updatePlusModeUI,
+  selectGpcHelperPhoneMode,
+  getSelectedPhoneMode() { return selectGpcHelperPhoneMode.value; },
+  getPayloadPhoneMode() {
+    return (() => {
+      const selectedGpcPhoneMode = normalizeGpcHelperPhoneModeValue(selectGpcHelperPhoneMode.value);
+      const preserveSelectedGpcAutoMode = shouldPreserveSelectedGpcAutoMode(latestState);
+      return (!preserveSelectedGpcAutoMode && isGpcAutoModePermissionDenied(latestState)) ? 'manual' : selectedGpcPhoneMode;
+    })();
+  },
+  applyDataUpdated(payload) {
+    syncLatestState(payload);
+    if (payload.gopayHelperPhoneMode !== undefined) {
+      selectGpcHelperPhoneMode.value = normalizeGpcHelperPhoneModeValue(payload.gopayHelperPhoneMode);
+    }
+    if (payload.gopayHelperAutoModeEnabled === false
+      && selectGpcHelperPhoneMode?.value === GPC_HELPER_PHONE_MODE_AUTO
+      && isGpcAutoModePermissionDenied(latestState)) {
+      selectGpcHelperPhoneMode.value = GPC_HELPER_PHONE_MODE_MANUAL;
+      syncLatestState({ gopayHelperPhoneMode: GPC_HELPER_PHONE_MODE_MANUAL });
+    }
+    updatePlusModeUI();
+  },
+  rows: { rowGpcHelperPhoneMode, rowGpcHelperPhone, rowGpcHelperOtpChannel, rowGpcHelperPin },
+};
+`)();
+
+  api.updatePlusModeUI();
+  assert.equal(api.getSelectedPhoneMode(), 'auto');
+  assert.equal(api.getPayloadPhoneMode(), 'auto');
+  assert.equal(api.rows.rowGpcHelperPhoneMode.style.display, '');
+  assert.equal(api.rows.rowGpcHelperPhone.style.display, 'none');
+
+  api.applyDataUpdated({
+    autoRunning: false,
+    autoRunPhase: 'stopped',
+    gopayHelperAutoModeEnabled: false,
+  });
+
+  assert.equal(api.getSelectedPhoneMode(), 'auto');
+  assert.equal(api.getPayloadPhoneMode(), 'auto');
+  assert.equal(api.rows.rowGpcHelperPhone.style.display, 'none');
+});
+
 test('sidepanel keeps selected GPC auto mode before permission has been queried', () => {
   const bundle = [
     extractFunction('normalizePlusPaymentMethod'),
     extractFunction('getSelectedPlusPaymentMethod'),
     extractFunction('normalizeGpcHelperPhoneModeValue'),
     extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
     extractFunction('hasGpcAutoModePermissionField'),
     extractFunction('isGpcAutoModePermissionDenied'),
     extractFunction('normalizeGpcOtpChannelValue'),
