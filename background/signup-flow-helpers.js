@@ -329,11 +329,12 @@
         return;
       }
       const preservedPhoneIdentity = getPreservedPhoneIdentityForEmailResolution(state, options);
+      const generatedEmailAlreadyPersisted = Boolean(options?.generatedEmailAlreadyPersisted);
       if (preservedPhoneIdentity && typeof setState === 'function') {
-        await setState({
-          email: resolvedEmail,
-          ...preservedPhoneIdentity,
-        });
+        if (!generatedEmailAlreadyPersisted && resolvedEmail !== state.email) {
+          await setEmailState(resolvedEmail, { source: 'flow' });
+        }
+        await setState(preservedPhoneIdentity);
         return;
       }
       if (resolvedEmail !== state.email) {
@@ -377,7 +378,10 @@
       }
 
       if (!generatedEmailAlreadyPersisted || options?.preserveAccountIdentity) {
-        await persistResolvedSignupEmail(resolvedEmail, state, options);
+        await persistResolvedSignupEmail(resolvedEmail, state, {
+          ...options,
+          generatedEmailAlreadyPersisted,
+        });
       }
 
       return resolvedEmail;

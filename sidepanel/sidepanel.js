@@ -10450,6 +10450,7 @@ async function fetchGeneratedEmail(options = {}) {
       source: 'sidepanel',
       payload: {
         generateNew: true,
+        currentEmail: inputEmail.value.trim(),
         generator: selectEmailGenerator.value,
         mailProvider: selectMailProvider.value,
         mail2925Mode: getSelectedMail2925Mode(),

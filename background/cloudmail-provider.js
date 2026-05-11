@@ -185,7 +185,7 @@
           throw err;
         }
       }
-      await setEmailState(address);
+      await setEmailState(address, { source: 'generated:cloudmail' });
       await addLog(`Cloud Mail：已生成 ${address}`, 'ok');
       return address;
     }

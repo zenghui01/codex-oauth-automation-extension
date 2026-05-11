@@ -176,7 +176,7 @@ test('fetchDuckEmail falls back to the previous Duck email when the page baselin
 
   const result = await api.fetchDuckEmail({
     generateNew: true,
-    previousEmail: 'previous@duck.com',
+    baselineEmail: 'previous@duck.com',
   });
 
   assert.deepEqual(result, {

@@ -16,6 +16,7 @@ importScripts(
   'background/ip-proxy-provider-711proxy.js',
   'background/ip-proxy-core.js',
   'background/panel-bridge.js',
+  'background/registration-email-state.js',
   'background/generated-email-helpers.js',
   'background/signup-flow-helpers.js',
   'background/message-router.js',
@@ -203,6 +204,56 @@ const {
 const {
   isRecoverableStep9AuthFailure,
 } = self.MultiPageActivationUtils;
+const registrationEmailStateHelpers = self.MultiPageRegistrationEmailState?.createRegistrationEmailStateHelpers?.() || null;
+const DEFAULT_REGISTRATION_EMAIL_STATE = registrationEmailStateHelpers?.DEFAULT_REGISTRATION_EMAIL_STATE || {
+  current: '',
+  previous: '',
+  source: '',
+  updatedAt: 0,
+};
+
+function getRegistrationEmailState(state = {}) {
+  if (registrationEmailStateHelpers?.getRegistrationEmailState) {
+    return registrationEmailStateHelpers.getRegistrationEmailState(state);
+  }
+  const fallbackEmail = String(state?.email || '').trim();
+  return {
+    current: fallbackEmail,
+    previous: fallbackEmail,
+    source: '',
+    updatedAt: 0,
+  };
+}
+
+function buildRegistrationEmailStateUpdates(state = {}, options = {}) {
+  if (registrationEmailStateHelpers?.buildRegistrationEmailStateUpdates) {
+    return registrationEmailStateHelpers.buildRegistrationEmailStateUpdates(state, options);
+  }
+  const currentEmail = String(options?.currentEmail || '').trim();
+  const preservePrevious = Boolean(options?.preservePrevious);
+  const currentState = getRegistrationEmailState(state);
+  return {
+    email: currentEmail || null,
+    registrationEmailState: {
+      current: currentEmail,
+      previous: currentEmail || (preservePrevious ? currentState.previous : ''),
+      source: currentEmail
+        ? String(options?.source || '').trim()
+        : (preservePrevious ? currentState.source : ''),
+      updatedAt: currentEmail || (preservePrevious && currentState.previous) ? Date.now() : 0,
+    },
+  };
+}
+
+function getRegistrationEmailBaseline(state = {}, options = {}) {
+  if (registrationEmailStateHelpers?.getRegistrationEmailBaseline) {
+    return registrationEmailStateHelpers.getRegistrationEmailBaseline(state, options);
+  }
+  const preferredEmail = String(options?.preferredEmail || '').trim();
+  const fallbackEmail = String(options?.fallbackEmail || '').trim();
+  const currentState = getRegistrationEmailState(state);
+  return preferredEmail || currentState.current || currentState.previous || fallbackEmail || '';
+}
 
 const LOG_PREFIX = '[MultiPage:bg]';
 const DUCK_AUTOFILL_URL = 'https://duckduckgo.com/email/settings/autofill';
@@ -782,6 +833,7 @@ const DEFAULT_STATE = {
   resolvedSignupMethod: null, // 当前自动轮次冻结后的实际注册方式。
   accountIdentifierType: null,
   accountIdentifier: '',
+  registrationEmailState: { ...DEFAULT_REGISTRATION_EMAIL_STATE },
   email: null, // 运行时邮箱，由程序自动获取并写入，不能手动预填。
   password: null, // 运行时实际密码，由 customPassword 或程序自动生成后写入。
   accounts: [], // 已生成账号记录：{ email, password, createdAt }。
@@ -2861,6 +2913,7 @@ async function importSettingsBundle(configBundle) {
     ...importedSettings,
     currentHotmailAccountId: null,
     email: null,
+    registrationEmailState: { ...DEFAULT_REGISTRATION_EMAIL_STATE },
   };
 
   await setState(sessionUpdates);
@@ -2868,6 +2921,7 @@ async function importSettingsBundle(configBundle) {
     ...importedSettings,
     currentHotmailAccountId: null,
     ...(sessionUpdates.email !== undefined ? { email: sessionUpdates.email } : {}),
+    registrationEmailState: sessionUpdates.registrationEmailState,
   });
 
   return getState();
@@ -2917,12 +2971,14 @@ function isPhoneActivationForNumber(activation, phoneNumber) {
   return Boolean(activationDigits && targetDigits && activationDigits === targetDigits);
 }
 
-async function setEmailStateSilently(email) {
-  const normalizedEmail = String(email || '').trim() || null;
+async function setEmailStateSilently(email, options = {}) {
   const currentState = await getState();
-  const updates = {
-    email: normalizedEmail,
-  };
+  const updates = buildRegistrationEmailStateUpdates(currentState, {
+    currentEmail: email,
+    preservePrevious: Boolean(options?.preservePrevious),
+    source: options?.source || '',
+  });
+  const normalizedEmail = updates.email;
 
   if (normalizedEmail) {
     updates.accountIdentifierType = 'email';
@@ -2942,8 +2998,8 @@ async function setEmailStateSilently(email) {
   broadcastDataUpdate(updates);
 }
 
-async function setEmailState(email) {
-  await setEmailStateSilently(email);
+async function setEmailState(email, options = {}) {
+  await setEmailStateSilently(email, options);
   if (email) {
     const latestState = await getState();
     const recordStatus = shouldMarkAccountRunRecordRunning(latestState) ? 'running' : 'step2_stopped';
@@ -9769,6 +9825,7 @@ const generatedEmailHelpers = self.MultiPageGeneratedEmailHelpers?.createGenerat
   getCloudflareTempEmailAddressFromResponse,
   getCloudflareTempEmailConfig,
   getCustomEmailPoolEmail: getCustomEmailPoolEmailForRun,
+  getRegistrationEmailBaseline,
   getState,
   ensureMail2925AccountForFlow,
   joinCloudflareTempEmailUrl,
@@ -11327,6 +11384,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   resolveSignupMethod,
   reuseOrCreateTab,
   sendToContentScriptResilient,
+  buildRegistrationEmailStateUpdates,
   setState,
   shouldUseCustomRegistrationEmail,
   sleepWithStop,

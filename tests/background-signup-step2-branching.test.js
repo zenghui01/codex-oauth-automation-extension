@@ -775,7 +775,6 @@ test('signup flow helper can generate an email on demand when add-email starts f
   assert.equal(fetchedStates[0].options.preserveAccountIdentity, true);
   assert.deepStrictEqual(setStateCalls, [
     {
-      email: 'duck.generated@example.com',
       accountIdentifierType: 'phone',
       accountIdentifier: '+447780579093',
       signupPhoneNumber: '+447780579093',

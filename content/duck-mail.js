@@ -23,7 +23,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function fetchDuckEmail(payload = {}) {
   const {
     generateNew = true,
-    previousEmail = '',
+    baselineEmail = '',
   } = payload;
 
   log(`Duck 邮箱：正在${generateNew ? '生成' : '读取'}私有地址...`);
@@ -119,21 +119,34 @@ async function fetchDuckEmail(payload = {}) {
         .map((value) => normalizeDuckEmail(value))
         .filter(Boolean)
     );
+    let stableCandidate = '';
+    let stableCount = 0;
 
     for (let i = 0; i < 100; i++) {
       const nextValue = readEmail();
       if (nextValue && !blockedValues.has(nextValue)) {
-        return nextValue;
+        if (nextValue === stableCandidate) {
+          stableCount += 1;
+        } else {
+          stableCandidate = nextValue;
+          stableCount = 1;
+        }
+        if (stableCount >= 2) {
+          return nextValue;
+        }
+      } else {
+        stableCandidate = '';
+        stableCount = 0;
       }
       await sleep(150);
     }
     throw new Error('等待 Duck 地址变化超时。');
   };
 
-  const fallbackPreviousEmail = normalizeDuckEmail(previousEmail);
+  const knownBaselineEmail = normalizeDuckEmail(baselineEmail);
   let currentEmail = readEmail();
   if (!currentEmail) {
-    currentEmail = await waitForVisibleEmail(generateNew ? 12 : 20);
+    currentEmail = await waitForVisibleEmail(generateNew ? (knownBaselineEmail ? 12 : 30) : 20);
   }
 
   if (currentEmail && !generateNew) {
@@ -153,9 +166,9 @@ async function fetchDuckEmail(payload = {}) {
     throw new Error('未找到 Duck 私有地址生成按钮。');
   }
 
-  const comparisonEmails = [currentEmail, fallbackPreviousEmail].filter(Boolean);
-  if (!currentEmail && fallbackPreviousEmail) {
-    log(`Duck 邮箱：当前地址尚未显示，改用上次地址 ${fallbackPreviousEmail} 作为对比基线。`, 'warn');
+  const comparisonEmails = [currentEmail, knownBaselineEmail].filter(Boolean);
+  if (!currentEmail && knownBaselineEmail) {
+    log(`Duck 邮箱：当前地址尚未显示，改用已知基线 ${knownBaselineEmail} 作为对比基线。`, 'warn');
   }
 
   for (let attempt = 1; attempt <= 2; attempt++) {
