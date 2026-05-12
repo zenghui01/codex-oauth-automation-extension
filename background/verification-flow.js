@@ -1313,7 +1313,9 @@
             disableTimeBudgetCap: Boolean(options.disableTimeBudgetCap),
             getRemainingTimeMs: options.getRemainingTimeMs,
             maxResendRequests: remainingAutomaticResendCount,
-            initialPollMaxAttempts: options.initialPollMaxAttempts,
+            initialPollMaxAttempts: mail.provider === '2925' && rejectedCodes.size > 0
+              ? undefined
+              : options.initialPollMaxAttempts,
             resendIntervalMs,
             lastResendAt,
             onResendRequestedAt: updateFilterAfterTimestampForVerificationStep,

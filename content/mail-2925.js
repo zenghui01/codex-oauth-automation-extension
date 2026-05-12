@@ -269,6 +269,48 @@ function findMailItems() {
   return [];
 }
 
+function isLikelyMail2925MailboxPage() {
+  const pageText = getPageTextSample(3000);
+  if (!pageText) {
+    return /#\/mailList/i.test(location.hash || location.href || '');
+  }
+
+  if (findRefreshButton() || findInboxLink()) {
+    return true;
+  }
+
+  return /#\/mailList/i.test(location.hash || location.href || '')
+    && /收件箱|刷新|删除|写信|邮件|mail/i.test(pageText)
+    && !(/欢迎使用邮箱|登录|login/i.test(pageText) && /密码|password/i.test(pageText));
+}
+
+async function waitForMailboxReady(timeoutMs = 12000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    if (typeof throwIfMail2925LimitReached === 'function') {
+      throwIfMail2925LimitReached();
+    }
+    const items = findMailItems();
+    if (items.length > 0) {
+      return { ready: true, items, empty: false };
+    }
+    if (getMail2925DisplayedMailboxEmail() || isLikelyMail2925MailboxPage()) {
+      return { ready: true, items: [], empty: true };
+    }
+    await sleep(500);
+  }
+
+  const items = findMailItems();
+  if (items.length > 0) {
+    return { ready: true, items, empty: false };
+  }
+  return {
+    ready: Boolean(getMail2925DisplayedMailboxEmail() || isLikelyMail2925MailboxPage()),
+    items,
+    empty: items.length === 0,
+  };
+}
+
 function findActionBySelectors(selectors = []) {
   for (const selector of selectors) {
     const candidates = document.querySelectorAll(selector);
@@ -518,7 +560,7 @@ function detectMail2925ViewState() {
   }
 
   const mailboxEmail = getMail2925DisplayedMailboxEmail();
-  if (findMailItems().length > 0 || mailboxEmail) {
+  if (findMailItems().length > 0 || mailboxEmail || isLikelyMail2925MailboxPage()) {
     return { view: 'mailbox', limitMessage: '', mailboxEmail };
   }
 
@@ -924,7 +966,8 @@ async function sleepRandom(minMs, maxMs = minMs) {
 }
 
 async function returnToInbox() {
-  if (findMailItems().length > 0) {
+  const currentMailbox = await waitForMailboxReady(1500);
+  if (currentMailbox.ready) {
     return true;
   }
 
@@ -936,7 +979,8 @@ async function returnToInbox() {
   simulateClick(inboxLink);
   for (let attempt = 0; attempt < 20; attempt += 1) {
     await sleep(250);
-    if (findMailItems().length > 0) {
+    const mailbox = await waitForMailboxReady(250);
+    if (mailbox.ready) {
       return true;
     }
   }
@@ -1196,27 +1240,20 @@ async function handlePollEmail(step, payload) {
   let initialItems = [];
   let initialLoadUsedRefresh = false;
 
-  for (let i = 0; i < 20; i += 1) {
-    initialItems = findMailItems();
-    if (initialItems.length > 0) {
-      break;
-    }
-    await sleep(500);
-  }
-
-  if (initialItems.length === 0) {
+  const initialMailbox = await waitForMailboxReady(10000);
+  initialItems = initialMailbox.items;
+  if (!initialMailbox.ready || initialItems.length === 0) {
     initialLoadUsedRefresh = true;
     await returnToInbox();
     await refreshInbox();
-    await sleep(2000);
+    const refreshedMailbox = await waitForMailboxReady(12000);
     if (typeof throwIfMail2925LimitReached === 'function') {
       throwIfMail2925LimitReached();
     }
-    initialItems = findMailItems();
-  }
-
-  if (initialItems.length === 0) {
-    throw new Error('2925 邮箱列表未加载完成，请确认当前已打开收件箱。');
+    if (!refreshedMailbox.ready) {
+      throw new Error('2925 邮箱列表未加载完成，请确认当前已打开收件箱。');
+    }
+    initialItems = refreshedMailbox.items;
   }
 
   log(`步骤 ${step}：邮件列表已加载，共 ${initialItems.length} 封邮件`);
@@ -1233,7 +1270,11 @@ async function handlePollEmail(step, payload) {
       await sleepRandom(900, 1500);
     }
 
-    const items = findMailItems();
+    const mailbox = await waitForMailboxReady(3000);
+    if (!mailbox.ready) {
+      throw new Error('2925 邮箱列表未加载完成，请确认当前已打开收件箱。');
+    }
+    const items = mailbox.items;
     if (items.length > 0) {
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index];
