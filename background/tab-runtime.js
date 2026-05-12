@@ -19,6 +19,88 @@
 
     const pendingCommands = new Map();
 
+    function normalizeAutomationWindowId(value) {
+      if (value === null || value === undefined || value === '') {
+        return null;
+      }
+      const numeric = Math.floor(Number(value));
+      return Number.isInteger(numeric) && numeric >= 0 ? numeric : null;
+    }
+
+    async function getAutomationWindowId(options = {}) {
+      const directWindowId = normalizeAutomationWindowId(
+        options.automationWindowId ?? options.windowId ?? null
+      );
+      if (directWindowId !== null) {
+        return directWindowId;
+      }
+
+      const state = await getState();
+      return normalizeAutomationWindowId(state?.automationWindowId);
+    }
+
+    async function withAutomationWindowScope(queryInfo = {}, options = {}) {
+      const windowId = await getAutomationWindowId(options);
+      if (windowId === null) {
+        return { ...(queryInfo || {}) };
+      }
+      const scoped = {
+        ...(queryInfo || {}),
+        windowId,
+      };
+      delete scoped.currentWindow;
+      return scoped;
+    }
+
+    async function queryTabsInAutomationWindow(queryInfo = {}, options = {}) {
+      const scopedQuery = await withAutomationWindowScope(queryInfo, options);
+      try {
+        return await chrome.tabs.query(scopedQuery);
+      } catch (error) {
+        if (Object.prototype.hasOwnProperty.call(scopedQuery, 'windowId')) {
+          await setState({ automationWindowId: null }).catch(() => {});
+          return chrome.tabs.query(queryInfo || {});
+        }
+        throw error;
+      }
+    }
+
+    async function createAutomationTab(createProperties = {}, options = {}) {
+      const windowId = await getAutomationWindowId(options);
+      const properties = {
+        ...(createProperties || {}),
+        ...(windowId !== null ? { windowId } : {}),
+      };
+
+      try {
+        return await chrome.tabs.create(properties);
+      } catch (error) {
+        if (windowId !== null) {
+          await setState({ automationWindowId: null }).catch(() => {});
+          return chrome.tabs.create(createProperties || {});
+        }
+        throw error;
+      }
+    }
+
+    async function isTabInAutomationWindow(tabOrId, options = {}) {
+      const windowId = await getAutomationWindowId(options);
+      if (windowId === null) {
+        return true;
+      }
+
+      let tab = tabOrId;
+      if (Number.isInteger(tabOrId)) {
+        if (typeof chrome?.tabs?.get !== 'function') {
+          return true;
+        }
+        tab = await chrome.tabs.get(tabOrId).catch(() => null);
+      }
+
+      const tabWindowId = normalizeAutomationWindowId(tab?.windowId);
+      return tabWindowId === null || tabWindowId === windowId;
+    }
+
     async function sleepOrStop(ms) {
       if (typeof sleepWithStop === 'function') {
         await sleepWithStop(ms);
@@ -86,7 +168,20 @@
 
     async function registerTab(source, tabId) {
       const registry = await getTabRegistry();
-      registry[source] = { tabId, ready: true };
+      let windowId = null;
+      if (chrome?.tabs?.get && Number.isInteger(tabId)) {
+        const tab = await chrome.tabs.get(tabId).catch(() => null);
+        if (tab && !(await isTabInAutomationWindow(tab))) {
+          console.log(LOG_PREFIX, `Ignored tab registration outside automation window: ${source} -> ${tabId}`);
+          return;
+        }
+        windowId = normalizeAutomationWindowId(tab?.windowId);
+      }
+      registry[source] = {
+        tabId,
+        ready: true,
+        ...(windowId !== null ? { windowId } : {}),
+      };
       await setState({ tabRegistry: registry });
       console.log(LOG_PREFIX, `Tab registered: ${source} -> ${tabId}`);
     }
@@ -96,7 +191,12 @@
       const entry = registry[source];
       if (!entry) return false;
       try {
-        await chrome.tabs.get(entry.tabId);
+        const tab = await chrome.tabs.get(entry.tabId);
+        if (!(await isTabInAutomationWindow(tab))) {
+          registry[source] = null;
+          await setState({ tabRegistry: registry });
+          return false;
+        }
         return true;
       } catch {
         registry[source] = null;
@@ -107,7 +207,16 @@
 
     async function getTabId(source) {
       const registry = await getTabRegistry();
-      return registry[source]?.tabId || null;
+      const tabId = registry[source]?.tabId || null;
+      if (!Number.isInteger(tabId)) {
+        return null;
+      }
+      if (!(await isTabInAutomationWindow(tabId))) {
+        registry[source] = null;
+        await setState({ tabRegistry: registry });
+        return null;
+      }
+      return tabId;
     }
 
     async function rememberSourceLastUrl(source, url) {
@@ -127,7 +236,7 @@
 
       if (!referenceUrls.length) return;
 
-      const tabs = await chrome.tabs.query({});
+      const tabs = await queryTabsInAutomationWindow({});
       const matchedIds = tabs
         .filter((tab) => Number.isInteger(tab.id) && !excluded.has(tab.id))
         .filter((tab) => referenceUrls.some((refUrl) => matchesSourceUrlFamily(source, tab.url, refUrl)))
@@ -164,7 +273,7 @@
 
       const { excludeTabIds = [] } = options;
       const excluded = new Set(excludeTabIds.filter((id) => Number.isInteger(id)));
-      const tabs = await chrome.tabs.query({});
+      const tabs = await queryTabsInAutomationWindow({});
       const matchedIds = tabs
         .filter((tab) => Number.isInteger(tab.id) && !excluded.has(tab.id))
         .filter((tab) => isLocalhostOAuthCallbackTabMatch(callbackUrl, tab.url))
@@ -198,7 +307,7 @@
       const { excludeTabIds = [], excludeUrls = [], excludeLocalhostCallbacks = false } = options;
       const excluded = new Set(excludeTabIds.filter((id) => Number.isInteger(id)));
       const excludedUrls = new Set((Array.isArray(excludeUrls) ? excludeUrls : []).filter(Boolean));
-      const tabs = await chrome.tabs.query({});
+      const tabs = await queryTabsInAutomationWindow({});
       const matchedIds = tabs
         .filter((tab) => Number.isInteger(tab.id) && !excluded.has(tab.id))
         .filter((tab) => typeof tab.url === 'string' && !excludedUrls.has(tab.url))
@@ -534,7 +643,7 @@
     async function reuseOrCreateTab(source, url, options = {}) {
       if (options.forceNew) {
         await closeConflictingTabsForSource(source, url);
-        const tab = await chrome.tabs.create({ url, active: true });
+        const tab = await createAutomationTab({ url, active: true }, options);
 
         if (options.inject) {
           await waitForTabUpdateComplete(tab.id);
@@ -626,7 +735,7 @@
       }
 
       await closeConflictingTabsForSource(source, url);
-      const tab = await chrome.tabs.create({ url, active: true });
+      const tab = await createAutomationTab({ url, active: true }, options);
 
       if (options.inject) {
         await waitForTabUpdateComplete(tab.id);
@@ -787,16 +896,20 @@
       closeConflictingTabsForSource,
       closeLocalhostCallbackTabs,
       closeTabsByUrlPrefix,
+      createAutomationTab,
       ensureContentScriptReadyOnTab,
       flushCommand,
+      getAutomationWindowId,
       getContentScriptResponseTimeoutMs,
       getMessageDebugLabel,
       getTabId,
       getTabRegistry,
       isLocalhostOAuthCallbackTabMatch,
       isTabAlive,
+      isTabInAutomationWindow,
       pingContentScriptOnTab,
       queueCommand,
+      queryTabsInAutomationWindow,
       registerTab,
       rememberSourceLastUrl,
       resolveResponseTimeoutMs,

@@ -874,6 +874,7 @@ const DEFAULT_STATE = {
   codex2apiSessionId: null, // Codex2API OAuth 会话 ID。
   codex2apiOAuthState: null, // Codex2API OAuth state。
   plusCheckoutTabId: null, // Plus checkout / PayPal 标签页 ID。
+  automationWindowId: null, // 当前任务锁定的浏览器窗口 ID，避免新标签页跑到其它窗口。
   plusCheckoutUrl: null, // Plus checkout 运行时短链，不写入持久配置。
   plusCheckoutCountry: 'DE',
   plusCheckoutCurrency: 'EUR',
@@ -3409,6 +3410,7 @@ async function resetState() {
       'luckmailPreserveTagId',
       'luckmailPreserveTagName',
       'preferredIcloudHost',
+      'automationWindowId',
       ...CONTRIBUTION_RUNTIME_KEYS,
     ]),
     getPersistedSettings(),
@@ -3478,6 +3480,10 @@ async function resetState() {
     freeReusablePhoneActivation,
     phoneReusableActivationPool,
     preferredIcloudHost: prev.preferredIcloudHost || '',
+    automationWindowId: Number.isInteger(Number(prev.automationWindowId))
+      && Number(prev.automationWindowId) >= 0
+      ? Number(prev.automationWindowId)
+      : null,
   });
 }
 
@@ -5542,7 +5548,7 @@ async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload 
 
 async function getOpenIcloudHostPreference() {
   try {
-    const tabs = await chrome.tabs.query({
+    const tabs = await queryTabsInAutomationWindow({
       url: ICLOUD_TAB_URL_PATTERNS,
     });
 
@@ -5690,7 +5696,7 @@ function shouldEmitIcloudTransientLog(key, windowMs = 1500) {
 }
 
 async function openIcloudLoginPage(preferredUrl) {
-  const tabs = await chrome.tabs.query({
+  const tabs = await queryTabsInAutomationWindow({
     url: ICLOUD_TAB_URL_PATTERNS,
   });
   const preferredHost = new URL(preferredUrl).host;
@@ -5714,7 +5720,7 @@ async function openIcloudLoginPage(preferredUrl) {
     return existingAnyIcloudTab.id;
   }
 
-  const created = await chrome.tabs.create({ url: preferredUrl, active: true });
+  const created = await createAutomationTab({ url: preferredUrl, active: true });
   return created.id;
 }
 
@@ -5930,7 +5936,7 @@ async function ensureIcloudMailContextTab(tabs = [], targetHost = '', preferredH
           await chrome.tabs.update(mailTabs[0].id, { url: fallbackMailUrl, active: false });
           await waitForIcloudMailTabReady(mailTabs[0].id, 9000);
           try {
-            return await chrome.tabs.query({
+            return await queryTabsInAutomationWindow({
               url: ICLOUD_TAB_URL_PATTERNS,
             });
           } catch {
@@ -5955,13 +5961,13 @@ async function ensureIcloudMailContextTab(tabs = [], targetHost = '', preferredH
       await chrome.tabs.update(anyIcloudTab.id, { url: fallbackMailUrl, active: false });
       await waitForIcloudMailTabReady(anyIcloudTab.id, 9000);
     } else {
-      const created = await chrome.tabs.create({ url: fallbackMailUrl, active: false });
+      const created = await createAutomationTab({ url: fallbackMailUrl, active: false });
       await waitForIcloudMailTabReady(created?.id, 9000);
     }
   } catch {}
 
   try {
-    return await chrome.tabs.query({
+    return await queryTabsInAutomationWindow({
       url: ICLOUD_TAB_URL_PATTERNS,
     });
   } catch {
@@ -6004,7 +6010,7 @@ async function icloudRequestViaPageContext(method, url, options = {}) {
   const targetHost = configuredHost || normalizeIcloudHost(new URL(url).hostname);
   const preferredHost = configuredHost || normalizeIcloudHost(state?.preferredIcloudHost);
 
-  let tabs = await chrome.tabs.query({
+  let tabs = await queryTabsInAutomationWindow({
     url: ICLOUD_TAB_URL_PATTERNS,
   });
   tabs = await ensureIcloudMailContextTab(tabs, targetHost, preferredHost);
@@ -6387,7 +6393,7 @@ async function resolveIcloudPremiumMailServiceViaPageContext(setupUrls, state, o
   const errors = [];
   let tabs = [];
   try {
-    tabs = await chrome.tabs.query({
+    tabs = await queryTabsInAutomationWindow({
       url: ICLOUD_TAB_URL_PATTERNS,
     });
   } catch (err) {
@@ -7107,6 +7113,22 @@ async function isTabAlive(source) {
 
 async function getTabId(source) {
   return tabRuntime.getTabId(source);
+}
+
+async function getAutomationWindowId(options = {}) {
+  return tabRuntime.getAutomationWindowId(options);
+}
+
+async function createAutomationTab(createProperties = {}, options = {}) {
+  return tabRuntime.createAutomationTab(createProperties, options);
+}
+
+async function queryTabsInAutomationWindow(queryInfo = {}, options = {}) {
+  return tabRuntime.queryTabsInAutomationWindow(queryInfo, options);
+}
+
+async function isTabInAutomationWindow(tabOrId, options = {}) {
+  return tabRuntime.isTabInAutomationWindow(tabOrId, options);
 }
 
 function parseUrlSafely(rawUrl) {
@@ -9981,7 +10003,9 @@ const contributionOAuthManager = self.MultiPageBackgroundContributionOAuth?.crea
   broadcastDataUpdate,
   chrome,
   closeLocalhostCallbackTabs,
+  createAutomationTab,
   getState,
+  queryTabsInAutomationWindow,
   setState,
 });
 contributionOAuthManager?.ensureCallbackListeners?.();
@@ -11179,6 +11203,7 @@ const panelBridge = self.MultiPageBackgroundPanelBridge?.createPanelBridge({
   chrome,
   addLog,
   closeConflictingTabsForSource,
+  createAutomationTab,
   ensureContentScriptReadyOnTab,
   getPanelMode,
   normalizeCodex2ApiUrl,
@@ -11465,6 +11490,7 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   addLog,
   chrome,
   completeStepFromBackground,
+  createAutomationTab,
   ensureContentScriptReadyOnTabUntilStopped,
   fetch: typeof fetch === 'function' ? fetch.bind(globalThis) : null,
   markCurrentRegistrationAccountUsed,
@@ -11488,6 +11514,7 @@ const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?
   getTabId,
   isTabAlive,
   markCurrentRegistrationAccountUsed,
+  queryTabsInAutomationWindow,
   sendTabMessageUntilStopped,
   setState,
   sleepWithStop,
@@ -11503,6 +11530,7 @@ const goPayManualConfirmExecutor = self.MultiPageBackgroundGoPayManualConfirm?.c
   getTabId,
   isTabAlive,
   registerTab,
+  createAutomationTab,
   setState,
 });
 const payPalApproveExecutor = self.MultiPageBackgroundPayPalApprove?.createPayPalApproveExecutor({
@@ -11510,6 +11538,7 @@ const payPalApproveExecutor = self.MultiPageBackgroundPayPalApprove?.createPayPa
   chrome,
   completeStepFromBackground,
   ensureContentScriptReadyOnTabUntilStopped,
+  queryTabsInAutomationWindow,
   getTabId,
   isTabAlive,
   sendTabMessageUntilStopped,
@@ -11525,6 +11554,7 @@ const goPayApproveExecutor = self.MultiPageBackgroundGoPayApprove?.createGoPayAp
   ensureContentScriptReadyOnTabUntilStopped,
   getTabId,
   isTabAlive,
+  queryTabsInAutomationWindow,
   registerTab,
   sendTabMessageUntilStopped,
   setState,

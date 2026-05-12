@@ -1151,6 +1151,66 @@ let currentReleaseSnapshot = null;
 let currentContributionContentSnapshot = null;
 let contributionContentSnapshotRequestInFlight = null;
 
+function normalizeAutomationWindowId(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const numeric = Math.floor(Number(value));
+  return Number.isInteger(numeric) && numeric >= 0 ? numeric : null;
+}
+
+async function getCurrentSidepanelWindowId() {
+  if (chrome?.windows?.getCurrent) {
+    try {
+      const currentWindow = await chrome.windows.getCurrent();
+      const windowId = normalizeAutomationWindowId(currentWindow?.id);
+      if (windowId !== null) {
+        return windowId;
+      }
+    } catch (error) {
+      console.warn('Failed to get current sidepanel window:', error?.message || error);
+    }
+  }
+
+  return normalizeAutomationWindowId(latestState?.automationWindowId);
+}
+
+function shouldAttachAutomationWindow(message = {}) {
+  const source = String(message?.source || '').trim();
+  if (source && source !== 'sidepanel') {
+    return false;
+  }
+  return [
+    'EXECUTE_STEP',
+    'AUTO_RUN',
+    'SCHEDULE_AUTO_RUN',
+    'RESUME_AUTO_RUN',
+    'START_SCHEDULED_AUTO_RUN_NOW',
+    'SKIP_AUTO_RUN_COUNTDOWN',
+    'PROBE_IP_PROXY_EXIT',
+  ].includes(String(message?.type || '').trim());
+}
+
+async function sendSidepanelMessage(message = {}) {
+  const payload = {
+    ...(message || {}),
+    source: message?.source || 'sidepanel',
+  };
+  if (shouldAttachAutomationWindow(payload)) {
+    const windowId = await getCurrentSidepanelWindowId();
+    if (windowId !== null) {
+      payload.payload = {
+        ...(payload.payload || {}),
+        automationWindowId: windowId,
+      };
+      syncLatestState({ automationWindowId: windowId });
+    }
+  }
+  return chrome.runtime.sendMessage(payload);
+}
+
+window.sendSidepanelMessage = sendSidepanelMessage;
+
 const DEFAULT_SUB2API_GROUP_OPTIONS = ['codex', 'openai-plus'];
 const editableListPickerModule = window.SidepanelEditableListPicker || {};
 const normalizeEditableListValues = editableListPickerModule.normalizeEditableListValues
@@ -11186,12 +11246,12 @@ stepsList?.addEventListener('click', async (event) => {
         syncLatestState({ customPassword: inputPassword.value });
       }
       if (shouldExecuteStep3WithSignupPhoneIdentity(latestState)) {
-        const response = await chrome.runtime.sendMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step } });
+        const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step } });
         if (response?.error) {
           throw new Error(response.error);
         }
       } else if (selectMailProvider.value === 'hotmail-api' || isLuckmailProvider()) {
-        const response = await chrome.runtime.sendMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step } });
+        const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step } });
         if (response?.error) {
           throw new Error(response.error);
         }
@@ -11201,7 +11261,7 @@ stepsList?.addEventListener('click', async (event) => {
           showToast(selectMailProvider.value === GMAIL_PROVIDER ? '请先填写 Gmail 原邮箱。' : '请先填写 2925 邮箱前缀。', 'warn');
           return;
         }
-        const response = await chrome.runtime.sendMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step, emailPrefix } });
+        const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step, emailPrefix } });
         if (response?.error) {
           throw new Error(response.error);
         }
@@ -11222,13 +11282,13 @@ stepsList?.addEventListener('click', async (event) => {
         if (!validateCurrentRegistrationEmail(email, { showToastOnFailure: true })) {
           return;
         }
-        const response = await chrome.runtime.sendMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step, email } });
+        const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step, email } });
         if (response?.error) {
           throw new Error(response.error);
         }
       }
     } else {
-      const response = await chrome.runtime.sendMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step } });
+      const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step } });
       if (response?.error) {
         throw new Error(response.error);
       }
@@ -11490,7 +11550,7 @@ async function startAutoRunFromCurrentSettings() {
   btnAutoRun.innerHTML = delayEnabled
     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> 计划中...'
     : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> 运行中...';
-  const response = await chrome.runtime.sendMessage({
+  const response = await sendSidepanelMessage({
     type: delayEnabled ? 'SCHEDULE_AUTO_RUN' : 'AUTO_RUN',
     source: 'sidepanel',
     payload: {
@@ -11532,14 +11592,14 @@ btnAutoContinue.addEventListener('click', async () => {
     return;
   }
   autoContinueBar.style.display = 'none';
-  await chrome.runtime.sendMessage({ type: 'RESUME_AUTO_RUN', source: 'sidepanel', payload: { email } });
+  await sendSidepanelMessage({ type: 'RESUME_AUTO_RUN', source: 'sidepanel', payload: { email } });
 });
 
 btnAutoRunNow?.addEventListener('click', async () => {
   try {
     btnAutoRunNow.disabled = true;
     const waitingInterval = currentAutoRun.phase === 'waiting_interval';
-    await chrome.runtime.sendMessage({
+    await sendSidepanelMessage({
       type: waitingInterval ? 'SKIP_AUTO_RUN_COUNTDOWN' : 'START_SCHEDULED_AUTO_RUN_NOW',
       source: 'sidepanel',
       payload: {},

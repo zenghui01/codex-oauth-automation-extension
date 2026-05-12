@@ -210,6 +210,34 @@
         : '';
     }
 
+    function normalizeAutomationWindowId(value) {
+      if (value === null || value === undefined || value === '') {
+        return null;
+      }
+      const numeric = Math.floor(Number(value));
+      return Number.isInteger(numeric) && numeric >= 0 ? numeric : null;
+    }
+
+    function resolveAutomationWindowIdFromMessage(message = {}, sender = {}) {
+      return normalizeAutomationWindowId(
+        message?.payload?.automationWindowId
+        ?? message?.payload?.windowId
+        ?? message?.automationWindowId
+        ?? message?.windowId
+        ?? sender?.tab?.windowId
+        ?? null
+      );
+    }
+
+    async function lockAutomationWindowFromMessage(message = {}, sender = {}) {
+      const windowId = resolveAutomationWindowIdFromMessage(message, sender);
+      if (windowId === null) {
+        return null;
+      }
+      await setState({ automationWindowId: windowId });
+      return windowId;
+    }
+
     async function syncStepAccountIdentityFromPayload(payload = {}) {
       const identifierType = String(payload?.accountIdentifierType || '').trim().toLowerCase();
       const signupPhoneNumber = resolveSignupPhonePayload(payload);
@@ -821,6 +849,7 @@
         case 'EXECUTE_STEP': {
           clearStopRequest();
           if (message.source === 'sidepanel') {
+            await lockAutomationWindowFromMessage(message, sender);
             await ensureManualInteractionAllowed('手动执行步骤');
           }
           const step = message.payload.step;
@@ -848,6 +877,9 @@
 
         case 'AUTO_RUN': {
           clearStopRequest();
+          if (message.source === 'sidepanel') {
+            await lockAutomationWindowFromMessage(message, sender);
+          }
           if (Boolean(message.payload?.contributionMode) && typeof setContributionMode === 'function') {
             await setContributionMode(true);
             if (typeof setState === 'function') {
@@ -873,6 +905,9 @@
 
         case 'SCHEDULE_AUTO_RUN': {
           clearStopRequest();
+          if (message.source === 'sidepanel') {
+            await lockAutomationWindowFromMessage(message, sender);
+          }
           if (Boolean(message.payload?.contributionMode) && typeof setContributionMode === 'function') {
             await setContributionMode(true);
             if (typeof setState === 'function') {
@@ -894,6 +929,9 @@
 
         case 'START_SCHEDULED_AUTO_RUN_NOW': {
           clearStopRequest();
+          if (message.source === 'sidepanel') {
+            await lockAutomationWindowFromMessage(message, sender);
+          }
           const started = await launchAutoRunTimerPlan('manual', {
             expectedKinds: [AUTO_RUN_TIMER_KIND_SCHEDULED_START],
           });
@@ -913,6 +951,9 @@
 
         case 'SKIP_AUTO_RUN_COUNTDOWN': {
           clearStopRequest();
+          if (message.source === 'sidepanel') {
+            await lockAutomationWindowFromMessage(message, sender);
+          }
           const skipped = await skipAutoRunCountdown();
           if (!skipped) {
             throw new Error('当前没有可立即开始的倒计时。');
@@ -922,6 +963,9 @@
 
         case 'RESUME_AUTO_RUN': {
           clearStopRequest();
+          if (message.source === 'sidepanel') {
+            await lockAutomationWindowFromMessage(message, sender);
+          }
           if (message.payload.email) {
             await setEmailState(message.payload.email);
           }
@@ -1117,6 +1161,9 @@
         }
 
         case 'PROBE_IP_PROXY_EXIT': {
+          if (message.source === 'sidepanel') {
+            await lockAutomationWindowFromMessage(message, sender);
+          }
           if (typeof probeIpProxyExit !== 'function') {
             throw new Error('IP 代理出口检测能力尚未接入。');
           }

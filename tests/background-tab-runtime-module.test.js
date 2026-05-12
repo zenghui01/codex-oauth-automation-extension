@@ -188,3 +188,75 @@ test('tab runtime waitForTabStableComplete waits through a late navigation after
   assert.equal(result?.status, 'complete');
   assert.ok(getCalls >= 4);
 });
+
+test('tab runtime opens new automation tabs in the locked window', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  const created = [];
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        create: async (payload) => {
+          created.push(payload);
+          return { id: 17, windowId: payload.windowId, url: payload.url };
+        },
+        get: async () => ({ id: 17, windowId: 100, url: 'https://example.com' }),
+        query: async () => [],
+        onUpdated: {
+          addListener: () => {},
+          removeListener: () => {},
+        },
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => ({
+      automationWindowId: 100,
+      tabRegistry: {},
+      sourceLastUrls: {},
+    }),
+    matchesSourceUrlFamily: () => false,
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await runtime.reuseOrCreateTab('signup-page', 'https://example.com');
+
+  assert.equal(created.length, 1);
+  assert.equal(created[0].windowId, 100);
+});
+
+test('tab runtime scopes tab queries to the locked automation window', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  const queries = [];
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        get: async () => ({ id: 1, windowId: 22, url: 'https://example.com' }),
+        query: async (queryInfo) => {
+          queries.push(queryInfo);
+          return [];
+        },
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => ({
+      automationWindowId: 22,
+      tabRegistry: {},
+      sourceLastUrls: {},
+    }),
+    matchesSourceUrlFamily: () => false,
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await runtime.queryTabsInAutomationWindow({ active: true, currentWindow: true });
+
+  assert.deepEqual(queries[0], { active: true, windowId: 22 });
+});
