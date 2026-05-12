@@ -51,11 +51,27 @@
       getStepIdsForState,
       getLastStepIdForState,
       normalizeSignupMethod = (value = '') => String(value || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email',
-      canUsePhoneSignup = (state = {}) => Boolean(state?.phoneVerificationEnabled)
-        && !Boolean(state?.plusModeEnabled)
-        && !Boolean(state?.contributionMode),
+      canUsePhoneSignup = (state = {}) => {
+        const rootScope = typeof self !== 'undefined' ? self : globalThis;
+        const capabilityRegistry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+          defaultFlowId: 'openai',
+        }) || null;
+        if (capabilityRegistry?.canUsePhoneSignup) {
+          return capabilityRegistry.canUsePhoneSignup(state);
+        }
+        return Boolean(state?.phoneVerificationEnabled)
+          && !Boolean(state?.plusModeEnabled)
+          && !Boolean(state?.contributionMode);
+      },
       resolveSignupMethod = (state = {}) => {
         const method = normalizeSignupMethod(state?.signupMethod);
+        const rootScope = typeof self !== 'undefined' ? self : globalThis;
+        const capabilityRegistry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+          defaultFlowId: 'openai',
+        }) || null;
+        if (capabilityRegistry?.resolveSignupMethod) {
+          return capabilityRegistry.resolveSignupMethod(state, method);
+        }
         return method === 'phone' && canUsePhoneSignup(state) ? 'phone' : 'email';
       },
       getTabId,
@@ -999,6 +1015,8 @@
             Object.prototype.hasOwnProperty.call(updates, 'phoneVerificationEnabled')
             || Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
             || Object.prototype.hasOwnProperty.call(updates, 'signupMethod')
+            || Object.prototype.hasOwnProperty.call(updates, 'panelMode')
+            || Object.prototype.hasOwnProperty.call(updates, 'activeFlowId')
           ) {
             updates.signupMethod = resolveSignupMethod(nextSignupState);
           }

@@ -1,6 +1,8 @@
 // background.js — Service Worker: orchestration, state, tab management, message routing
 
 importScripts(
+  'shared/source-registry.js',
+  'shared/flow-capabilities.js',
   'managed-alias-utils.js',
   'mail2925-utils.js',
   'paypal-utils.js',
@@ -17,8 +19,11 @@ importScripts(
   'background/ip-proxy-core.js',
   'background/panel-bridge.js',
   'background/registration-email-state.js',
+  'background/runtime-state.js',
   'background/generated-email-helpers.js',
   'background/signup-flow-helpers.js',
+  'background/mail-rule-registry.js',
+  'flows/openai/mail-rules.js',
   'background/message-router.js',
   'background/verification-flow.js',
   'background/auto-run-controller.js',
@@ -80,6 +85,8 @@ const STEP_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)))
   .sort((left, right) => left - right);
+const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const DEFAULT_STEP_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
 const NORMAL_STEP_IDS = NORMAL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
@@ -205,6 +212,11 @@ const {
   isRecoverableStep9AuthFailure,
 } = self.MultiPageActivationUtils;
 const registrationEmailStateHelpers = self.MultiPageRegistrationEmailState?.createRegistrationEmailStateHelpers?.() || null;
+const runtimeStateHelpers = self.MultiPageBackgroundRuntimeState?.createRuntimeStateHelpers?.({
+  DEFAULT_ACTIVE_FLOW_ID,
+  defaultStepStatuses: DEFAULT_STEP_STATUSES,
+  getStepDefinitionForState: (step, state) => getStepDefinitionForState(step, state),
+}) || null;
 const DEFAULT_REGISTRATION_EMAIL_STATE = registrationEmailStateHelpers?.DEFAULT_REGISTRATION_EMAIL_STATE || {
   current: '',
   previous: '',
@@ -267,6 +279,20 @@ function getPreservedPhoneIdentity(state = {}) {
     return registrationEmailStateHelpers.getPreservedPhoneIdentity(state);
   }
   return null;
+}
+
+function buildStateViewWithRuntimeState(state = {}) {
+  if (runtimeStateHelpers?.buildStateView) {
+    return runtimeStateHelpers.buildStateView(state);
+  }
+  return state;
+}
+
+function buildStatePatchWithRuntimeState(currentState = {}, updates = {}) {
+  if (runtimeStateHelpers?.buildSessionStatePatch) {
+    return runtimeStateHelpers.buildSessionStatePatch(currentState, updates);
+  }
+  return updates;
 }
 
 function statePatchHasChanges(state = {}, patch = {}) {
@@ -844,8 +870,13 @@ const SETTINGS_EXPORT_FILENAME_PREFIX = 'multipage-settings';
 const STEP6_REGISTRATION_SUCCESS_WAIT_MS = 20000;
 
 const DEFAULT_STATE = {
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  activeRunId: '',
+  currentNodeId: '',
+  nodeStatuses: {},
   currentStep: 0, // 当前流程执行到的步骤编号。
-  stepStatuses: Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending'])),
+  stepStatuses: { ...DEFAULT_STEP_STATUSES },
+  runtimeState: runtimeStateHelpers?.buildDefaultRuntimeState?.() || null,
   ...CONTRIBUTION_RUNTIME_DEFAULTS,
   oauthUrl: null, // 运行时抓取到的 OAuth 地址，不要手动预填。
   resolvedSignupMethod: null, // 当前自动轮次冻结后的实际注册方式。
@@ -1320,7 +1351,49 @@ function normalizeSignupMethod(value = '') {
     : 'email';
 }
 
+function getFlowCapabilityRegistry() {
+  const rootScope = typeof self !== 'undefined' ? self : globalThis;
+  if (typeof flowCapabilityRegistry !== 'undefined' && flowCapabilityRegistry) {
+    return flowCapabilityRegistry;
+  }
+  return rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+    defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+  }) || null;
+}
+
+function resolveCurrentFlowCapabilities(state = {}, options = {}) {
+  const registry = getFlowCapabilityRegistry();
+  if (!registry?.resolveSidepanelCapabilities) {
+    return null;
+  }
+  return registry.resolveSidepanelCapabilities({
+    activeFlowId: options?.activeFlowId ?? state?.activeFlowId,
+    panelMode: options?.panelMode ?? state?.panelMode,
+    signupMethod: options?.signupMethod ?? state?.signupMethod,
+    state,
+  });
+}
+
 function canUsePhoneSignup(state = {}) {
+  const capabilityState = typeof resolveCurrentFlowCapabilities === 'function'
+    ? resolveCurrentFlowCapabilities(state)
+    : (() => {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      const registry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+        defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+      }) || null;
+      return registry?.resolveSidepanelCapabilities
+        ? registry.resolveSidepanelCapabilities({
+          activeFlowId: state?.activeFlowId,
+          panelMode: state?.panelMode,
+          signupMethod: state?.signupMethod,
+          state,
+        })
+        : null;
+    })();
+  if (capabilityState && typeof capabilityState.canUsePhoneSignup === 'boolean') {
+    return capabilityState.canUsePhoneSignup;
+  }
   return Boolean(state?.phoneVerificationEnabled)
     && !Boolean(state?.plusModeEnabled)
     && !Boolean(state?.contributionMode);
@@ -1332,9 +1405,26 @@ function resolveSignupMethod(state = {}) {
     return normalizeSignupMethod(frozenMethod);
   }
   const method = normalizeSignupMethod(state?.signupMethod);
-  return method === SIGNUP_METHOD_PHONE && canUsePhoneSignup(state)
-    ? SIGNUP_METHOD_PHONE
-    : SIGNUP_METHOD_EMAIL;
+  const capabilityState = typeof resolveCurrentFlowCapabilities === 'function'
+    ? resolveCurrentFlowCapabilities(state, { signupMethod: method })
+    : (() => {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      const registry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+        defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+      }) || null;
+      return registry?.resolveSidepanelCapabilities
+        ? registry.resolveSidepanelCapabilities({
+          activeFlowId: state?.activeFlowId,
+          panelMode: state?.panelMode,
+          signupMethod: method,
+          state,
+        })
+        : null;
+    })();
+  if (capabilityState?.effectiveSignupMethod) {
+    return normalizeSignupMethod(capabilityState.effectiveSignupMethod);
+  }
+  return method === SIGNUP_METHOD_PHONE && canUsePhoneSignup(state) ? SIGNUP_METHOD_PHONE : SIGNUP_METHOD_EMAIL;
 }
 
 async function ensureResolvedSignupMethodForRun(options = {}) {
@@ -2762,7 +2852,9 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
   };
   if (Object.prototype.hasOwnProperty.call(payload, 'phoneVerificationEnabled')
     || Object.prototype.hasOwnProperty.call(payload, 'plusModeEnabled')
-    || Object.prototype.hasOwnProperty.call(payload, 'signupMethod')) {
+    || Object.prototype.hasOwnProperty.call(payload, 'signupMethod')
+    || Object.prototype.hasOwnProperty.call(payload, 'panelMode')
+    || Object.prototype.hasOwnProperty.call(payload, 'activeFlowId')) {
     payload.signupMethod = resolveSignupMethod(nextSignupConstraintState);
   }
   if (payload.ipProxyServiceProfiles) {
@@ -2838,7 +2930,13 @@ async function getState() {
     getPersistedAliasState(),
     accountRunHistoryHelpers?.getPersistedAccountRunHistory?.() || [],
   ]);
-  return { ...DEFAULT_STATE, ...persistedSettings, ...persistedAliasState, ...state, accountRunHistory };
+  return buildStateViewWithRuntimeState({
+    ...DEFAULT_STATE,
+    ...persistedSettings,
+    ...persistedAliasState,
+    ...state,
+    accountRunHistory,
+  });
 }
 
 async function initializeSessionStorageAccess() {
@@ -2857,19 +2955,24 @@ async function initializeSessionStorageAccess() {
 async function setState(updates) {
   console.log(LOG_PREFIX, 'storage.set:', JSON.stringify(updates).slice(0, 200));
   if (Object.keys(updates || {}).length > 0) {
-    await chrome.storage.session.set(updates);
+    const currentSessionState = await chrome.storage.session.get(null);
+    const sessionUpdates = buildStatePatchWithRuntimeState({
+      ...DEFAULT_STATE,
+      ...currentSessionState,
+    }, updates);
+    await chrome.storage.session.set(sessionUpdates);
     const persistentAliasUpdates = {};
-    if (Object.prototype.hasOwnProperty.call(updates, 'manualAliasUsage')) {
-      persistentAliasUpdates.manualAliasUsage = normalizeBooleanMap(updates.manualAliasUsage);
+    if (Object.prototype.hasOwnProperty.call(sessionUpdates, 'manualAliasUsage')) {
+      persistentAliasUpdates.manualAliasUsage = normalizeBooleanMap(sessionUpdates.manualAliasUsage);
     }
-    if (Object.prototype.hasOwnProperty.call(updates, 'preservedAliases')) {
-      persistentAliasUpdates.preservedAliases = normalizeBooleanMap(updates.preservedAliases);
+    if (Object.prototype.hasOwnProperty.call(sessionUpdates, 'preservedAliases')) {
+      persistentAliasUpdates.preservedAliases = normalizeBooleanMap(sessionUpdates.preservedAliases);
     }
-    if (Object.prototype.hasOwnProperty.call(updates, 'icloudAliasCache')) {
-      persistentAliasUpdates.icloudAliasCache = normalizeIcloudAliasCacheList(updates.icloudAliasCache);
+    if (Object.prototype.hasOwnProperty.call(sessionUpdates, 'icloudAliasCache')) {
+      persistentAliasUpdates.icloudAliasCache = normalizeIcloudAliasCacheList(sessionUpdates.icloudAliasCache);
     }
-    if (Object.prototype.hasOwnProperty.call(updates, 'icloudAliasCacheAt')) {
-      persistentAliasUpdates.icloudAliasCacheAt = Math.max(0, Number(updates.icloudAliasCacheAt) || 0);
+    if (Object.prototype.hasOwnProperty.call(sessionUpdates, 'icloudAliasCacheAt')) {
+      persistentAliasUpdates.icloudAliasCacheAt = Math.max(0, Number(sessionUpdates.icloudAliasCacheAt) || 0);
     }
     if (Object.keys(persistentAliasUpdates).length > 0) {
       await chrome.storage.local.set(persistentAliasUpdates);
@@ -3455,7 +3558,7 @@ async function resetState() {
     ? prev.freeReusablePhoneActivation
     : null;
   await chrome.storage.session.clear();
-  await chrome.storage.session.set({
+  const resetPayload = buildStatePatchWithRuntimeState({}, {
     ...DEFAULT_STATE,
     ...persistedSettings,
     ...persistedAliasState,
@@ -3485,6 +3588,7 @@ async function resetState() {
       ? Number(prev.automationWindowId)
       : null,
   });
+  await chrome.storage.session.set(resetPayload);
 }
 
 /**
@@ -7210,7 +7314,7 @@ function isSignupEntryHost(hostname = '') {
   if (typeof navigationUtils !== 'undefined' && navigationUtils?.isSignupEntryHost) {
     return navigationUtils.isSignupEntryHost(hostname);
   }
-  return ['chatgpt.com', 'chat.openai.com'].includes(hostname);
+  return ['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com'].includes(hostname);
 }
 
 function isLikelyLoggedInChatgptHomeUrl(rawUrl) {
@@ -7294,6 +7398,7 @@ function matchesSourceUrlFamily(source, candidateUrl, referenceUrl) {
   if (!candidate) return false;
   const reference = parseUrlSafely(referenceUrl);
   switch (source) {
+    case 'openai-auth':
     case 'signup-page':
       return isSignupPageHost(candidate.hostname) || isSignupEntryHost(candidate.hostname);
     case 'duck-mail':
@@ -7304,6 +7409,8 @@ function matchesSourceUrlFamily(source, candidateUrl, referenceUrl) {
       return is163MailHost(candidate.hostname);
     case 'gmail-mail':
       return candidate.hostname === 'mail.google.com';
+    case 'icloud-mail':
+      return candidate.hostname === 'www.icloud.com' || candidate.hostname === 'www.icloud.com.cn';
     case 'inbucket-mail':
       return Boolean(reference) && candidate.origin === reference.origin && candidate.pathname.startsWith('/m/');
     case 'mail-2925':
@@ -7314,9 +7421,22 @@ function matchesSourceUrlFamily(source, candidateUrl, referenceUrl) {
       return Boolean(reference)
         && candidate.origin === reference.origin
         && (candidate.pathname.startsWith('/admin/accounts') || candidate.pathname.startsWith('/login') || candidate.pathname === '/');
+    case 'codex2api-panel':
+      return Boolean(reference)
+        && candidate.origin === reference.origin
+        && (candidate.pathname.startsWith('/admin/accounts') || candidate.pathname === '/admin' || candidate.pathname === '/');
     default:
       return false;
   }
+}
+
+function sourcesMatch(leftSource, rightSource) {
+  if (sourceRegistry?.resolveCanonicalSource) {
+    const left = sourceRegistry.resolveCanonicalSource(leftSource);
+    const right = sourceRegistry.resolveCanonicalSource(rightSource);
+    return Boolean(left && right && left === right);
+  }
+  return String(leftSource || '').trim() === String(rightSource || '').trim();
 }
 
 async function rememberSourceLastUrl(source, url) {
@@ -7399,7 +7519,7 @@ async function ensureContentScriptReadyOnTab(source, tabId, options = {}) {
 
 function isContentScriptReadyPong(source, pong) {
   if (!pong?.ok) return false;
-  if (pong.source && pong.source !== source) return false;
+  if (pong.source && !sourcesMatch(pong.source, source)) return false;
   if (source === 'plus-checkout') {
     return Boolean(pong.plusCheckoutReady);
   }
@@ -7590,11 +7710,13 @@ function getSourceLabel(source) {
     return loggingStatus.getSourceLabel(source);
   }
   const labels = {
+    'openai-auth': '认证页',
     'gmail-mail': 'Gmail 邮箱',
     'sidepanel': '侧边栏',
     'signup-page': '认证页',
     'vps-panel': 'CPA 面板',
     'sub2api-panel': 'SUB2API 后台',
+    'codex2api-panel': 'Codex2API 后台',
     'qq-mail': 'QQ 邮箱',
     'mail-163': '163 邮箱',
     'mail-2925': '2925 邮箱',
@@ -7606,6 +7728,8 @@ function getSourceLabel(source) {
     'cloudmail': 'Cloud Mail',
     'plus-checkout': 'Plus Checkout',
     'paypal-flow': 'PayPal 授权页',
+    'gopay-flow': 'GoPay 授权页',
+    'unknown-source': '未知来源',
   };
   return labels[source] || source || '未知来源';
 }
@@ -7659,10 +7783,16 @@ function getStepFetchNetworkRetryPolicy(step) {
   };
 }
 
+const sourceRegistry = self.MultiPageSourceRegistry?.createSourceRegistry?.() || null;
+const flowCapabilityRegistry = self.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+  defaultFlowId: DEFAULT_ACTIVE_FLOW_ID,
+}) || null;
+
 const navigationUtils = self.MultiPageBackgroundNavigationUtils?.createNavigationUtils({
   DEFAULT_CODEX2API_URL,
   DEFAULT_SUB2API_URL,
   normalizeLocalCpaStep9Mode,
+  sourceRegistry,
 });
 
 const loggingStatus = self.MultiPageBackgroundLoggingStatus?.createLoggingStatus({
@@ -7672,6 +7802,7 @@ const loggingStatus = self.MultiPageBackgroundLoggingStatus?.createLoggingStatus
   isRecoverableStep9AuthFailure,
   LOG_PREFIX,
   setState,
+  sourceRegistry,
   STOP_ERROR_MESSAGE,
 });
 
@@ -7684,6 +7815,7 @@ const tabRuntime = self.MultiPageBackgroundTabRuntime?.createTabRuntime({
   isRetryableContentScriptTransportError,
   LOG_PREFIX,
   matchesSourceUrlFamily,
+  sourceRegistry,
   setState,
   sleepWithStop,
   STOP_ERROR_MESSAGE,
@@ -11251,8 +11383,20 @@ const signupFlowHelpers = self.MultiPageSignupFlowHelpers?.createSignupFlowHelpe
   waitForTabStableComplete,
   waitForTabUrlMatch,
 });
+const openAiMailRules = self.MultiPageOpenAiMailRules?.createOpenAiMailRules({
+  getHotmailVerificationRequestTimestamp,
+  MAIL_2925_VERIFICATION_INTERVAL_MS,
+  MAIL_2925_VERIFICATION_MAX_ATTEMPTS,
+});
+const mailRuleRegistry = self.MultiPageBackgroundMailRuleRegistry?.createMailRuleRegistry({
+  defaultFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  flowBuilders: {
+    openai: openAiMailRules,
+  },
+});
 const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.createVerificationFlowHelpers({
   addLog,
+  buildVerificationPollPayload: mailRuleRegistry?.buildVerificationPollPayload,
   chrome,
   closeConflictingTabsForSource,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,

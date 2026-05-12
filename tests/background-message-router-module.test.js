@@ -162,3 +162,39 @@ test('SAVE_SETTING broadcasts operation delay setting without background success
   assert.deepStrictEqual(broadcasts.at(-1), { operationDelayEnabled: false });
   assert.equal(logs.length, 0);
 });
+
+test('SAVE_SETTING re-resolves signup method when panel mode changes', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  let state = {
+    signupMethod: 'phone',
+    phoneVerificationEnabled: true,
+    plusModeEnabled: false,
+    panelMode: 'sub2api',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => Object.prototype.hasOwnProperty.call(input, 'panelMode')
+      ? { panelMode: input.panelMode }
+      : {},
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    resolveSignupMethod: (nextState = {}) => nextState.panelMode === 'cpa' ? 'email' : 'phone',
+    setPersistentSettings: async () => {},
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: { panelMode: 'cpa' },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.panelMode, 'cpa');
+  assert.equal(state.signupMethod, 'email');
+});

@@ -124,8 +124,8 @@ test('sidepanel signup method UI syncs shared step definitions with the selected
 
 test('sidepanel applies restored signup method when rebuilding shared step definitions on load', () => {
   const source = extractFunction('applySettingsState');
-  assert.match(source, /syncStepDefinitionsForMode\(Boolean\(state\?\.plusModeEnabled\),\s*\{/);
-  assert.match(source, /signupMethod:\s*state\?\.signupMethod/);
+  assert.match(source, /resolveStepDefinitionCapabilityState\(state/);
+  assert.match(source, /signupMethod:\s*stepDefinitionState\.signupMethod/);
 });
 
 test('sidepanel Plus UI hides PayPal account selector while GoPay is selected', () => {
@@ -163,6 +163,62 @@ return { updatePlusModeUI, selectPlusPaymentMethod, rowPayPalAccount };
   api.selectPlusPaymentMethod.value = 'paypal';
   api.updatePlusModeUI();
   assert.equal(api.rowPayPalAccount.style.display, '');
+});
+
+test('sidepanel Plus UI can hide Plus controls when the shared flow capability registry disables them', () => {
+  const bundle = [
+    extractFunction('normalizePlusPaymentMethod'),
+    extractFunction('getSelectedPlusPaymentMethod'),
+    extractFunction('normalizeGpcHelperPhoneModeValue'),
+    extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
+    extractFunction('hasGpcAutoModePermissionField'),
+    extractFunction('isGpcAutoModePermissionDenied'),
+    extractFunction('normalizeGpcOtpChannelValue'),
+    extractFunction('updatePlusModeUI'),
+  ].join('\n');
+
+  const api = new Function(`
+const window = {
+  MultiPageFlowCapabilities: {
+    createFlowCapabilityRegistry() {
+      return {
+        resolveSidepanelCapabilities() {
+          return {
+            canShowPlusSettings: false,
+            runtimeLocks: { plusModeEnabled: false },
+          };
+        },
+      };
+    },
+  },
+};
+let latestState = { plusPaymentMethod: 'paypal' };
+const inputPlusModeEnabled = { checked: true };
+const rowPlusMode = { style: { display: '' } };
+const selectPlusPaymentMethod = { value: 'paypal', style: { display: '' } };
+const rowPlusPaymentMethod = { style: { display: '' } };
+const rowPayPalAccount = { style: { display: '' } };
+const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
+const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
+${bundle}
+return {
+  rowPlusMode,
+  rowPlusPaymentMethod,
+  rowPayPalAccount,
+  selectPlusPaymentMethod,
+  updatePlusModeUI,
+};
+`)();
+
+  api.updatePlusModeUI();
+
+  assert.equal(api.rowPlusMode.style.display, 'none');
+  assert.equal(api.rowPlusPaymentMethod.style.display, 'none');
+  assert.equal(api.rowPayPalAccount.style.display, 'none');
+  assert.equal(api.selectPlusPaymentMethod.style.display, 'none');
 });
 
 test('sidepanel step definitions keep GPC helper mode distinct', () => {

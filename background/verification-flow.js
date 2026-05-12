@@ -7,6 +7,7 @@
   function createVerificationFlowHelpers(deps = {}) {
     const {
       addLog: rawAddLog = async () => {},
+      buildVerificationPollPayload: externalBuildVerificationPollPayload = null,
       chrome,
       closeConflictingTabsForSource,
       CLOUDFLARE_TEMP_EMAIL_PROVIDER,
@@ -408,6 +409,9 @@
     }
 
     function getVerificationPollPayload(step, state, overrides = {}) {
+      if (typeof externalBuildVerificationPollPayload === 'function') {
+        return externalBuildVerificationPollPayload(step, state, overrides);
+      }
       const is2925Provider = state?.mailProvider === '2925';
       const mail2925MatchTargetEmail = is2925Provider
         && String(state?.mail2925Mode || '').trim().toLowerCase() === 'receive';
