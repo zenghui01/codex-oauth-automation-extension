@@ -551,7 +551,7 @@
         },
         targetEmail: fixedTargetEmail,
         maxResendRequests: mail.provider === '2925' ? 1 : undefined,
-        initialPollMaxAttempts: mail.provider === '2925' ? 5 : undefined,
+        initialPollMaxAttempts: mail.provider === '2925' ? 2 : undefined,
         resendIntervalMs: mail.provider === LUCKMAIL_PROVIDER
           ? 15000
           : ((mail.provider === HOTMAIL_PROVIDER || mail.provider === '2925')

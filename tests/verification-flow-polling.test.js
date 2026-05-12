@@ -835,7 +835,7 @@ test('verification flow keeps 2925 mailbox polling at 15 refresh attempts even w
   assert.ok(pollCall.options.timeoutMs >= 250000);
 });
 
-test('verification flow delays 2925 login resend until after the first full mailbox poll fails', async () => {
+test('verification flow delays 2925 login resend until after the first quick mailbox poll fails', async () => {
   const events = [];
   const pollMaxAttempts = [];
   let pollCalls = 0;
@@ -894,7 +894,7 @@ test('verification flow delays 2925 login resend until after the first full mail
     { provider: '2925', label: '2925 邮箱' },
     {
       maxResendRequests: 1,
-      initialPollMaxAttempts: 5,
+      initialPollMaxAttempts: 2,
       requestFreshCodeFirst: false,
       filterAfterTimestamp: 123,
       resendIntervalMs: 0,
@@ -902,7 +902,7 @@ test('verification flow delays 2925 login resend until after the first full mail
   );
 
   assert.deepStrictEqual(events.slice(0, 3), ['poll', 'resend', 'poll']);
-  assert.deepStrictEqual(pollMaxAttempts.slice(0, 2), [5, 15]);
+  assert.deepStrictEqual(pollMaxAttempts.slice(0, 2), [2, 15]);
   assert.equal(events.filter((event) => event === 'resend').length, 1);
 });
 
@@ -969,14 +969,14 @@ test('verification flow uses full 2925 polling window after a rejected login cod
     { provider: '2925', label: '2925 邮箱' },
     {
       maxResendRequests: 0,
-      initialPollMaxAttempts: 5,
+      initialPollMaxAttempts: 2,
       requestFreshCodeFirst: false,
       filterAfterTimestamp: 123,
       resendIntervalMs: 0,
     }
   );
 
-  assert.deepStrictEqual(pollMaxAttempts, [5, 15]);
+  assert.deepStrictEqual(pollMaxAttempts, [2, 15]);
   assert.deepStrictEqual(submittedCodes, ['111111', '222222']);
 });
 
