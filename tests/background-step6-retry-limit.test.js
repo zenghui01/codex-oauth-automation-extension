@@ -592,7 +592,7 @@ test('step 7 keeps phone login after step 8 stores an unbound email for phone si
   const phoneSignupState = {
     phoneVerificationEnabled: true,
     signupMethod: 'phone',
-    resolvedSignupMethod: 'phone',
+    resolvedSignupMethod: 'email',
     email: 'bound.step8@example.com',
     accountIdentifierType: 'email',
     accountIdentifier: 'bound.step8@example.com',

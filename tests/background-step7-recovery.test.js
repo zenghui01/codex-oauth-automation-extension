@@ -266,6 +266,7 @@ test('step 8 submits add-email before polling the email verification code', asyn
     resolvedStates: [],
     setStates: [],
     mailStates: [],
+    persistCalls: [],
   };
 
   const executor = api.createStep8Executor({
@@ -300,6 +301,9 @@ test('step 8 submits add-email before polling the email verification code', asyn
     isTabAlive: async () => true,
     isVerificationMailPollingError: () => false,
     LUCKMAIL_PROVIDER: 'luckmail-api',
+    persistRegistrationEmailState: async (state, email, options) => {
+      calls.persistCalls.push({ state, email, options });
+    },
     resolveSignupEmailForFlow: async (state, options = {}) => {
       calls.resolvedStates.push(state);
       calls.resolveOptions = options;
@@ -338,14 +342,14 @@ test('step 8 submits add-email before polling the email verification code', asyn
   assert.equal(calls.contentMessages.length, 1);
   assert.equal(calls.resolvedStates.length, 1);
   assert.equal(calls.resolveOptions.preserveAccountIdentity, true);
+  assert.equal(calls.persistCalls.length, 1);
+  assert.equal(calls.persistCalls[0].email, 'new.user@example.com');
+  assert.equal(calls.persistCalls[0].options.preserveAccountIdentity, true);
+  assert.equal(calls.persistCalls[0].options.source, 'step8_add_email');
   assert.equal(calls.mailStates[0].email, 'new.user@example.com');
   assert.equal(calls.resolvedVerification.state.email, 'new.user@example.com');
   assert.equal(calls.resolvedVerification.options.targetEmail, 'new.user@example.com');
   assert.deepStrictEqual(calls.setStates, [
-    {
-      email: 'new.user@example.com',
-      step8VerificationTargetEmail: 'new.user@example.com',
-    },
     {
       step8VerificationTargetEmail: 'new.user@example.com',
     },
@@ -407,6 +411,14 @@ test('step 8 reruns step 7 with preserved phone login identity after add-email v
     isTabAlive: async () => true,
     isVerificationMailPollingError: () => false,
     LUCKMAIL_PROVIDER: 'luckmail-api',
+    persistRegistrationEmailState: async (_state, email, options) => {
+      assert.equal(email, 'new.user@example.com');
+      assert.equal(options.preserveAccountIdentity, true);
+      runtimeState = {
+        ...runtimeState,
+        email,
+      };
+    },
     resolveSignupEmailForFlow: async (_state, options = {}) => {
       assert.equal(options.preserveAccountIdentity, true);
       runtimeState = {
@@ -944,7 +956,7 @@ test('step 8 completes when polling fails but recovery probe shows oauth consent
   ]);
 });
 
-test('step 8 uses a fixed 10-minute lookback window and disables resend interval for 2925 mailbox polling', async () => {
+test('step 8 uses a fixed 10-minute lookback window and delays 2925 resend until after one full poll', async () => {
   let capturedOptions = null;
   let ensureCalls = 0;
   let ensureOptions = null;
@@ -1036,6 +1048,8 @@ test('step 8 uses a fixed 10-minute lookback window and disables resend interval
   ]);
   assert.equal(capturedOptions.filterAfterTimestamp, 300000);
   assert.equal(capturedOptions.resendIntervalMs, 0);
+  assert.equal(capturedOptions.maxResendRequests, 1);
+  assert.equal(capturedOptions.initialPollMaxAttempts, 5);
   assert.equal(capturedOptions.targetEmail, '');
   assert.equal(capturedOptions.beforeSubmit, undefined);
   assert.equal(typeof capturedOptions.getRemainingTimeMs, 'function');

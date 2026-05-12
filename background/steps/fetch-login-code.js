@@ -31,6 +31,7 @@
       reuseOrCreateTab,
       sendToContentScriptResilient,
       buildRegistrationEmailStateUpdates = null,
+      persistRegistrationEmailState = null,
       phoneVerificationHelpers = null,
       setState,
       shouldUseCustomRegistrationEmail,
@@ -181,10 +182,17 @@
       }
 
       const displayedEmail = normalizeStep8VerificationTargetEmail(result?.displayedEmail || resolvedEmail);
-      await setState({
-        email: resolvedEmail,
-        step8VerificationTargetEmail: displayedEmail,
-      });
+      if (typeof persistRegistrationEmailState === 'function') {
+        await persistRegistrationEmailState(latestState, resolvedEmail, {
+          source: 'step8_add_email',
+          preserveAccountIdentity: true,
+        });
+      } else {
+        await setState({
+          email: resolvedEmail,
+          step8VerificationTargetEmail: displayedEmail,
+        });
+      }
 
       return {
         state: {
@@ -535,6 +543,8 @@
           }
         },
         targetEmail: fixedTargetEmail,
+        maxResendRequests: mail.provider === '2925' ? 1 : undefined,
+        initialPollMaxAttempts: mail.provider === '2925' ? 5 : undefined,
         resendIntervalMs: mail.provider === LUCKMAIL_PROVIDER
           ? 15000
           : ((mail.provider === HOTMAIL_PROVIDER || mail.provider === '2925')

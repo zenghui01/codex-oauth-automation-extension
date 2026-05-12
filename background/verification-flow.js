@@ -874,6 +874,7 @@
         onResendRequestedAt,
         maxRounds: _ignoredMaxRounds,
         maxResendRequests: _ignoredMaxResendRequests,
+        initialPollMaxAttempts: _ignoredInitialPollMaxAttempts,
         ...cleanPollOverrides
       } = pollOverrides;
       const basePayload = {
@@ -927,6 +928,7 @@
         onResendRequestedAt,
         maxRounds: _ignoredMaxRounds,
         maxResendRequests: _ignoredMaxResendRequests,
+        initialPollMaxAttempts: _ignoredInitialPollMaxAttempts,
         ...cleanPollOverrides
       } = pollOverrides;
 
@@ -982,6 +984,7 @@
       let filterAfterTimestamp = cleanPollOverrides.filterAfterTimestamp ?? getVerificationPollPayload(step, state).filterAfterTimestamp;
       const maxResendRequests = resolveMaxResendRequests(pollOverrides);
       const maxRounds = maxResendRequests + 1;
+      const initialPollMaxAttempts = Math.max(0, Math.floor(Number(pollOverrides.initialPollMaxAttempts) || 0));
       let usedResendRequests = 0;
 
       for (let round = 1; round <= maxRounds; round++) {
@@ -1002,6 +1005,9 @@
           filterAfterTimestamp,
           excludeCodes: [...rejectedCodes],
         });
+        if (round === 1 && initialPollMaxAttempts > 0) {
+          payload.maxAttempts = initialPollMaxAttempts;
+        }
 
         try {
           const timedPoll = await applyMailPollingTimeBudget(
@@ -1307,6 +1313,7 @@
             disableTimeBudgetCap: Boolean(options.disableTimeBudgetCap),
             getRemainingTimeMs: options.getRemainingTimeMs,
             maxResendRequests: remainingAutomaticResendCount,
+            initialPollMaxAttempts: options.initialPollMaxAttempts,
             resendIntervalMs,
             lastResendAt,
             onResendRequestedAt: updateFilterAfterTimestampForVerificationStep,

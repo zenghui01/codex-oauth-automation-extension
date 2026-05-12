@@ -2993,14 +2993,22 @@ function isPhoneActivationForNumber(activation, phoneNumber) {
 
 async function setEmailStateSilently(email, options = {}) {
   const currentState = await getState();
-  const updates = buildRegistrationEmailStateUpdates(currentState, {
-    currentEmail: email,
-    preservePrevious: Boolean(options?.preservePrevious),
-    source: options?.source || '',
-  });
+  const preserveAccountIdentity = Boolean(options?.preserveAccountIdentity);
+  const updates = preserveAccountIdentity
+    ? buildFlowRegistrationEmailStateUpdates(currentState, {
+        currentEmail: email,
+        preservePrevious: Boolean(options?.preservePrevious),
+        preserveAccountIdentity: true,
+        source: options?.source || '',
+      })
+    : buildRegistrationEmailStateUpdates(currentState, {
+        currentEmail: email,
+        preservePrevious: Boolean(options?.preservePrevious),
+        source: options?.source || '',
+      });
   const normalizedEmail = updates.email;
 
-  if (normalizedEmail) {
+  if (!preserveAccountIdentity && normalizedEmail) {
     updates.accountIdentifierType = 'email';
     updates.accountIdentifier = normalizedEmail;
     updates.phoneNumber = '';
@@ -3009,7 +3017,7 @@ async function setEmailStateSilently(email, options = {}) {
     updates.signupPhoneCompletedActivation = null;
     updates.signupPhoneVerificationRequestedAt = null;
     updates.signupPhoneVerificationPurpose = '';
-  } else if (String(currentState?.accountIdentifierType || '').trim().toLowerCase() === 'email') {
+  } else if (!preserveAccountIdentity && String(currentState?.accountIdentifierType || '').trim().toLowerCase() === 'email') {
     updates.accountIdentifierType = null;
     updates.accountIdentifier = '';
   }

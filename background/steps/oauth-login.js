@@ -71,9 +71,7 @@
     }
 
     function shouldPreferStep7PhoneSignupIdentity(state = {}) {
-      const frozenSignupMethod = normalizeStep7IdentifierType(state?.resolvedSignupMethod);
       return canUseConfiguredPhoneSignup(state)
-        && frozenSignupMethod !== 'email'
         && hasStep7PhoneSignupIdentity(state);
     }
 
