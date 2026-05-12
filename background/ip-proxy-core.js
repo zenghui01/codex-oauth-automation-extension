@@ -35,8 +35,13 @@ function normalizeAutomationWindowId(value) {
   if (value === null || value === undefined || value === '') {
     return null;
   }
-  const numeric = Math.floor(Number(value));
+  const numeric = Number(value);
   return Number.isInteger(numeric) && numeric >= 0 ? numeric : null;
+}
+
+function buildAutomationWindowUnavailableError(error) {
+  const suffix = error?.message ? ` 原因：${error.message}` : '';
+  return new Error(`自动任务窗口已不可用，请在目标 Chrome 窗口重新打开侧边栏并启动任务。${suffix}`);
 }
 
 async function createAutomationScopedTab(createProperties = {}, options = {}) {
@@ -55,8 +60,8 @@ async function createAutomationScopedTab(createProperties = {}, options = {}) {
       ...(createProperties || {}),
       windowId,
     });
-  } catch {
-    return chrome.tabs.create(createProperties || {});
+  } catch (error) {
+    throw buildAutomationWindowUnavailableError(error);
   }
 }
 
@@ -78,8 +83,8 @@ async function queryAutomationScopedTabs(queryInfo = {}, options = {}) {
   delete scopedQuery.currentWindow;
   try {
     return await chrome.tabs.query(scopedQuery);
-  } catch {
-    return chrome.tabs.query(queryInfo || {});
+  } catch (error) {
+    throw buildAutomationWindowUnavailableError(error);
   }
 }
 

@@ -1155,7 +1155,7 @@ function normalizeAutomationWindowId(value) {
   if (value === null || value === undefined || value === '') {
     return null;
   }
-  const numeric = Math.floor(Number(value));
+  const numeric = Number(value);
   return Number.isInteger(numeric) && numeric >= 0 ? numeric : null;
 }
 

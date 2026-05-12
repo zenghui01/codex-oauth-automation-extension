@@ -23,8 +23,13 @@
       if (value === null || value === undefined || value === '') {
         return null;
       }
-      const numeric = Math.floor(Number(value));
+      const numeric = Number(value);
       return Number.isInteger(numeric) && numeric >= 0 ? numeric : null;
+    }
+
+    function buildAutomationWindowUnavailableError(error) {
+      const suffix = error?.message ? ` 原因：${error.message}` : '';
+      return new Error(`自动任务窗口已不可用，请在目标 Chrome 窗口重新打开侧边栏并启动任务。${suffix}`);
     }
 
     async function getAutomationWindowId(options = {}) {
@@ -58,8 +63,7 @@
         return await chrome.tabs.query(scopedQuery);
       } catch (error) {
         if (Object.prototype.hasOwnProperty.call(scopedQuery, 'windowId')) {
-          await setState({ automationWindowId: null }).catch(() => {});
-          return chrome.tabs.query(queryInfo || {});
+          throw buildAutomationWindowUnavailableError(error);
         }
         throw error;
       }
@@ -76,8 +80,7 @@
         return await chrome.tabs.create(properties);
       } catch (error) {
         if (windowId !== null) {
-          await setState({ automationWindowId: null }).catch(() => {});
-          return chrome.tabs.create(createProperties || {});
+          throw buildAutomationWindowUnavailableError(error);
         }
         throw error;
       }
