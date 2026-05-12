@@ -244,6 +244,31 @@ test('message router preserves phone signup identity when step payload only repo
   assert.ok(events.stateUpdates.some((updates) => updates.signupVerificationRequestedAt === 123456));
 });
 
+test('message router persists phone signup identity from step 7 completion payload', async () => {
+  const completedActivation = {
+    activationId: 'signup-done',
+    phoneNumber: '+5511917097811',
+  };
+  const { router, events } = createRouter({
+    state: { stepStatuses: { 7: 'completed', 8: 'pending' } },
+  });
+
+  await router.handleStepData(7, {
+    loginVerificationRequestedAt: 123456,
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+5511917097811',
+    signupPhoneNumber: '+5511917097811',
+    signupPhoneActivation: null,
+    signupPhoneCompletedActivation: completedActivation,
+  });
+
+  assert.deepStrictEqual(events.signupPhoneSilentStates, ['+5511917097811']);
+  assert.ok(events.stateUpdates.some((updates) => updates.signupPhoneActivation === null));
+  assert.ok(events.stateUpdates.some((updates) => updates.signupPhoneCompletedActivation === completedActivation));
+  assert.ok(events.stateUpdates.some((updates) => updates.loginVerificationRequestedAt === 123456));
+  assert.deepStrictEqual(events.emailStates, []);
+});
+
 test('message router does not overwrite a completed step 3 when step 2 is replayed', async () => {
   const { router, events } = createRouter({
     state: { stepStatuses: { 3: 'completed' } },

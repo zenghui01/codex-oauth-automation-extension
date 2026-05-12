@@ -9014,6 +9014,15 @@ async function handleStepData(step, payload) {
       }
       break;
     case 7:
+      if (payload.accountIdentifierType || payload.accountIdentifier || payload.signupPhoneNumber || payload.signupPhoneActivation || payload.signupPhoneCompletedActivation) {
+        await setState({
+          accountIdentifierType: payload.accountIdentifierType || null,
+          accountIdentifier: String(payload.accountIdentifier || '').trim(),
+          signupPhoneNumber: String(payload.signupPhoneNumber || '').trim(),
+          signupPhoneActivation: payload.signupPhoneActivation || null,
+          signupPhoneCompletedActivation: payload.signupPhoneCompletedActivation || null,
+        });
+      }
       if (payload.loginVerificationRequestedAt) {
         await setState({ loginVerificationRequestedAt: payload.loginVerificationRequestedAt });
       }
@@ -11509,6 +11518,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   LUCKMAIL_PROVIDER,
   resolveVerificationStep: verificationFlowHelpers.resolveVerificationStep,
   resolveSignupEmailForFlow,
+  persistRegistrationEmailState,
   phoneVerificationHelpers,
   rerunStep7ForStep8Recovery: (...args) => rerunStep7ForStep8Recovery(...args),
   resolveSignupMethod,

@@ -463,12 +463,15 @@ test('step 7 forwards phone login identity payload when account identifier is ph
   const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
 
   const events = {
+    completions: [],
     payloads: [],
   };
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async () => {},
+    completeStepFromBackground: async (step, payload) => {
+      events.completions.push({ step, payload });
+    },
     getErrorMessage: (error) => error?.message || String(error || ''),
     getLoginAuthStateLabel: (state) => state || 'unknown',
     getState: async () => ({
@@ -522,6 +525,24 @@ test('step 7 forwards phone login identity payload when account identifier is ph
       loginIdentifierType: 'phone',
       password: 'secret',
       visibleStep: 7,
+    },
+  ]);
+  assert.deepStrictEqual(events.completions, [
+    {
+      step: 7,
+      payload: {
+        loginVerificationRequestedAt: 123456,
+        accountIdentifierType: 'phone',
+        accountIdentifier: '66959916439',
+        signupPhoneNumber: '66959916439',
+        signupPhoneCompletedActivation: {
+          activationId: 'signup-done',
+          phoneNumber: '66959916439',
+          countryId: 52,
+          countryLabel: 'Thailand',
+        },
+        signupPhoneActivation: null,
+      },
     },
   ]);
 });
@@ -737,6 +758,11 @@ test('step 7 can start from a manually filled signup phone without completed ste
       step: 7,
       payload: {
         loginVerificationRequestedAt: 987654,
+        accountIdentifierType: 'phone',
+        accountIdentifier: '+447780579093',
+        signupPhoneNumber: '+447780579093',
+        signupPhoneCompletedActivation: null,
+        signupPhoneActivation: null,
       },
     },
   ]);

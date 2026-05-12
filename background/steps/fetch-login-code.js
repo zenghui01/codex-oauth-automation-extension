@@ -182,21 +182,28 @@
       }
 
       const displayedEmail = normalizeStep8VerificationTargetEmail(result?.displayedEmail || resolvedEmail);
+      let persistedState = latestState;
       if (typeof persistRegistrationEmailState === 'function') {
         await persistRegistrationEmailState(latestState, resolvedEmail, {
           source: 'step8_add_email',
           preserveAccountIdentity: true,
         });
+        persistedState = typeof getState === 'function' ? await getState() : latestState;
       } else {
         await setState({
           email: resolvedEmail,
           step8VerificationTargetEmail: displayedEmail,
         });
+        persistedState = {
+          ...latestState,
+          email: resolvedEmail,
+          step8VerificationTargetEmail: displayedEmail,
+        };
       }
 
       return {
         state: {
-          ...latestState,
+          ...persistedState,
           email: resolvedEmail,
           step8VerificationTargetEmail: displayedEmail,
         },

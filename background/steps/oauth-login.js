@@ -263,6 +263,13 @@
             const completionPayload = {
               loginVerificationRequestedAt: result.loginVerificationRequestedAt || null,
             };
+            if (currentIdentifierType === 'phone') {
+              completionPayload.accountIdentifierType = 'phone';
+              completionPayload.accountIdentifier = currentPhoneNumber;
+              completionPayload.signupPhoneNumber = currentPhoneNumber;
+              completionPayload.signupPhoneCompletedActivation = currentState?.signupPhoneCompletedActivation || null;
+              completionPayload.signupPhoneActivation = currentState?.signupPhoneActivation || null;
+            }
             if (Object.prototype.hasOwnProperty.call(result || {}, 'skipLoginVerificationStep')) {
               completionPayload.skipLoginVerificationStep = Boolean(result.skipLoginVerificationStep);
             }

@@ -574,6 +574,12 @@
             }
           }
           break;
+        case 7:
+          await syncStepAccountIdentityFromPayload(payload);
+          if (payload.loginVerificationRequestedAt) {
+            await setState({ loginVerificationRequestedAt: payload.loginVerificationRequestedAt });
+          }
+          break;
         case 8:
           await setState({
             ...(payload.phoneVerification || payload.loginPhoneVerification ? {
