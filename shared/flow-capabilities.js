@@ -38,6 +38,14 @@
     supportsPhoneSignup: true,
     requiresPhoneSignupWarning: false,
   });
+  const MODE_SWITCH_RELEVANT_KEYS = Object.freeze([
+    'activeFlowId',
+    'contributionMode',
+    'panelMode',
+    'phoneVerificationEnabled',
+    'plusModeEnabled',
+    'signupMethod',
+  ]);
 
   const PANEL_CAPABILITIES = Object.freeze({
     cpa: Object.freeze({
@@ -95,6 +103,17 @@
     return normalized;
   }
 
+  function getPanelModeLabel(panelMode = '') {
+    const normalized = normalizePanelMode(panelMode);
+    if (normalized === 'sub2api') {
+      return 'SUB2API';
+    }
+    if (normalized === 'codex2api') {
+      return 'Codex2API';
+    }
+    return 'CPA';
+  }
+
   function createFlowCapabilityRegistry(deps = {}) {
     const {
       defaultFlowCapabilities = DEFAULT_FLOW_CAPABILITIES,
@@ -120,6 +139,21 @@
         ...defaultPanelCapabilities,
         ...(panelCapabilities[normalizedPanelMode] || {}),
       };
+    }
+
+    function normalizeChangedKeys(values = []) {
+      const list = Array.isArray(values) ? values : [];
+      const seen = new Set();
+      const normalized = [];
+      list.forEach((value) => {
+        const key = String(value || '').trim();
+        if (!key || seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+        normalized.push(key);
+      });
+      return normalized;
     }
 
     function resolveSidepanelCapabilities(options = {}) {
@@ -202,6 +236,165 @@
       };
     }
 
+    function buildPhoneSignupValidationError(capabilityState = {}) {
+      const flowState = capabilityState.flowCapabilities || {};
+      const panelState = capabilityState.panelCapabilities || {};
+      const runtimeLocks = capabilityState.runtimeLocks || {};
+
+      if (!flowState.supportsPhoneSignup) {
+        return {
+          code: 'phone_signup_flow_unsupported',
+          message: '当前 flow 不支持手机号注册。',
+        };
+      }
+      if (!panelState.supportsPhoneSignup) {
+        return {
+          code: 'phone_signup_panel_unsupported',
+          message: `当前面板模式 ${getPanelModeLabel(capabilityState.requestedPanelMode)} 不支持手机号注册。`,
+        };
+      }
+      if (!runtimeLocks.phoneVerificationEnabled) {
+        return {
+          code: 'phone_signup_phone_verification_disabled',
+          message: '请先开启接码功能后再使用手机号注册。',
+        };
+      }
+      if (runtimeLocks.plusModeEnabled) {
+        return {
+          code: 'phone_signup_plus_mode_locked',
+          message: 'Plus 模式开启时不能使用手机号注册。',
+        };
+      }
+      if (runtimeLocks.contributionMode) {
+        return {
+          code: 'phone_signup_contribution_mode_locked',
+          message: '贡献模式开启时不能使用手机号注册。',
+        };
+      }
+      return {
+        code: 'phone_signup_unavailable',
+        message: '当前设置暂不支持手机号注册。',
+      };
+    }
+
+    function validateAutoRunStart(options = {}) {
+      const state = options?.state || {};
+      const capabilityState = resolveSidepanelCapabilities(options);
+      const errors = [];
+
+      if (
+        Array.isArray(capabilityState.supportedPanelModes)
+        && capabilityState.supportedPanelModes.length > 0
+        && capabilityState.canUseSelectedPanelMode === false
+      ) {
+        errors.push({
+          code: 'panel_mode_unsupported',
+          message: `当前 flow 不支持 ${getPanelModeLabel(capabilityState.requestedPanelMode)} 面板模式。`,
+        });
+      }
+
+      if (Boolean(state?.plusModeEnabled) && !capabilityState.flowCapabilities?.supportsPlusMode) {
+        errors.push({
+          code: 'plus_mode_unsupported',
+          message: '当前 flow 不支持 Plus 模式。',
+        });
+      }
+
+      if (Boolean(state?.contributionMode) && !capabilityState.flowCapabilities?.supportsContributionMode) {
+        errors.push({
+          code: 'contribution_mode_unsupported',
+          message: '当前 flow 不支持贡献模式。',
+        });
+      }
+
+      if (
+        capabilityState.requestedSignupMethod === SIGNUP_METHOD_PHONE
+        && capabilityState.effectiveSignupMethod !== SIGNUP_METHOD_PHONE
+      ) {
+        errors.push(buildPhoneSignupValidationError(capabilityState));
+      }
+
+      return {
+        ok: errors.length === 0,
+        errors,
+        capabilityState,
+      };
+    }
+
+    function validateModeSwitch(options = {}) {
+      const state = options?.state || {};
+      const changedKeys = normalizeChangedKeys(
+        options?.changedKeys !== undefined
+          ? options.changedKeys
+          : Object.keys(state || {})
+      );
+      const changedKeySet = new Set(changedKeys);
+      const capabilityState = resolveSidepanelCapabilities(options);
+      const errors = [];
+      const normalizedUpdates = {};
+      const flowState = capabilityState.flowCapabilities || {};
+      const requestedPhoneSignup = capabilityState.requestedSignupMethod === SIGNUP_METHOD_PHONE;
+      const shouldReconcileSignupMethod = MODE_SWITCH_RELEVANT_KEYS.some((key) => changedKeySet.has(key));
+
+      if (
+        changedKeySet.has('panelMode')
+        && Array.isArray(capabilityState.supportedPanelModes)
+        && capabilityState.supportedPanelModes.length > 0
+        && capabilityState.canUseSelectedPanelMode === false
+      ) {
+        normalizedUpdates.panelMode = capabilityState.effectivePanelMode;
+        errors.push({
+          code: 'panel_mode_unsupported',
+          message: `当前 flow 不支持 ${getPanelModeLabel(capabilityState.requestedPanelMode)} 面板模式。`,
+        });
+      }
+
+      if (changedKeySet.has('plusModeEnabled') && Boolean(state?.plusModeEnabled) && !flowState.supportsPlusMode) {
+        normalizedUpdates.plusModeEnabled = false;
+        errors.push({
+          code: 'plus_mode_unsupported',
+          message: '当前 flow 不支持 Plus 模式。',
+        });
+      }
+
+      if (changedKeySet.has('contributionMode') && Boolean(state?.contributionMode) && !flowState.supportsContributionMode) {
+        normalizedUpdates.contributionMode = false;
+        errors.push({
+          code: 'contribution_mode_unsupported',
+          message: '当前 flow 不支持贡献模式。',
+        });
+      }
+
+      if (
+        changedKeySet.has('phoneVerificationEnabled')
+        && Boolean(state?.phoneVerificationEnabled)
+        && !flowState.supportsPhoneVerificationSettings
+      ) {
+        normalizedUpdates.phoneVerificationEnabled = false;
+        errors.push({
+          code: 'phone_verification_unsupported',
+          message: '当前 flow 不支持接码配置。',
+        });
+      }
+
+      if (
+        shouldReconcileSignupMethod
+        && requestedPhoneSignup
+        && capabilityState.effectiveSignupMethod !== SIGNUP_METHOD_PHONE
+      ) {
+        normalizedUpdates.signupMethod = capabilityState.effectiveSignupMethod;
+        errors.push(buildPhoneSignupValidationError(capabilityState));
+      }
+
+      return {
+        ok: errors.length === 0,
+        changedKeys,
+        capabilityState,
+        errors,
+        normalizedUpdates,
+      };
+    }
+
     function canUsePhoneSignup(state = {}) {
       return resolveSidepanelCapabilities({ state }).canUsePhoneSignup;
     }
@@ -222,6 +415,8 @@
       normalizeSignupMethod,
       resolveSidepanelCapabilities,
       resolveSignupMethod,
+      validateAutoRunStart,
+      validateModeSwitch,
     };
   }
 

@@ -74,6 +74,44 @@
         }
         return method === 'phone' && canUsePhoneSignup(state) ? 'phone' : 'email';
       },
+      validateAutoRunStart = (state = {}, options = {}) => {
+        const validationState = options?.state || state;
+        const rootScope = typeof self !== 'undefined' ? self : globalThis;
+        const capabilityRegistry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+          defaultFlowId: 'openai',
+        }) || null;
+        if (!capabilityRegistry?.validateAutoRunStart) {
+          return { ok: true, errors: [] };
+        }
+        return capabilityRegistry.validateAutoRunStart({
+          activeFlowId: options?.activeFlowId ?? validationState?.activeFlowId,
+          panelMode: options?.panelMode ?? validationState?.panelMode,
+          signupMethod: options?.signupMethod ?? validationState?.signupMethod,
+          state: validationState,
+        });
+      },
+      validateModeSwitch = (state = {}, options = {}) => {
+        const validationState = options?.state || state;
+        const rootScope = typeof self !== 'undefined' ? self : globalThis;
+        const capabilityRegistry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+          defaultFlowId: 'openai',
+        }) || null;
+        if (!capabilityRegistry?.validateModeSwitch) {
+          return {
+            ok: true,
+            changedKeys: Array.isArray(options?.changedKeys) ? options.changedKeys : [],
+            errors: [],
+            normalizedUpdates: {},
+          };
+        }
+        return capabilityRegistry.validateModeSwitch({
+          activeFlowId: options?.activeFlowId ?? validationState?.activeFlowId,
+          changedKeys: options?.changedKeys,
+          panelMode: options?.panelMode ?? validationState?.panelMode,
+          signupMethod: options?.signupMethod ?? validationState?.signupMethod,
+          state: validationState,
+        });
+      },
       getTabId,
       getStopRequested,
       handleAutoRunLoopUnhandledError,
@@ -908,6 +946,10 @@
             }
           }
           const state = await getState();
+          const autoRunStartValidation = validateAutoRunStart(state, { state });
+          if (autoRunStartValidation?.ok === false) {
+            throw new Error(autoRunStartValidation.errors?.[0]?.message || '当前设置不支持启动自动流程。');
+          }
           if (getPendingAutoRunTimerPlan(state)) {
             throw new Error('已有自动运行倒计时计划，请先取消或立即开始。');
           }
@@ -934,6 +976,11 @@
                 contributionQq,
               });
             }
+          }
+          const state = await getState();
+          const autoRunStartValidation = validateAutoRunStart(state, { state });
+          if (autoRunStartValidation?.ok === false) {
+            throw new Error(autoRunStartValidation.errors?.[0]?.message || '当前设置不支持启动自动流程。');
           }
           const totalRuns = normalizeRunCount(message.payload?.totalRuns || 1);
           return await scheduleAutoRun(totalRuns, {
@@ -1006,6 +1053,16 @@
           const currentState = await getState();
           const updates = buildPersistentSettingsPayload(message.payload || {});
           const sessionUpdates = buildLuckmailSessionSettingsPayload(message.payload || {});
+          const modeValidation = validateModeSwitch({
+            ...currentState,
+            ...updates,
+            resolvedSignupMethod: null,
+          }, {
+            changedKeys: Object.keys(updates),
+          });
+          if (modeValidation?.normalizedUpdates && Object.keys(modeValidation.normalizedUpdates).length > 0) {
+            Object.assign(updates, modeValidation.normalizedUpdates);
+          }
           const nextSignupState = {
             ...currentState,
             ...updates,
@@ -1017,6 +1074,7 @@
             || Object.prototype.hasOwnProperty.call(updates, 'signupMethod')
             || Object.prototype.hasOwnProperty.call(updates, 'panelMode')
             || Object.prototype.hasOwnProperty.call(updates, 'activeFlowId')
+            || Object.prototype.hasOwnProperty.call(updates, 'contributionMode')
           ) {
             updates.signupMethod = resolveSignupMethod(nextSignupState);
           }
@@ -1117,7 +1175,12 @@
             );
             await addLog(`Plus 支付方式已切换为 ${selectedPlusPaymentMethod}，已更新对应的 Plus 步骤。`, 'info');
           }
-          return { ok: true, state: await getState(), proxyRouting };
+          return {
+            ok: true,
+            modeValidation,
+            proxyRouting,
+            state: await getState(),
+          };
         }
 
         case 'REFRESH_GPC_CARD_BALANCE': {

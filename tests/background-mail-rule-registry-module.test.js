@@ -42,10 +42,26 @@ test('mail rule registry exposes canonical OpenAI verification poll payloads', (
       ruleId: 'openai-signup-code',
       step: 4,
       artifactType: 'code',
+      codePatterns: [
+        {
+          source: '(?:chatgpt\\s+log-?in\\s+code|enter\\s+this\\s+code)[^0-9]{0,24}(\\d{6})',
+          flags: 'i',
+        },
+        {
+          source: 'your\\s+chatgpt\\s+code\\s+is\\s+(\\d{6})',
+          flags: 'i',
+        },
+        {
+          source: '(?:verification\\s+code|temporary\\s+verification\\s+code|your\\s+chatgpt\\s+code|code(?:\\s+is)?)[^0-9]{0,16}(\\d{6})',
+          flags: 'i',
+        },
+      ],
       filterAfterTimestamp: 0,
+      requiredKeywords: ['openai', 'chatgpt', 'verify', 'verification', 'confirm', '验证码', '代码'],
       senderFilters: ['openai', 'noreply', 'verify', 'auth', 'duckduckgo', 'forward'],
       subjectFilters: ['verify', 'verification', 'code', '验证码', 'confirm'],
       targetEmail: 'user@example.com',
+      targetEmailHints: ['user@example.com', 'user=example.com'],
       mail2925MatchTargetEmail: true,
       maxAttempts: 15,
       intervalMs: 15000,
@@ -64,10 +80,26 @@ test('mail rule registry exposes canonical OpenAI verification poll payloads', (
       ruleId: 'openai-login-code',
       step: 8,
       artifactType: 'code',
+      codePatterns: [
+        {
+          source: '(?:chatgpt\\s+log-?in\\s+code|enter\\s+this\\s+code)[^0-9]{0,24}(\\d{6})',
+          flags: 'i',
+        },
+        {
+          source: 'your\\s+chatgpt\\s+code\\s+is\\s+(\\d{6})',
+          flags: 'i',
+        },
+        {
+          source: '(?:verification\\s+code|temporary\\s+verification\\s+code|your\\s+chatgpt\\s+code|code(?:\\s+is)?)[^0-9]{0,16}(\\d{6})',
+          flags: 'i',
+        },
+      ],
       filterAfterTimestamp: 456,
+      requiredKeywords: ['openai', 'chatgpt', 'verify', 'verification', 'confirm', '验证码', '代码', 'login'],
       senderFilters: ['openai', 'noreply', 'verify', 'auth', 'chatgpt', 'duckduckgo', 'forward'],
       subjectFilters: ['verify', 'verification', 'code', '验证码', 'confirm', 'login'],
       targetEmail: 'login@example.com',
+      targetEmailHints: ['login@example.com', 'login=example.com'],
       mail2925MatchTargetEmail: false,
       maxAttempts: 5,
       intervalMs: 3000,

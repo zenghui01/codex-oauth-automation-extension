@@ -61,21 +61,30 @@ importScripts(
   'content/activation-utils.js'
 );
 
-const NORMAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({ plusModeEnabled: false }) || [];
+const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const NORMAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: false,
+}) || [];
 const PLUS_PAYPAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
   plusPaymentMethod: 'paypal',
 }) || NORMAL_STEP_DEFINITIONS;
 const PLUS_GOPAY_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
   plusPaymentMethod: 'gopay',
 }) || PLUS_PAYPAL_STEP_DEFINITIONS;
 const PLUS_GPC_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
   plusPaymentMethod: 'gpc-helper',
 }) || PLUS_GOPAY_STEP_DEFINITIONS;
 const PLUS_STEP_DEFINITIONS = PLUS_PAYPAL_STEP_DEFINITIONS;
-const ALL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getAllSteps?.() || [
+const ALL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getAllSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+}) || [
   ...NORMAL_STEP_DEFINITIONS,
   ...PLUS_PAYPAL_STEP_DEFINITIONS,
   ...PLUS_GOPAY_STEP_DEFINITIONS,
@@ -85,7 +94,6 @@ const STEP_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)))
   .sort((left, right) => left - right);
-const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const DEFAULT_STEP_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
 const NORMAL_STEP_IDS = NORMAL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
@@ -597,11 +605,21 @@ function getSignupMethodForStepDefinitions(state = {}) {
 function getStepDefinitionsForState(state = {}) {
   const rootScope = typeof self !== 'undefined' ? self : globalThis;
   if (rootScope.MultiPageStepDefinitions?.getSteps) {
-    return rootScope.MultiPageStepDefinitions.getSteps({
+    const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
+    const activeFlowId = String(state?.activeFlowId || '').trim().toLowerCase() || defaultFlowId;
+    const definitions = rootScope.MultiPageStepDefinitions.getSteps({
+      activeFlowId,
       plusModeEnabled: isPlusModeState(state),
       plusPaymentMethod: normalizePlusPaymentMethod(state?.plusPaymentMethod),
       signupMethod: getSignupMethodForStepDefinitions(state),
     });
+    if (Array.isArray(definitions)) {
+      return definitions;
+    }
+  }
+  const activeFlowId = String(state?.activeFlowId || '').trim().toLowerCase();
+  if (activeFlowId && activeFlowId !== DEFAULT_ACTIVE_FLOW_ID) {
+    return [];
   }
   if (!isPlusModeState(state)) {
     return NORMAL_STEP_DEFINITIONS;
@@ -633,10 +651,19 @@ function getStepIdsForState(state = {}) {
 
 function getLastStepIdForState(state = {}) {
   const ids = getStepIdsForState(state);
-  return ids[ids.length - 1] || 10;
+  if (ids.length) {
+    return ids[ids.length - 1];
+  }
+  return String(state?.activeFlowId || '').trim().toLowerCase() === DEFAULT_ACTIVE_FLOW_ID ? 10 : 0;
 }
 
 function getAuthChainStartStepId(state = {}) {
+  const authStepId = typeof getStepIdByKeyForState === 'function'
+    ? getStepIdByKeyForState('oauth-login', state)
+    : null;
+  if (Number.isInteger(authStepId) && authStepId > 0) {
+    return authStepId;
+  }
   return isPlusModeState(state) ? 10 : FINAL_OAUTH_CHAIN_START_STEP;
 }
 
@@ -1368,6 +1395,38 @@ function resolveCurrentFlowCapabilities(state = {}, options = {}) {
   }
   return registry.resolveSidepanelCapabilities({
     activeFlowId: options?.activeFlowId ?? state?.activeFlowId,
+    panelMode: options?.panelMode ?? state?.panelMode,
+    signupMethod: options?.signupMethod ?? state?.signupMethod,
+    state,
+  });
+}
+
+function validateAutoRunStartState(state = {}, options = {}) {
+  const registry = getFlowCapabilityRegistry();
+  if (!registry?.validateAutoRunStart) {
+    return { ok: true, errors: [] };
+  }
+  return registry.validateAutoRunStart({
+    activeFlowId: options?.activeFlowId ?? state?.activeFlowId,
+    panelMode: options?.panelMode ?? state?.panelMode,
+    signupMethod: options?.signupMethod ?? state?.signupMethod,
+    state,
+  });
+}
+
+function validateModeSwitchState(state = {}, options = {}) {
+  const registry = getFlowCapabilityRegistry();
+  if (!registry?.validateModeSwitch) {
+    return {
+      ok: true,
+      changedKeys: Array.isArray(options?.changedKeys) ? options.changedKeys : [],
+      errors: [],
+      normalizedUpdates: {},
+    };
+  }
+  return registry.validateModeSwitch({
+    activeFlowId: options?.activeFlowId ?? state?.activeFlowId,
+    changedKeys: options?.changedKeys,
     panelMode: options?.panelMode ?? state?.panelMode,
     signupMethod: options?.signupMethod ?? state?.signupMethod,
     state,
@@ -3029,6 +3088,30 @@ async function importSettingsBundle(configBundle) {
     fillDefaults: true,
     requireKnownKeys: true,
   });
+  const importModeValidation = validateModeSwitchState({
+    ...state,
+    ...importedSettings,
+    resolvedSignupMethod: null,
+  }, {
+    changedKeys: Object.keys(importedSettings),
+  });
+  if (importModeValidation?.normalizedUpdates && Object.keys(importModeValidation.normalizedUpdates).length > 0) {
+    Object.assign(importedSettings, importModeValidation.normalizedUpdates);
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(importedSettings, 'phoneVerificationEnabled')
+    || Object.prototype.hasOwnProperty.call(importedSettings, 'plusModeEnabled')
+    || Object.prototype.hasOwnProperty.call(importedSettings, 'signupMethod')
+    || Object.prototype.hasOwnProperty.call(importedSettings, 'panelMode')
+    || Object.prototype.hasOwnProperty.call(importedSettings, 'activeFlowId')
+    || Object.prototype.hasOwnProperty.call(importedSettings, 'contributionMode')
+  ) {
+    importedSettings.signupMethod = resolveSignupMethod({
+      ...state,
+      ...importedSettings,
+      resolvedSignupMethod: null,
+    });
+  }
 
   await setPersistentSettings(importedSettings);
 
@@ -4151,6 +4234,8 @@ async function requestHotmailLocalCode(account, pollPayload = {}) {
         top: 5,
         senderFilters: pollPayload.senderFilters || [],
         subjectFilters: pollPayload.subjectFilters || [],
+        requiredKeywords: pollPayload.requiredKeywords || [],
+        codePatterns: pollPayload.codePatterns || [],
         excludeCodes: pollPayload.excludeCodes || [],
         filterAfterTimestamp: Number(pollPayload.filterAfterTimestamp || 0) || 0,
       }),
@@ -4427,6 +4512,8 @@ async function pollHotmailVerificationCode(step, state, pollPayload = {}) {
         afterTimestamp: pollPayload.filterAfterTimestamp || 0,
         senderFilters: pollPayload.senderFilters || [],
         subjectFilters: pollPayload.subjectFilters || [],
+        requiredKeywords: pollPayload.requiredKeywords || [],
+        codePatterns: pollPayload.codePatterns || [],
         excludeCodes: pollPayload.excludeCodes || [],
       });
       const match = matchResult.match;
@@ -5609,6 +5696,8 @@ async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload 
         afterTimestamp: pollPayload.filterAfterTimestamp || 0,
         senderFilters: pollPayload.senderFilters || [],
         subjectFilters: pollPayload.subjectFilters || [],
+        requiredKeywords: pollPayload.requiredKeywords || [],
+        codePatterns: pollPayload.codePatterns || [],
         excludeCodes: pollPayload.excludeCodes || [],
       });
       const match = matchResult.match;
@@ -8678,6 +8767,30 @@ async function launchAutoRunTimerPlan(trigger = 'alarm', options = {}) {
         scheduledAutoRunPlan: null,
       });
       return false;
+    }
+
+    if (plan.kind === AUTO_RUN_TIMER_KIND_SCHEDULED_START) {
+      const autoRunStartValidation = typeof validateAutoRunStartState === 'function'
+        ? validateAutoRunStartState(state, { state })
+        : { ok: true, errors: [] };
+      if (autoRunStartValidation?.ok === false) {
+        const validationMessage = autoRunStartValidation.errors?.[0]?.message || '当前设置不支持启动自动流程。';
+        await clearAutoRunTimerAlarm();
+        await broadcastAutoRunStatus('idle', {
+          currentRun: 0,
+          totalRuns: 1,
+          attemptRun: 0,
+        }, {
+          autoRunRoundSummaries: [],
+          autoRunTimerPlan: null,
+          scheduledAutoRunPlan: null,
+        });
+        await addLog(`自动运行计划已取消：${validationMessage}`, 'error');
+        if (trigger === 'manual') {
+          throw new Error(validationMessage);
+        }
+        return false;
+      }
     }
 
     await clearAutoRunTimerAlarm();
@@ -11814,6 +11927,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   normalizeSignupMethod,
   canUsePhoneSignup,
   resolveSignupMethod,
+  validateAutoRunStart: validateAutoRunStartState,
   getTabId,
   getStopRequested: () => stopRequested,
   handleCloudflareSecurityBlocked,
@@ -11902,6 +12016,10 @@ const plusGoPayStepRegistry = buildStepRegistry(PLUS_GOPAY_STEP_DEFINITIONS);
 const plusGpcStepRegistry = buildStepRegistry(PLUS_GPC_STEP_DEFINITIONS);
 
 function getStepRegistryForState(state = {}) {
+  const activeFlowId = String(state?.activeFlowId || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase() || DEFAULT_ACTIVE_FLOW_ID;
+  if (activeFlowId !== DEFAULT_ACTIVE_FLOW_ID) {
+    throw new Error(`当前尚未注册 flow=${activeFlowId} 的步骤执行器。`);
+  }
   if (!isPlusModeState(state)) {
     return normalStepRegistry;
   }

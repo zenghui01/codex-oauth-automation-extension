@@ -70,3 +70,91 @@ test('flow capability registry defaults unknown flows to minimal non-phone capab
   assert.equal(capabilityState.panelMode, 'codex2api');
   assert.deepEqual(capabilityState.supportedPanelModes, []);
 });
+
+test('flow capability registry exposes shared auto-run validation for phone locks and panel support', () => {
+  const api = loadApi();
+  const registry = api.createFlowCapabilityRegistry({
+    flowCapabilities: {
+      openai: api.FLOW_CAPABILITIES.openai,
+      'site-a': {
+        ...api.DEFAULT_FLOW_CAPABILITIES,
+        supportsPlatformBinding: ['cpa'],
+      },
+    },
+  });
+
+  const plusLockedResult = registry.validateAutoRunStart({
+    state: {
+      activeFlowId: 'openai',
+      panelMode: 'cpa',
+      signupMethod: 'phone',
+      phoneVerificationEnabled: true,
+      plusModeEnabled: true,
+      contributionMode: false,
+    },
+  });
+
+  assert.equal(plusLockedResult.ok, false);
+  assert.equal(plusLockedResult.errors[0].code, 'phone_signup_plus_mode_locked');
+
+  const unsupportedPanelResult = registry.validateAutoRunStart({
+    state: {
+      activeFlowId: 'site-a',
+      panelMode: 'sub2api',
+      signupMethod: 'email',
+    },
+  });
+
+  assert.equal(unsupportedPanelResult.ok, false);
+  assert.equal(unsupportedPanelResult.errors[0].code, 'panel_mode_unsupported');
+});
+
+test('flow capability registry normalizes unsupported mode switches back to the effective capability set', () => {
+  const api = loadApi();
+  const registry = api.createFlowCapabilityRegistry({
+    flowCapabilities: {
+      openai: api.FLOW_CAPABILITIES.openai,
+      'site-a': {
+        ...api.DEFAULT_FLOW_CAPABILITIES,
+        supportsPlatformBinding: ['cpa'],
+      },
+    },
+  });
+
+  const validation = registry.validateModeSwitch({
+    state: {
+      activeFlowId: 'site-a',
+      panelMode: 'sub2api',
+      signupMethod: 'phone',
+      phoneVerificationEnabled: true,
+      plusModeEnabled: true,
+      contributionMode: true,
+    },
+    changedKeys: [
+      'panelMode',
+      'signupMethod',
+      'phoneVerificationEnabled',
+      'plusModeEnabled',
+      'contributionMode',
+    ],
+  });
+
+  assert.equal(validation.ok, false);
+  assert.deepEqual(validation.normalizedUpdates, {
+    panelMode: 'cpa',
+    signupMethod: 'email',
+    phoneVerificationEnabled: false,
+    plusModeEnabled: false,
+    contributionMode: false,
+  });
+  assert.deepEqual(
+    validation.errors.map((entry) => entry.code),
+    [
+      'panel_mode_unsupported',
+      'plus_mode_unsupported',
+      'contribution_mode_unsupported',
+      'phone_verification_unsupported',
+      'phone_signup_flow_unsupported',
+    ]
+  );
+});

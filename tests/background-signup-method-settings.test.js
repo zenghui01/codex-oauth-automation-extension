@@ -177,6 +177,7 @@ return {
   });
 
   assert.deepEqual(api.getCaptured(), [{
+    activeFlowId: 'openai',
     plusModeEnabled: true,
     plusPaymentMethod: 'gopay',
     signupMethod: 'phone',
