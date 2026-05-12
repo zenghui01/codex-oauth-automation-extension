@@ -1056,7 +1056,7 @@ test('step 8 completes when polling fails but recovery probe shows oauth consent
   ]);
 });
 
-test('step 8 uses a fixed 10-minute lookback window and delays 2925 resend until after two quick polls', async () => {
+test('step 8 uses a fixed 10-minute lookback window and plans 2925 polling as 2/3/15', async () => {
   let capturedOptions = null;
   let ensureCalls = 0;
   let ensureOptions = null;
@@ -1148,8 +1148,9 @@ test('step 8 uses a fixed 10-minute lookback window and delays 2925 resend until
   ]);
   assert.equal(capturedOptions.filterAfterTimestamp, 300000);
   assert.equal(capturedOptions.resendIntervalMs, 0);
-  assert.equal(capturedOptions.maxResendRequests, 1);
-  assert.equal(capturedOptions.initialPollMaxAttempts, 2);
+  assert.equal(capturedOptions.maxResendRequests, 2);
+  assert.equal(capturedOptions.initialPollMaxAttempts, 5);
+  assert.deepStrictEqual(capturedOptions.pollAttemptPlan, [2, 3, 15]);
   assert.equal(capturedOptions.targetEmail, '');
   assert.equal(capturedOptions.beforeSubmit, undefined);
   assert.equal(typeof capturedOptions.getRemainingTimeMs, 'function');

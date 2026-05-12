@@ -875,6 +875,7 @@
         maxRounds: _ignoredMaxRounds,
         maxResendRequests: _ignoredMaxResendRequests,
         initialPollMaxAttempts: _ignoredInitialPollMaxAttempts,
+        pollAttemptPlan: _ignoredPollAttemptPlan,
         ...cleanPollOverrides
       } = pollOverrides;
       const basePayload = {
@@ -929,6 +930,7 @@
         maxRounds: _ignoredMaxRounds,
         maxResendRequests: _ignoredMaxResendRequests,
         initialPollMaxAttempts: _ignoredInitialPollMaxAttempts,
+        pollAttemptPlan: _ignoredPollAttemptPlan,
         ...cleanPollOverrides
       } = pollOverrides;
 
@@ -985,6 +987,12 @@
       const maxResendRequests = resolveMaxResendRequests(pollOverrides);
       const maxRounds = maxResendRequests + 1;
       const initialPollMaxAttempts = Math.max(0, Math.floor(Number(pollOverrides.initialPollMaxAttempts) || 0));
+      const configuredPollAttemptPlan = Array.isArray(pollOverrides.pollAttemptPlan)
+        ? pollOverrides.pollAttemptPlan
+          .map((value) => Math.floor(Number(value) || 0))
+          .filter((value) => value > 0)
+        : [];
+      const pollAttemptPlan = rejectedCodes.size > 0 ? [] : configuredPollAttemptPlan;
       let usedResendRequests = 0;
 
       for (let round = 1; round <= maxRounds; round++) {
@@ -1005,7 +1013,10 @@
           filterAfterTimestamp,
           excludeCodes: [...rejectedCodes],
         });
-        if (round === 1 && initialPollMaxAttempts > 0) {
+        const plannedPollMaxAttempts = pollAttemptPlan[round - 1] || 0;
+        if (plannedPollMaxAttempts > 0) {
+          payload.maxAttempts = plannedPollMaxAttempts;
+        } else if (round === 1 && initialPollMaxAttempts > 0) {
           payload.maxAttempts = initialPollMaxAttempts;
         }
 
@@ -1316,6 +1327,9 @@
             initialPollMaxAttempts: mail.provider === '2925' && rejectedCodes.size > 0
               ? undefined
               : options.initialPollMaxAttempts,
+            pollAttemptPlan: mail.provider === '2925' && rejectedCodes.size > 0
+              ? undefined
+              : options.pollAttemptPlan,
             resendIntervalMs,
             lastResendAt,
             onResendRequestedAt: updateFilterAfterTimestampForVerificationStep,
