@@ -87,6 +87,9 @@ const console = {
     events.push({ type: 'warn', args });
   },
 };
+async function sendSidepanelMessage(message) {
+  return chrome.runtime.sendMessage(message);
+}
 async function persistCurrentSettingsForAction() {
   events.push({ type: 'sync-settings' });
   ${persistImpl ? `return (${persistImpl})(events, {

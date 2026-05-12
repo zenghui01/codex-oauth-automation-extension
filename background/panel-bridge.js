@@ -6,6 +6,7 @@
       chrome,
       addLog,
       closeConflictingTabsForSource,
+      createAutomationTab = null,
       ensureContentScriptReadyOnTab,
       getPanelMode,
       normalizeCodex2ApiUrl,
@@ -266,7 +267,9 @@
       const injectFiles = ['content/utils.js', 'content/sub2api-panel.js'];
       await closeConflictingTabsForSource('sub2api-panel', sub2apiUrl);
 
-      const tab = await chrome.tabs.create({ url: sub2apiUrl, active: true });
+      const tab = typeof createAutomationTab === 'function'
+        ? await createAutomationTab({ url: sub2apiUrl, active: true })
+        : await chrome.tabs.create({ url: sub2apiUrl, active: true });
       const tabId = tab.id;
       await rememberSourceLastUrl('sub2api-panel', sub2apiUrl);
 
