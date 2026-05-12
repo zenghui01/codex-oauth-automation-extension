@@ -104,6 +104,7 @@
       setContributionMode,
       setEmailState,
       setEmailStateSilently,
+      persistRegistrationEmailState,
       setFreeReusablePhoneActivation,
       setSignupPhoneState,
       setSignupPhoneStateSilently,
@@ -210,6 +211,42 @@
         : '';
     }
 
+    function hasPhoneSignupIdentity(state = {}) {
+      const identifierType = String(state?.accountIdentifierType || '').trim().toLowerCase();
+      return Boolean(
+        String(state?.signupPhoneNumber || '').trim()
+        || (identifierType === 'phone' && String(state?.accountIdentifier || '').trim())
+        || state?.signupPhoneActivation
+        || state?.signupPhoneCompletedActivation
+      );
+    }
+
+    function shouldPreservePhoneIdentityForEmailPayload(payload = {}, state = {}) {
+      const identifierType = String(payload?.accountIdentifierType || '').trim().toLowerCase();
+      if (identifierType === 'email') {
+        return false;
+      }
+      return hasPhoneSignupIdentity(state);
+    }
+
+    async function persistEmailIdentityFromStepPayload(email, payload = {}, source = 'step_payload') {
+      if (!email) {
+        return;
+      }
+      const state = await getState();
+      const preserveAccountIdentity = shouldPreservePhoneIdentityForEmailPayload(payload, state);
+      if (preserveAccountIdentity && typeof persistRegistrationEmailState === 'function') {
+        await persistRegistrationEmailState(state, email, {
+          source,
+          preserveAccountIdentity: true,
+        });
+        return;
+      }
+      await setEmailState(email, preserveAccountIdentity
+        ? { source, preserveAccountIdentity: true }
+        : { source });
+    }
+
     function normalizeAutomationWindowId(value) {
       if (value === null || value === undefined || value === '') {
         return null;
@@ -262,7 +299,10 @@
       const email = resolveEmailIdentityPayload(payload);
       if (identifierType === 'email' || email) {
         if (email) {
-          await setEmailState(email);
+          await persistEmailIdentityFromStepPayload(email, payload, 'step_identity');
+        }
+        if (email) {
+          return;
         }
         const updates = {
           phoneNumber: '',

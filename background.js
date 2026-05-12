@@ -8924,6 +8924,34 @@ async function handleStepData(step, payload) {
     return messageRouter.handleStepData(step, payload);
   }
 
+  function shouldPreservePhoneIdentityForStepEmailPayload(state = {}, stepPayload = {}) {
+    if (String(stepPayload.accountIdentifierType || '').trim().toLowerCase() === 'email') {
+      return false;
+    }
+    return Boolean(
+      String(state.signupPhoneNumber || '').trim()
+      || (String(state.accountIdentifierType || '').trim().toLowerCase() === 'phone'
+        && String(state.accountIdentifier || '').trim())
+      || state.signupPhoneActivation
+      || state.signupPhoneCompletedActivation
+    );
+  }
+
+  async function persistStepEmailPayload(email, stepPayload = {}, source = 'step_identity') {
+    if (!email) {
+      return;
+    }
+    const currentState = await getState();
+    if (shouldPreservePhoneIdentityForStepEmailPayload(currentState, stepPayload)) {
+      await persistRegistrationEmailState(currentState, email, {
+        source,
+        preserveAccountIdentity: true,
+      });
+      return;
+    }
+    await setEmailState(email);
+  }
+
   switch (step) {
     case 1: {
       const updates = {};
@@ -8949,8 +8977,8 @@ async function handleStepData(step, payload) {
       break;
     }
     case 2:
-      if (payload.email) await setEmailState(payload.email);
-      if (payload.accountIdentifierType || payload.accountIdentifier || payload.signupPhoneNumber || payload.signupPhoneActivation) {
+      await persistStepEmailPayload(payload.email, payload, 'step2_identity');
+      if (!payload.email && (payload.accountIdentifierType || payload.accountIdentifier || payload.signupPhoneNumber || payload.signupPhoneActivation)) {
         await setState({
           accountIdentifierType: payload.accountIdentifierType || null,
           accountIdentifier: String(payload.accountIdentifier || '').trim(),
@@ -8969,7 +8997,7 @@ async function handleStepData(step, payload) {
       }
       break;
     case 3:
-      if (payload.email) await setEmailState(payload.email);
+      await persistStepEmailPayload(payload.email, payload, 'step3_identity');
       if (payload.signupVerificationRequestedAt) {
         await setState({ signupVerificationRequestedAt: payload.signupVerificationRequestedAt });
       }
@@ -11724,6 +11752,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   setContributionMode,
   setEmailState,
   setEmailStateSilently,
+  persistRegistrationEmailState,
   setFreeReusablePhoneActivation,
   setSignupPhoneState,
   setSignupPhoneStateSilently,
