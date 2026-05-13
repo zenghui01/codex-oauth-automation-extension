@@ -116,6 +116,15 @@ test('sidepanel normalizeSignupMethod stays independent from signup constants du
   assert.doesNotMatch(source, /SIGNUP_METHOD_(PHONE|EMAIL)/);
 });
 
+test('sidepanel initializes latestState before bootstrapping shared step definitions', () => {
+  const latestStateIndex = sidepanelSource.indexOf('let latestState = null;');
+  const bootstrapIndex = sidepanelSource.indexOf('let stepDefinitions = getStepDefinitionsForMode(false, {');
+
+  assert.notEqual(latestStateIndex, -1);
+  assert.notEqual(bootstrapIndex, -1);
+  assert.ok(latestStateIndex < bootstrapIndex);
+});
+
 test('sidepanel signup method UI syncs shared step definitions with the selected signup method', () => {
   const source = extractFunction('updateSignupMethodUI');
   assert.match(source, /syncStepDefinitionsForMode\(/);

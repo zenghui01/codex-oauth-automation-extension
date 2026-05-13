@@ -518,6 +518,7 @@ const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+let latestState = null;
 let currentPlusModeEnabled = false;
 let currentPlusPaymentMethod = DEFAULT_PLUS_PAYMENT_METHOD;
 let currentSignupMethod = DEFAULT_SIGNUP_METHOD;
@@ -1123,7 +1124,6 @@ function validateCurrentRegistrationEmail(email = inputEmail.value.trim(), optio
   return false;
 }
 
-let latestState = null;
 let currentAutoRun = {
   autoRunning: false,
   phase: 'idle',
