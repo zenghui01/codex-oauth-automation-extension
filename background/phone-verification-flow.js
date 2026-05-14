@@ -396,6 +396,60 @@
       return Math.round(parsed * 10000) / 10000;
     }
 
+    function resolvePhonePriceRange(state = {}, provider = DEFAULT_PHONE_SMS_PROVIDER) {
+      const normalizedProvider = normalizePhoneSmsProvider(provider);
+      const minPriceLimit = normalizedProvider === PHONE_SMS_PROVIDER_5SIM
+        ? normalizeHeroSmsPriceLimit(state?.fiveSimMinPrice)
+        : normalizeHeroSmsPriceLimit(state?.heroSmsMinPrice);
+      const maxPriceLimit = normalizedProvider === PHONE_SMS_PROVIDER_5SIM
+        ? normalizeHeroSmsPriceLimit(state?.fiveSimMaxPrice)
+        : normalizeHeroSmsPriceLimit(state?.heroSmsMaxPrice);
+      return {
+        provider: normalizedProvider,
+        minPriceLimit,
+        maxPriceLimit,
+        hasMinPriceLimit: minPriceLimit !== null,
+        hasMaxPriceLimit: maxPriceLimit !== null,
+        invalidRange: minPriceLimit !== null && maxPriceLimit !== null && minPriceLimit > maxPriceLimit,
+      };
+    }
+
+    function isPriceWithinRange(price, minPriceLimit = null, maxPriceLimit = null) {
+      const numeric = Number(price);
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        return false;
+      }
+      const normalized = Math.round(numeric * 10000) / 10000;
+      if (minPriceLimit !== null && normalized < minPriceLimit) {
+        return false;
+      }
+      if (maxPriceLimit !== null && normalized > maxPriceLimit) {
+        return false;
+      }
+      return true;
+    }
+
+    function filterPriceCandidatesWithinRange(prices = [], minPriceLimit = null, maxPriceLimit = null) {
+      return (Array.isArray(prices) ? prices : []).filter((price) => (
+        isPriceWithinRange(price, minPriceLimit, maxPriceLimit)
+      ));
+    }
+
+    function formatPhonePriceRangeText(minPriceLimit = null, maxPriceLimit = null) {
+      const minPrice = normalizeHeroSmsPriceLimit(minPriceLimit);
+      const maxPrice = normalizeHeroSmsPriceLimit(maxPriceLimit);
+      if (minPrice !== null && maxPrice !== null) {
+        return `${minPrice}~${maxPrice}`;
+      }
+      if (minPrice !== null) {
+        return `${minPrice}~`;
+      }
+      if (maxPrice !== null) {
+        return `~${maxPrice}`;
+      }
+      return 'unbounded';
+    }
+
     function isPhoneNumberUsedError(value) {
       const text = String(value || '').trim();
       if (!text) {
@@ -2030,7 +2084,7 @@
       if (!text) {
         return false;
       }
-      return /no\s+numbers\s+available\s+across|no\s+free\s+phones|numbers?\s+not\s+found|no\s+numbers\s+within\s+maxprice|step\s*9:\s*(?:5sim|nexsms)\s+countries\s+are\s+empty|\bNO_NUMBERS\b/i.test(text);
+      return /no\s+numbers\s+available\s+across|no\s+free\s+phones|numbers?\s+not\s+found|no\s+numbers\s+within\s+(?:maxprice|price\s+range)|price\s+range\s+is\s+invalid|step\s*9:\s*(?:5sim|nexsms)\s+countries\s+are\s+empty|\bNO_NUMBERS\b/i.test(text);
     }
 
     function resolveNoSupplyDiagnosticsContext(state = {}, providerOrder = []) {
@@ -2040,22 +2094,37 @@
       const heroCountryCount = resolveCountryCandidates(state).length;
       const fiveSimCountryCount = resolveFiveSimCountryCandidates(state).length;
       const nexSmsCountryCount = resolveNexSmsCountryCandidates(state).length;
-      const maxPrice = normalizeHeroSmsPriceLimit(state?.heroSmsMaxPrice);
+      const activeProvider = normalizePhoneSmsProvider(state?.phoneSmsProvider || DEFAULT_PHONE_SMS_PROVIDER);
+      const priceRange = resolvePhonePriceRange(state, activeProvider);
+      const minPrice = priceRange.minPriceLimit;
+      const maxPrice = priceRange.maxPriceLimit;
       const acquirePriority = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
       return {
         order,
         heroCountryCount,
         fiveSimCountryCount,
         nexSmsCountryCount,
+        minPrice,
         maxPrice,
+        priceRangeInvalid: priceRange.invalidRange,
+        priceRangeText: formatPhonePriceRangeText(minPrice, maxPrice),
         acquirePriority,
       };
     }
 
     function formatNoSupplySuggestion(context = {}) {
       const suggestions = [];
+      const minPrice = Number(context?.minPrice);
       const maxPrice = Number(context?.maxPrice);
-      if (!Number.isFinite(maxPrice) || maxPrice <= 0) {
+      const hasMinPrice = Number.isFinite(minPrice) && minPrice > 0;
+      const hasMaxPrice = Number.isFinite(maxPrice) && maxPrice > 0;
+      if (context?.priceRangeInvalid) {
+        suggestions.push('先修正价格区间（最低购买价不能高于价格上限）');
+      } else if (hasMinPrice && hasMaxPrice) {
+        suggestions.push(`先适当放宽价格区间（当前 ${context.priceRangeText || `${minPrice}~${maxPrice}`}）`);
+      } else if (hasMinPrice) {
+        suggestions.push(`可适当降低最低购买价（当前 ${context.priceRangeText || `${minPrice}~`}）`);
+      } else if (!hasMaxPrice) {
         suggestions.push('先设置价格上限（建议 >= 0.12）');
       } else if (maxPrice < 0.12) {
         suggestions.push('先提高价格上限（当前偏低）');
@@ -2118,11 +2187,13 @@
         latestState && typeof latestState === 'object' ? latestState : state,
         providerOrder
       );
+      const minPriceText = context.minPrice === null ? '未设置' : String(context.minPrice);
       const maxPriceText = context.maxPrice === null ? '未设置' : String(context.maxPrice);
+      const priceRangeText = context.priceRangeText || formatPhonePriceRangeText(context.minPrice, context.maxPrice);
       const providerOrderText = context.order.join(' > ');
       const suggestion = formatNoSupplySuggestion(context);
       await addLog(
-        `Step 9 diagnostics: 无号连续失败 ${nextStreak} 次；maxPrice=${maxPriceText}；providerOrder=${providerOrderText}；国家数 HeroSMS=${context.heroCountryCount}, 5sim=${context.fiveSimCountryCount}, NexSMS=${context.nexSmsCountryCount}。建议：${suggestion}。`,
+        `Step 9 diagnostics: 无号连续失败 ${nextStreak} 次；priceRange=${priceRangeText}；minPrice=${minPriceText}；maxPrice=${maxPriceText}；providerOrder=${providerOrderText}；国家数 HeroSMS=${context.heroCountryCount}, 5sim=${context.fiveSimCountryCount}, NexSMS=${context.nexSmsCountryCount}。建议：${suggestion}。`,
         nextStreak >= 2 ? 'warn' : 'info'
       );
       return true;
@@ -2229,6 +2300,7 @@
       let retriedWithUpdatedPrice = false;
       let retriedWithoutPrice = false;
       const userLimit = normalizeHeroSmsPriceLimit(options.userLimit);
+      const userMinLimit = normalizeHeroSmsPriceLimit(options.userMinLimit);
 
       while (true) {
         try {
@@ -2247,6 +2319,11 @@
             if (userLimit !== null && updatedMaxPrice > userLimit) {
               throw new Error(
                 `HeroSMS ${action} failed: WRONG_MAX_PRICE requires ${updatedMaxPrice}, which exceeds configured maxPrice=${userLimit}.`
+              );
+            }
+            if (userMinLimit !== null && updatedMaxPrice < userMinLimit) {
+              throw new Error(
+                `HeroSMS ${action} failed: WRONG_MAX_PRICE requires ${updatedMaxPrice}, which is below configured minPrice=${userMinLimit}.`
               );
             }
             nextMaxPrice = updatedMaxPrice;
@@ -2326,7 +2403,7 @@
       return candidates;
     }
 
-    function findLowestFiveSimPrice(payload, product = DEFAULT_FIVE_SIM_PRODUCT, countryCode = '') {
+    function findLowestFiveSimPrice(payload, product = DEFAULT_FIVE_SIM_PRODUCT, countryCode = '', priceRange = {}) {
       const normalizedProduct = normalizeFiveSimCountryCode(product, DEFAULT_FIVE_SIM_PRODUCT);
       const normalizedCountryCode = normalizeFiveSimCountryCode(countryCode, '');
       const root = payload && typeof payload === 'object'
@@ -2337,7 +2414,11 @@
           ? (root?.[normalizedCountryCode] || root)
           : root
       );
-      const candidates = collectFiveSimPriceCandidates(countryPayload, []);
+      const candidates = filterPriceCandidatesWithinRange(
+        buildSortedUniquePriceCandidates(collectFiveSimPriceCandidates(countryPayload, [])),
+        priceRange?.minPriceLimit ?? null,
+        priceRange?.maxPriceLimit ?? null
+      );
       if (!candidates.length) {
         return null;
       }
@@ -2372,7 +2453,7 @@
       return /not\s+enough\s+balance|no\s+balance|unauthorized|invalid\s+token|forbidden|bad\s+key|wrong\s+key|banned/i.test(text);
     }
 
-    async function resolveFiveSimLowestPrice(config, countryCode) {
+    async function resolveFiveSimLowestPrice(config, countryCode, priceRange = {}) {
       try {
         const payload = await fetchFiveSimPayload(
           config,
@@ -2385,7 +2466,7 @@
             },
           }
         );
-        return findLowestFiveSimPrice(payload, config.product, countryCode);
+        return findLowestFiveSimPrice(payload, config.product, countryCode, priceRange);
       } catch {
         return null;
       }
@@ -2467,9 +2548,15 @@
         }
       }
 
-      const maxPriceLimit = config.maxPriceLimit === undefined
-        ? normalizeHeroSmsPriceLimit(state.heroSmsMaxPrice)
-        : config.maxPriceLimit;
+      const priceRange = resolvePhonePriceRange(state, PHONE_SMS_PROVIDER_5SIM);
+      if (priceRange.invalidRange) {
+        throw new Error(
+          `5sim price range is invalid: minPrice=${priceRange.minPriceLimit} exceeds maxPrice=${priceRange.maxPriceLimit}.`
+        );
+      }
+      const maxPriceLimit = priceRange.maxPriceLimit;
+      const minPriceLimit = priceRange.minPriceLimit;
+      const hasPriceBounds = priceRange.hasMinPriceLimit || priceRange.hasMaxPriceLimit;
       const acquirePriority = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
       const preferredPriceTier = normalizeHeroSmsPriceLimit(state?.heroSmsPreferredPrice);
       const countryPriceFloorByCountryCode = normalizeCountryPriceFloorMap(
@@ -2504,7 +2591,7 @@
           const rankedCandidates = [];
           for (const [index, countryConfig] of countryCandidates.entries()) {
             const countryCode = normalizeFiveSimCountryCode(countryConfig.code || countryConfig.id || '', 'thailand');
-            const lowestPrice = await resolveFiveSimLowestPrice(config, countryCode);
+            const lowestPrice = await resolveFiveSimLowestPrice(config, countryCode, priceRange);
             rankedCandidates.push({
               index,
               countryConfig,
@@ -2593,11 +2680,13 @@
                 ),
               ]
             );
-            const boundedPriceCandidates = maxPriceLimit === null
-              ? rawPriceCandidates
-              : rawPriceCandidates.filter((price) => Number(price) <= maxPriceLimit);
+            const rangeFilteredPriceCandidates = filterPriceCandidatesWithinRange(
+              rawPriceCandidates,
+              minPriceLimit,
+              maxPriceLimit
+            );
             const orderedPricesFromCatalog = reorderPriceCandidates(
-              boundedPriceCandidates,
+              rangeFilteredPriceCandidates,
               acquirePriority,
               preferredPriceTier
             );
@@ -2610,8 +2699,16 @@
                   ]
                   : orderedPricesFromCatalog
               )
-              : (maxPriceLimit !== null ? [maxPriceLimit] : [null]);
-            const floorFilteredPrices = filterPriceCandidatesAboveFloor(orderedPrices, countryPriceFloor);
+              : (
+                minPriceLimit !== null
+                  ? (maxPriceLimit !== null ? [maxPriceLimit] : [])
+                  : (maxPriceLimit !== null ? [maxPriceLimit] : [null])
+              );
+            const rangeCheckedPrices = filterPriceCandidatesWithinRange(orderedPrices, minPriceLimit, maxPriceLimit);
+            const candidatePrices = rangeCheckedPrices.length
+              ? rangeCheckedPrices
+              : (hasPriceBounds ? [] : orderedPrices);
+            const floorFilteredPrices = filterPriceCandidatesAboveFloor(candidatePrices, countryPriceFloor);
             const hasCountryPriceFloor = (
               countryPriceFloor !== null
               && Number.isFinite(Number(countryPriceFloor))
@@ -2628,13 +2725,21 @@
               ? (
                 floorFilteredPrices.length
                   ? floorFilteredPrices
-                  : (hasAlternativeCountries ? [] : orderedPrices.slice(0, 1))
+                  : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
               )
-              : (floorFilteredPrices.length ? floorFilteredPrices : orderedPrices);
+              : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
 
             if (!pricesToTry.length) {
               const lowestCatalog = rawPriceCandidates.length ? rawPriceCandidates[0] : null;
               if (
+                minPriceLimit !== null
+                && !rangeFilteredPriceCandidates.length
+                && rawPriceCandidates.length
+              ) {
+                noNumbersByCountry.push(
+                  `${countryLabel}: no numbers within price range ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)}; visible tiers=${rawPriceCandidates.join(', ')}`
+                );
+              } else if (
                 maxPriceLimit !== null
                 && lowestCatalog !== null
                 && Number(lowestCatalog) > Number(maxPriceLimit)
@@ -2642,7 +2747,7 @@
                 noNumbersByCountry.push(
                   `${countryLabel}: no numbers within maxPrice=${maxPriceLimit}; lowest listed=${lowestCatalog}`
                 );
-              } else if (countryPriceFloor !== null && boundedPriceCandidates.length) {
+              } else if (countryPriceFloor !== null && rangeFilteredPriceCandidates.length) {
                 noNumbersByCountry.push(
                   `${countryLabel}: no higher price tier above ${countryPriceFloor} for current fallback attempt`
                 );
@@ -2716,10 +2821,20 @@
               return acquiredActivation;
             }
 
-            const lowestPrice = rawPriceCandidates.length ? rawPriceCandidates[0] : await resolveFiveSimLowestPrice(config, countryCode);
-            if (maxPriceLimit !== null && lowestPrice !== null && Number(lowestPrice) > Number(maxPriceLimit)) {
+            const lowestCatalogPrice = rawPriceCandidates.length
+              ? rawPriceCandidates[0]
+              : await resolveFiveSimLowestPrice(config, countryCode);
+            if (
+              minPriceLimit !== null
+              && !rangeFilteredPriceCandidates.length
+              && rawPriceCandidates.length
+            ) {
               noNumbersByCountry.push(
-                `${countryLabel}: no numbers within maxPrice=${maxPriceLimit}; lowest listed=${lowestPrice}`
+                `${countryLabel}: no numbers within price range ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)}; visible tiers=${rawPriceCandidates.join(', ')}`
+              );
+            } else if (maxPriceLimit !== null && lowestCatalogPrice !== null && Number(lowestCatalogPrice) > Number(maxPriceLimit)) {
+              noNumbersByCountry.push(
+                `${countryLabel}: no numbers within maxPrice=${maxPriceLimit}; lowest listed=${lowestCatalogPrice}`
               );
             } else if (isFiveSimRateLimitError(countryNoNumbersText)) {
               rateLimitByCountry.push(`${countryLabel}: ${countryNoNumbersText || 'rate limit'}`);
@@ -2737,10 +2852,17 @@
               throw new Error(`5sim buy activation failed: ${describeFiveSimPayload(error?.payload || error?.message) || 'unknown terminal error'}`);
             }
             if (isFiveSimNoNumbersError(error?.payload || error?.message)) {
-              const lowestPrice = await resolveFiveSimLowestPrice(config, countryCode);
-              if (maxPriceLimit !== null && lowestPrice !== null && lowestPrice > maxPriceLimit) {
+              const lowestRangePrice = await resolveFiveSimLowestPrice(config, countryCode, priceRange);
+              const lowestCatalogPrice = lowestRangePrice === null
+                ? await resolveFiveSimLowestPrice(config, countryCode)
+                : lowestRangePrice;
+              if (minPriceLimit !== null && lowestRangePrice === null) {
                 noNumbersByCountry.push(
-                  `${countryLabel}: no numbers within maxPrice=${maxPriceLimit}; lowest listed=${lowestPrice}`
+                  `${countryLabel}: no numbers within price range ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)}`
+                );
+              } else if (maxPriceLimit !== null && lowestCatalogPrice !== null && lowestCatalogPrice > maxPriceLimit) {
+                noNumbersByCountry.push(
+                  `${countryLabel}: no numbers within maxPrice=${maxPriceLimit}; lowest listed=${lowestCatalogPrice}`
                 );
               } else {
                 noNumbersByCountry.push(`${countryLabel}: ${describeFiveSimPayload(error?.payload || error?.message) || 'no free phones'}`);
@@ -2957,6 +3079,15 @@
       }
 
       const acquirePriority = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
+      const priceRange = resolvePhonePriceRange(state, PHONE_SMS_PROVIDER_NEXSMS);
+      if (priceRange.invalidRange) {
+        throw new Error(
+          `NexSMS price range is invalid: minPrice=${priceRange.minPriceLimit} exceeds maxPrice=${priceRange.maxPriceLimit}.`
+        );
+      }
+      const minPriceLimit = priceRange.minPriceLimit;
+      const maxPriceLimit = priceRange.maxPriceLimit;
+      const hasPriceBounds = priceRange.hasMinPriceLimit || priceRange.hasMaxPriceLimit;
       const preferredPriceTier = normalizeHeroSmsPriceLimit(state?.heroSmsPreferredPrice);
       const countryPriceFloorByCountryId = normalizeCountryPriceFloorMap(
         options?.countryPriceFloorByCountryId,
@@ -2995,8 +3126,16 @@
               const pricePlan = await resolveNexSmsCountryPricePlan(config, attempt.countryConfig, state);
               attempt.pricePlan = pricePlan;
               const orderedForRanking = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
-              attempt.orderingPrice = Array.isArray(orderedForRanking) && orderedForRanking.length
-                ? Number(orderedForRanking[0])
+              const rangeFilteredForRanking = filterPriceCandidatesWithinRange(
+                orderedForRanking,
+                minPriceLimit,
+                maxPriceLimit
+              );
+              const rankingPrices = rangeFilteredForRanking.length
+                ? rangeFilteredForRanking
+                : (hasPriceBounds ? [] : orderedForRanking);
+              attempt.orderingPrice = Array.isArray(rankingPrices) && rankingPrices.length
+                ? Number(rankingPrices[0])
                 : Number.POSITIVE_INFINITY;
             } catch (error) {
               attempt.pricePlan = null;
@@ -3061,7 +3200,15 @@
           }
 
             const orderedPrices = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
-            const floorFilteredPrices = filterPriceCandidatesAboveFloor(orderedPrices, countryPriceFloor);
+            const rangeFilteredPrices = filterPriceCandidatesWithinRange(
+              orderedPrices,
+              minPriceLimit,
+              maxPriceLimit
+            );
+            const candidatePrices = rangeFilteredPrices.length
+              ? rangeFilteredPrices
+              : (hasPriceBounds ? [] : orderedPrices);
+            const floorFilteredPrices = filterPriceCandidatesAboveFloor(candidatePrices, countryPriceFloor);
             const hasCountryPriceFloor = (
               countryPriceFloor !== null
               && Number.isFinite(Number(countryPriceFloor))
@@ -3077,10 +3224,16 @@
               ? (
                 floorFilteredPrices.length
                   ? floorFilteredPrices
-                  : (hasAlternativeCountries ? [] : orderedPrices.slice(0, 1))
+                  : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
               )
-              : (floorFilteredPrices.length ? floorFilteredPrices : orderedPrices);
+              : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
             if (!pricesToTry.length) {
+              if (priceRange.hasMinPriceLimit && !rangeFilteredPrices.length) {
+                noNumbersByCountry.push(
+                  `${countryLabel}: no numbers within price range ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)}`
+                );
+                continue;
+              }
               if (
                 countryPriceFloor !== null
                 && Array.isArray(pricePlan.prices)
@@ -3217,6 +3370,15 @@
         }
       }
       const acquirePriority = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
+      const priceRange = resolvePhonePriceRange(state, PHONE_SMS_PROVIDER_HERO);
+      if (priceRange.invalidRange) {
+        throw new Error(
+          `HeroSMS price range is invalid: minPrice=${priceRange.minPriceLimit} exceeds maxPrice=${priceRange.maxPriceLimit}.`
+        );
+      }
+      const minPriceLimit = priceRange.minPriceLimit;
+      const maxPriceLimit = priceRange.maxPriceLimit;
+      const hasPriceBounds = priceRange.hasMinPriceLimit || priceRange.hasMaxPriceLimit;
       const preferredPriceTier = normalizeHeroSmsPriceLimit(state?.heroSmsPreferredPrice);
       const countryPriceFloorByCountryId = normalizeCountryPriceFloorMap(
         options?.countryPriceFloorByCountryId,
@@ -3257,8 +3419,16 @@
           for (const attempt of countryAttempts) {
             const pricePlan = await resolvePhoneActivationPricePlan(config, attempt.countryConfig, state);
             const orderedPrices = reorderPriceCandidates(pricePlan?.prices, acquirePriority, preferredPriceTier);
+            const rangeFilteredForRanking = filterPriceCandidatesWithinRange(
+              orderedPrices,
+              minPriceLimit,
+              maxPriceLimit
+            );
+            const rankingPrices = rangeFilteredForRanking.length
+              ? rangeFilteredForRanking
+              : (hasPriceBounds ? [] : orderedPrices);
             const numericPrices = Array.isArray(orderedPrices)
-              ? orderedPrices
+              ? rankingPrices
                   .map((value) => Number(value))
                   .filter((value) => Number.isFinite(value) && value > 0)
               : [];
@@ -3308,7 +3478,15 @@
           let noNumbersObservedInCountry = false;
 
           const orderedPrices = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
-          const floorFilteredPrices = filterPriceCandidatesAboveFloor(orderedPrices, countryPriceFloor);
+          const rangeFilteredPrices = filterPriceCandidatesWithinRange(
+            orderedPrices,
+            minPriceLimit,
+            maxPriceLimit
+          );
+          const candidatePrices = rangeFilteredPrices.length
+            ? rangeFilteredPrices
+            : (hasPriceBounds ? [] : orderedPrices);
+          const floorFilteredPrices = filterPriceCandidatesAboveFloor(candidatePrices, countryPriceFloor);
           const hasCountryPriceFloor = (
             countryPriceFloor !== null
             && Number.isFinite(Number(countryPriceFloor))
@@ -3325,9 +3503,9 @@
             ? (
               floorFilteredPrices.length
                 ? floorFilteredPrices
-                : (hasAlternativeCountries ? [] : orderedPrices.slice(0, 1))
+                : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
             )
-            : (floorFilteredPrices.length ? floorFilteredPrices : orderedPrices);
+            : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
           const rawTierText = Array.isArray(pricePlan?.prices) && pricePlan.prices.length
             ? pricePlan.prices
                 .map((value) => (value === null || value === undefined ? 'auto' : String(value)))
@@ -3347,6 +3525,12 @@
             );
           }
           if (!pricesToTry.length) {
+            if (priceRange.hasMinPriceLimit && !rangeFilteredPrices.length) {
+              noNumbersByCountry.push(
+                `${countryConfig.label}: no numbers within price range ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)}`
+              );
+              continue;
+            }
             if (
               countryPriceFloor !== null
               && Array.isArray(pricePlan.prices)
@@ -3388,6 +3572,7 @@
                   maxPrice,
                   {
                     userLimit: pricePlan.userLimit,
+                    userMinLimit: minPriceLimit,
                     fixedPrice,
                   }
                 );

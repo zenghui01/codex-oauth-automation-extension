@@ -163,6 +163,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoStepDelaySeconds: null,
   gopayHelperApiUrl: 'https://gpc.qlhazycoder.top',
   mailProvider: '163',
+  heroSmsMinPrice: '',
+  fiveSimMinPrice: '',
 };
 function normalizePanelMode(value) { return value === 'sub2api' ? 'sub2api' : (value === 'codex2api' ? 'codex2api' : 'cpa'); }
 function normalizeLocalCpaStep9Mode(value) { return value === 'bypass' ? 'bypass' : 'submit'; }
@@ -241,6 +243,8 @@ return {
   assert.equal(api.normalizePersistentSettingValue('phoneCodeTimeoutWindows', '3'), 3);
   assert.equal(api.normalizePersistentSettingValue('phoneCodePollIntervalSeconds', '6'), 6);
   assert.equal(api.normalizePersistentSettingValue('phoneCodePollMaxRounds', '18'), 18);
+  assert.equal(api.normalizePersistentSettingValue('heroSmsMinPrice', '0.123456'), '0.1235');
+  assert.equal(api.normalizePersistentSettingValue('heroSmsMinPrice', '0'), '');
   assert.equal(api.normalizePersistentSettingValue('heroSmsMaxPrice', '0.123456'), '0.1235');
   assert.equal(api.normalizePersistentSettingValue('heroSmsMaxPrice', '0'), '');
   assert.equal(api.normalizePersistentSettingValue('heroSmsPreferredPrice', '0.051234'), '0.0512');
@@ -259,6 +263,8 @@ return {
   assert.equal(api.normalizePersistentSettingValue('fiveSimCountryLabel', ''), '越南 (Vietnam)');
   assert.equal(api.normalizePersistentSettingValue('fiveSimMaxPrice', '9.87654'), '9.8765');
   assert.equal(api.normalizePersistentSettingValue('fiveSimMaxPrice', '-1'), '');
+  assert.equal(api.normalizePersistentSettingValue('fiveSimMinPrice', '9.87654'), '9.8765');
+  assert.equal(api.normalizePersistentSettingValue('fiveSimMinPrice', '-1'), '');
   assert.equal(api.normalizePersistentSettingValue('fiveSimOperator', ''), 'any');
   assert.deepStrictEqual(
     api.normalizePersistentSettingValue('fiveSimCountryFallback', [{ id: 'usa', label: 'USA' }, 'thailand:Thailand']),
@@ -326,6 +332,12 @@ return {
     [1, 6]
   );
   assert.equal(api.normalizePersistentSettingValue('nexSmsServiceCode', ' OT! '), 'ot');
+  const rangePayload = api.buildPersistentSettingsPayload({
+    heroSmsMinPrice: '0.023456',
+    fiveSimMinPrice: '0.0789',
+  });
+  assert.equal(rangePayload.heroSmsMinPrice, '0.0235');
+  assert.equal(rangePayload.fiveSimMinPrice, '0.0789');
   assert.deepStrictEqual(
     api.normalizePersistentSettingValue('phonePreferredActivation', {
       provider: 'nexsms',

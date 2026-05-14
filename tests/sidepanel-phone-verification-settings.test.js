@@ -98,6 +98,7 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.doesNotMatch(html, /id="select-hero-sms-country-fallback"/);
   assert.match(html, /id="row-hero-sms-api-key"/);
   assert.match(html, /id="row-hero-sms-max-price"/);
+  assert.match(html, /id="input-hero-sms-min-price"/);
   assert.match(html, /id="btn-phone-sms-balance"/);
   assert.match(html, /id="display-phone-sms-balance"/);
   assert.match(html, /id="row-five-sim-operator"/);
@@ -756,6 +757,8 @@ let latestState = {
   mail2925UseAccountPool: false,
   currentMail2925AccountId: '',
   fiveSimCountryOrder: ['thailand', 'england'],
+  heroSmsMinPrice: '0.0444',
+  fiveSimMinPrice: '0.3333',
 };
 let cloudflareDomainEditMode = false;
 let cloudflareTempEmailDomainEditMode = false;
@@ -820,6 +823,7 @@ function getSelectedPhonePreferredActivation() {
   };
 }
 const inputHeroSmsMaxPrice = { value: '0.12' };
+const inputHeroSmsMinPrice = { value: '0.03' };
 const inputHeroSmsPreferredPrice = { value: '0.0512' };
 const inputPhoneReplacementLimit = { value: '5' };
 const inputPhoneCodeWaitSeconds = { value: '75' };
@@ -900,6 +904,7 @@ ${extractFunction('normalizeFiveSimOperator')}
 ${extractFunction('normalizeFiveSimMaxPriceValue')}
 ${extractFunction('normalizeFiveSimCountryFallbackList')}
 ${extractFunction('normalizePhoneSmsMaxPriceValue')}
+${extractFunction('normalizePhoneSmsMinPriceValue')}
 ${extractFunction('normalizeHeroSmsMaxPriceValue')}
 ${extractFunction('normalizePhoneVerificationReplacementLimit')}
 ${extractFunction('normalizePhoneCodeWaitSecondsValue')}
@@ -948,6 +953,7 @@ return { collectSettingsPayload };
   assert.equal(payload.freePhoneReuseEnabled, true);
   assert.equal(payload.freePhoneReuseAutoEnabled, true);
   assert.equal(payload.heroSmsAcquirePriority, 'price');
+  assert.equal(payload.heroSmsMinPrice, '0.03');
   assert.equal(payload.heroSmsMaxPrice, '0.12');
   assert.equal(payload.heroSmsPreferredPrice, '0.0512');
   assert.deepStrictEqual(payload.phonePreferredActivation, {
@@ -969,6 +975,7 @@ return { collectSettingsPayload };
   assert.deepStrictEqual(payload.heroSmsCountryFallback, [{ id: 16, label: 'United Kingdom' }]);
   assert.equal(payload.fiveSimApiKey, 'five-sim-key');
   assert.equal(payload.fiveSimCountryId, 'vietnam');
+  assert.equal(payload.fiveSimMinPrice, '0.3333');
 });
 
 test('switchPhoneSmsProvider saves API keys independently when the select value has already changed', async () => {
@@ -977,7 +984,9 @@ let latestState = {
   phoneSmsProvider: 'hero-sms',
   heroSmsApiKey: 'hero-old',
   fiveSimApiKey: 'five-old',
+  heroSmsMinPrice: '0.04',
   heroSmsMaxPrice: '0.11',
+  fiveSimMinPrice: '0.88',
   fiveSimMaxPrice: '12',
   heroSmsCountryId: 52,
   heroSmsCountryLabel: 'Thailand',
@@ -998,6 +1007,7 @@ const FIVE_SIM_SUPPORTED_COUNTRY_ID_SET = new Set(['indonesia', 'thailand', 'vie
 const HERO_SMS_SUPPORTED_COUNTRY_ID_SET = new Set(['6', '52', '10']);
 const selectPhoneSmsProvider = { value: 'hero-sms', dataset: { activeProvider: 'hero-sms' } };
 const inputHeroSmsApiKey = { value: 'hero-live' };
+const inputHeroSmsMinPrice = { value: '0.03' };
 const inputHeroSmsMaxPrice = { value: '0.22' };
 const inputFiveSimOperator = { value: 'any' };
 const displayHeroSmsPriceTiers = { textContent: '' };
@@ -1015,6 +1025,7 @@ ${extractFunction('normalizeFiveSimCountryLabel')}
 ${extractFunction('normalizeFiveSimOperator')}
 ${extractFunction('normalizeFiveSimMaxPriceValue')}
 ${extractFunction('normalizeHeroSmsMaxPriceValue')}
+${extractFunction('normalizePhoneSmsMinPriceValue')}
 ${extractFunction('normalizePhoneSmsMaxPriceValue')}
 ${extractFunction('normalizeHeroSmsCountryId')}
 ${extractFunction('normalizeHeroSmsCountryLabel')}
@@ -1042,6 +1053,7 @@ ${extractFunction('switchPhoneSmsProvider')}
 return {
   selectPhoneSmsProvider,
   inputHeroSmsApiKey,
+  inputHeroSmsMinPrice,
   get latestState() { return latestState; },
   get savedPayload() { return savedPayload; },
   switchPhoneSmsProvider,
@@ -1055,7 +1067,10 @@ return {
   assert.equal(api.latestState.phoneSmsProvider, '5sim');
   assert.equal(api.latestState.heroSmsApiKey, 'hero-live');
   assert.equal(api.latestState.fiveSimApiKey, 'five-old');
+  assert.equal(api.latestState.heroSmsMinPrice, '0.03');
+  assert.equal(api.latestState.fiveSimMinPrice, '0.88');
   assert.equal(api.inputHeroSmsApiKey.value, 'five-old');
+  assert.equal(api.inputHeroSmsMinPrice.value, '0.88');
   assert.equal(api.selectPhoneSmsProvider.dataset.activeProvider, '5sim');
 
   api.inputHeroSmsApiKey.value = 'five-live';
@@ -1065,10 +1080,15 @@ return {
   assert.equal(api.latestState.phoneSmsProvider, 'hero-sms');
   assert.equal(api.latestState.heroSmsApiKey, 'hero-live');
   assert.equal(api.latestState.fiveSimApiKey, 'five-live');
+  assert.equal(api.latestState.heroSmsMinPrice, '0.03');
+  assert.equal(api.latestState.fiveSimMinPrice, '0.88');
   assert.equal(api.inputHeroSmsApiKey.value, 'hero-live');
+  assert.equal(api.inputHeroSmsMinPrice.value, '0.03');
   assert.equal(api.selectPhoneSmsProvider.dataset.activeProvider, 'hero-sms');
   assert.equal(api.savedPayload.heroSmsApiKey, 'hero-live');
   assert.equal(api.savedPayload.fiveSimApiKey, 'five-live');
+  assert.equal(api.savedPayload.heroSmsMinPrice, '0.03');
+  assert.equal(api.savedPayload.fiveSimMinPrice, '0.88');
 });
 
 test('formatPhoneSmsPriceEntriesSummary treats HeroSMS physicalCount=0 as out of stock even when count is positive', () => {
@@ -1107,6 +1127,7 @@ const DEFAULT_FIVE_SIM_PRODUCT = 'openai';
 const FIVE_SIM_SUPPORTED_COUNTRY_ID_SET = new Set(['indonesia', 'thailand', 'vietnam']);
 const HERO_SMS_SUPPORTED_COUNTRY_ID_SET = new Set(['6', '52', '10']);
 const inputHeroSmsMaxPrice = { value: '' };
+const inputHeroSmsMinPrice = { value: '0.1' };
 const inputHeroSmsApiKey = { value: '' };
 const inputFiveSimOperator = { value: 'any' };
 const inputFiveSimProduct = { value: 'openai' };
@@ -1126,6 +1147,7 @@ ${extractFunction('normalizeFiveSimCountryCode')}
 ${extractFunction('normalizeFiveSimProductValue')}
 ${extractFunction('normalizeFiveSimOperator')}
 ${extractFunction('normalizePhoneSmsMaxPriceValue')}
+${extractFunction('normalizePhoneSmsMinPriceValue')}
 ${extractFunction('normalizeFiveSimMaxPriceValue')}
 ${extractFunction('normalizeHeroSmsMaxPriceValue')}
 ${extractFunction('normalizeHeroSmsPriceForPreview')}
@@ -1135,6 +1157,12 @@ ${extractFunction('collectHeroSmsPriceEntriesForPreview')}
 ${extractFunction('formatPhoneSmsPriceEntriesSummary')}
 ${extractFunction('describeHeroSmsPreviewPayload')}
 ${extractFunction('summarizeHeroSmsPreviewError')}
+${extractFunction('resolvePhoneSmsPricePreviewRange')}
+${extractFunction('isPhoneSmsPriceWithinPreviewRange')}
+${extractFunction('filterPhoneSmsPriceEntriesForPreviewRange')}
+${extractFunction('filterPhoneSmsPriceValuesForPreviewRange')}
+${extractFunction('formatPhoneSmsPriceRangePreviewText')}
+${extractFunction('buildPhoneSmsPriceRangePreviewMessage')}
 ${extractFunction('formatPriceTiersForPreview')}
 ${extractFunction('formatPriceTiersWithZeroStockForPreview')}
 function normalizeHeroSmsFetchErrorMessage(error) { return error?.message || String(error); }
@@ -1193,7 +1221,7 @@ return {
 
   assert.equal(
     api.displayHeroSmsPriceTiers.textContent,
-    '5sim:\n越南 (Vietnam): 最低 0.1282；档位：0.0769(x0), 0.1282(x4608)'
+    '5sim:\n越南 (Vietnam): 区间内最低 0.1282；档位：0.1282(x4608)'
   );
   assert.equal(api.rowHeroSmsPriceTiers.style.display, '');
   assert.deepStrictEqual(
@@ -1210,5 +1238,13 @@ test('hero sms max price input does not auto-save partial typing states', () => 
   assert.doesNotMatch(
     sidepanelSource,
     /inputHeroSmsMaxPrice\?\.\s*addEventListener\('input',\s*\(\)\s*=>\s*\{\s*markSettingsDirty\(true\);\s*scheduleSettingsAutoSave\(\);/
+  );
+  assert.match(
+    sidepanelSource,
+    /inputHeroSmsMinPrice\?\.\s*addEventListener\('input',\s*\(\)\s*=>\s*\{\s*markSettingsDirty\(true\);\s*\}\);/
+  );
+  assert.doesNotMatch(
+    sidepanelSource,
+    /inputHeroSmsMinPrice\?\.\s*addEventListener\('input',\s*\(\)\s*=>\s*\{\s*markSettingsDirty\(true\);\s*scheduleSettingsAutoSave\(\);/
   );
 });

@@ -1464,7 +1464,7 @@
                 placeholder="ot" />
             </div>
             <div class="data-row" id="row-hero-sms-max-price" style="display:none;">
-              <span class="data-label">价格</span>
+              <span class="data-label">价格区间</span>
               <div class="data-inline hero-sms-price-preview-stack">
                 <div class="hero-sms-price-preview-head">
                   <button id="btn-hero-sms-price-preview" class="btn btn-outline btn-xs data-inline-btn" type="button">查询价格</button>
@@ -1476,9 +1476,15 @@
                 </div>
                 <div class="hero-sms-price-controls-grid">
                   <div class="hero-sms-price-control">
+                    <span class="hero-sms-settings-caption">最低购买价</span>
+                    <div class="setting-controls">
+                      <input type="number" id="input-hero-sms-min-price" class="data-input auto-delay-input mono hero-sms-max-price-input" placeholder="0.05" min="0" step="0.0001" title="接码最低购买价；可空（空=不设下限）" />
+                    </div>
+                  </div>
+                  <div class="hero-sms-price-control">
                     <span class="hero-sms-settings-caption">价格上限</span>
                     <div class="setting-controls">
-                      <input type="number" id="input-hero-sms-max-price" class="data-input auto-delay-input mono hero-sms-max-price-input" placeholder="0.12" min="0" step="0.0001" title="接码价格上限；可空（空=自动价格）" />
+                      <input type="number" id="input-hero-sms-max-price" class="data-input auto-delay-input mono hero-sms-max-price-input" placeholder="0.12" min="0" step="0.0001" title="接码价格上限；可空（空=不设上限）" />
                     </div>
                   </div>
                   <div class="hero-sms-price-control">

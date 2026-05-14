@@ -433,6 +433,7 @@ const inputFiveSimProduct = document.getElementById('input-five-sim-product');
 const inputNexSmsApiKey = document.getElementById('input-nex-sms-api-key');
 const btnToggleNexSmsApiKey = document.getElementById('btn-toggle-nex-sms-api-key');
 const inputNexSmsServiceCode = document.getElementById('input-nex-sms-service-code');
+const inputHeroSmsMinPrice = document.getElementById('input-hero-sms-min-price');
 const inputHeroSmsMaxPrice = document.getElementById('input-hero-sms-max-price');
 const inputHeroSmsPreferredPrice = document.getElementById('input-hero-sms-preferred-price');
 const inputPhoneReplacementLimit = document.getElementById('input-phone-replacement-limit');
@@ -3359,12 +3360,21 @@ function collectSettingsPayload() {
   const currentPhoneSmsMaxPriceValue = typeof inputHeroSmsMaxPrice !== 'undefined' && inputHeroSmsMaxPrice
     ? normalizePhoneSmsMaxPriceValue(inputHeroSmsMaxPrice.value, phoneSmsProviderValue)
     : '';
+  const currentPhoneSmsMinPriceValue = typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice
+    ? normalizePhoneSmsMinPriceValue(inputHeroSmsMinPrice.value, phoneSmsProviderValue)
+    : '';
   const heroSmsMaxPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_HERO_SMS
     ? currentPhoneSmsMaxPriceValue
     : normalizeHeroSmsMaxPriceValue(latestState?.heroSmsMaxPrice || '');
   const fiveSimMaxPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
     ? currentPhoneSmsMaxPriceValue
     : normalizeFiveSimMaxPriceValue(latestState?.fiveSimMaxPrice || '');
+  const heroSmsMinPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
+    ? normalizePhoneSmsMinPriceValue(latestState?.heroSmsMinPrice || '', PHONE_SMS_PROVIDER_HERO_SMS)
+    : currentPhoneSmsMinPriceValue;
+  const fiveSimMinPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
+    ? currentPhoneSmsMinPriceValue
+    : normalizePhoneSmsMinPriceValue(latestState?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
   const defaultFiveSimProduct = typeof DEFAULT_FIVE_SIM_PRODUCT !== 'undefined'
     ? DEFAULT_FIVE_SIM_PRODUCT
     : 'openai';
@@ -3791,6 +3801,7 @@ function collectSettingsPayload() {
     freePhoneReuseEnabled: freePhoneReuseEnabledValue,
     freePhoneReuseAutoEnabled: freePhoneReuseAutoEnabledValue,
     heroSmsAcquirePriority: heroSmsAcquirePriorityValue,
+    heroSmsMinPrice: heroSmsMinPriceValue,
     heroSmsMaxPrice: heroSmsMaxPriceValue,
     heroSmsPreferredPrice: heroSmsPreferredPriceValue,
     phonePreferredActivation: phonePreferredActivationValue,
@@ -3806,6 +3817,7 @@ function collectSettingsPayload() {
     fiveSimCountryLabel: fiveSimCountry.label,
     fiveSimCountryFallback,
     fiveSimMaxPrice: fiveSimMaxPriceValue,
+    fiveSimMinPrice: fiveSimMinPriceValue,
   };
 }
 
@@ -3921,6 +3933,13 @@ function normalizePhoneSmsCountryLabel(value = '', provider = getSelectedPhoneSm
 }
 
 function normalizePhoneSmsMaxPriceValue(value = '', provider = getSelectedPhoneSmsProvider()) {
+  if (normalizePhoneSmsProvider(provider) === PHONE_SMS_PROVIDER_FIVE_SIM) {
+    return normalizeFiveSimMaxPriceValue(value);
+  }
+  return normalizeHeroSmsMaxPriceValue(value);
+}
+
+function normalizePhoneSmsMinPriceValue(value = '', provider = getSelectedPhoneSmsProvider()) {
   if (normalizePhoneSmsProvider(provider) === PHONE_SMS_PROVIDER_FIVE_SIM) {
     return normalizeFiveSimMaxPriceValue(value);
   }
@@ -5068,6 +5087,97 @@ function summarizeHeroSmsPreviewError(payload, responseStatus = 0) {
     return `HTTP ${responseStatus}`;
   }
   return text || '未知错误';
+}
+
+function resolvePhoneSmsPricePreviewRange(provider = '') {
+  const activeProvider = provider || (
+    typeof getSelectedPhoneSmsProvider === 'function'
+      ? getSelectedPhoneSmsProvider()
+      : (typeof DEFAULT_PHONE_SMS_PROVIDER !== 'undefined' ? DEFAULT_PHONE_SMS_PROVIDER : 'hero-sms')
+  );
+  const rawMinPrice = typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice
+    ? inputHeroSmsMinPrice.value
+    : '';
+  const rawMaxPrice = typeof inputHeroSmsMaxPrice !== 'undefined' && inputHeroSmsMaxPrice
+    ? inputHeroSmsMaxPrice.value
+    : '';
+  const minPriceText = typeof normalizePhoneSmsMinPriceValue === 'function'
+    ? normalizePhoneSmsMinPriceValue(rawMinPrice, activeProvider)
+    : normalizeHeroSmsMaxPriceValue(rawMinPrice);
+  const maxPriceText = typeof normalizePhoneSmsMaxPriceValue === 'function'
+    ? normalizePhoneSmsMaxPriceValue(rawMaxPrice, activeProvider)
+    : normalizeHeroSmsMaxPriceValue(rawMaxPrice);
+  const minPrice = minPriceText ? Number(minPriceText) : null;
+  const maxPrice = maxPriceText ? Number(maxPriceText) : null;
+  return {
+    minPrice,
+    maxPrice,
+    hasMinPrice: Number.isFinite(minPrice) && minPrice > 0,
+    hasMaxPrice: Number.isFinite(maxPrice) && maxPrice > 0,
+    invalid: Number.isFinite(minPrice) && minPrice > 0
+      && Number.isFinite(maxPrice) && maxPrice > 0
+      && minPrice > maxPrice,
+  };
+}
+
+function isPhoneSmsPriceWithinPreviewRange(price, range = {}) {
+  const numeric = Number(price);
+  if (!Number.isFinite(numeric) || numeric <= 0 || range?.invalid) {
+    return false;
+  }
+  const normalized = Math.round(numeric * 10000) / 10000;
+  if (range?.hasMinPrice && normalized < Number(range.minPrice)) {
+    return false;
+  }
+  if (range?.hasMaxPrice && normalized > Number(range.maxPrice)) {
+    return false;
+  }
+  return true;
+}
+
+function filterPhoneSmsPriceEntriesForPreviewRange(entries = [], range = {}) {
+  if (!range?.hasMinPrice && !range?.hasMaxPrice && !range?.invalid) {
+    return Array.isArray(entries) ? [...entries] : [];
+  }
+  return (Array.isArray(entries) ? entries : []).filter((entry) => (
+    isPhoneSmsPriceWithinPreviewRange(entry?.price ?? entry?.cost, range)
+  ));
+}
+
+function filterPhoneSmsPriceValuesForPreviewRange(values = [], range = {}) {
+  if (!range?.hasMinPrice && !range?.hasMaxPrice && !range?.invalid) {
+    return Array.isArray(values) ? [...values] : [];
+  }
+  return (Array.isArray(values) ? values : []).filter((price) => (
+    isPhoneSmsPriceWithinPreviewRange(price, range)
+  ));
+}
+
+function formatPhoneSmsPriceRangePreviewText(range = {}) {
+  const minText = range?.hasMinPrice
+    ? (formatHeroSmsPriceForPreview(range.minPrice) || String(range.minPrice))
+    : '';
+  const maxText = range?.hasMaxPrice
+    ? (formatHeroSmsPriceForPreview(range.maxPrice) || String(range.maxPrice))
+    : '';
+  if (minText && maxText) {
+    return `${minText}~${maxText}`;
+  }
+  if (minText) {
+    return `${minText}~`;
+  }
+  if (maxText) {
+    return `~${maxText}`;
+  }
+  return '';
+}
+
+function buildPhoneSmsPriceRangePreviewMessage(range = {}) {
+  const rangeText = formatPhoneSmsPriceRangePreviewText(range);
+  if (range?.invalid) {
+    return `价格区间无效：最低购买价 ${formatHeroSmsPriceForPreview(range.minPrice) || range.minPrice} 高于价格上限 ${formatHeroSmsPriceForPreview(range.maxPrice) || range.maxPrice}`;
+  }
+  return rangeText ? `区间内无可用号源（当前 ${rangeText}）` : '暂无可用号源';
 }
 
 function formatPriceTiersForPreview(entries = [], options = {}) {
@@ -6670,13 +6780,18 @@ async function buildNexSmsPricePreviewLines(options = {}) {
   const serviceCode = normalizeNexSmsServiceCodeValue(
     inputNexSmsServiceCode?.value || latestState?.nexSmsServiceCode || DEFAULT_NEX_SMS_SERVICE_CODE
   );
-  const maxPriceText = normalizeHeroSmsMaxPriceValue(inputHeroSmsMaxPrice?.value || '');
-  const maxPrice = maxPriceText ? Number(maxPriceText) : null;
+  const priceRange = resolvePhoneSmsPricePreviewRange(
+    typeof PHONE_SMS_PROVIDER_NEXSMS !== 'undefined' ? PHONE_SMS_PROVIDER_NEXSMS : 'nexsms'
+  );
+  const maxPrice = priceRange.maxPrice;
   const apiKey = String(inputNexSmsApiKey?.value || '').trim();
   const providerLabel = String(options?.providerLabel || 'NexSMS').trim();
 
   if (!apiKey) {
     return [`${providerLabel}: 请先填写 NexSMS API Key`];
+  }
+  if (priceRange.invalid) {
+    return [`${providerLabel}: ${buildPhoneSmsPriceRangePreviewMessage(priceRange)}`];
   }
   if (!countryIds.length) {
     return [`${providerLabel}: 请先选择至少 1 个国家`];
@@ -6717,19 +6832,22 @@ async function buildNexSmsPricePreviewLines(options = {}) {
         .map((entry) => entry.price);
       const uniqueSorted = Array.from(new Set(availablePrices)).sort((left, right) => left - right);
       const fallbackMin = Number(data?.minPrice);
-      const lowest = uniqueSorted.length
-        ? uniqueSorted[0]
-        : (Number.isFinite(fallbackMin) && fallbackMin > 0 ? Math.round(fallbackMin * 10000) / 10000 : null);
+      const filteredTierEntries = filterPhoneSmsPriceEntriesForPreviewRange(tierEntries, priceRange);
+      const rangePrices = filterPhoneSmsPriceValuesForPreviewRange(uniqueSorted, priceRange);
+      const fallbackMinPrice = Number.isFinite(fallbackMin) && fallbackMin > 0
+        ? Math.round(fallbackMin * 10000) / 10000
+        : null;
+      const rangeFallbackMin = isPhoneSmsPriceWithinPreviewRange(fallbackMinPrice, priceRange)
+        ? fallbackMinPrice
+        : null;
+      const lowest = rangePrices.length ? rangePrices[0] : rangeFallbackMin;
       if (!Number.isFinite(lowest)) {
-        previews.push(`${countryLabel}: 暂无可用号源`);
+        previews.push(`${countryLabel}: ${buildPhoneSmsPriceRangePreviewMessage(priceRange)}`);
         continue;
       }
-      const tierText = formatPriceTiersForPreview(tierEntries, { maxPrice });
-      if (Number.isFinite(maxPrice) && maxPrice > 0 && lowest > maxPrice) {
-        previews.push(`${countryLabel}: 最低 ${lowest}（高于上限 ${maxPrice}）${tierText ? `；档位：${tierText}` : ''}`);
-      } else {
-        previews.push(`${countryLabel}: 最低 ${lowest}${tierText ? `；档位：${tierText}` : ''}`);
-      }
+      const tierText = formatPriceTiersForPreview(filteredTierEntries, { maxPrice });
+      const lowestLabel = priceRange.hasMinPrice || priceRange.hasMaxPrice ? '区间内最低' : '最低';
+      previews.push(`${countryLabel}: ${lowestLabel} ${lowest}${tierText ? `；档位：${tierText}` : ''}`);
     } catch (error) {
       previews.push(`${countryLabel}: 查询失败（${normalizeHeroSmsFetchErrorMessage(error)}）`);
     }
@@ -6757,12 +6875,18 @@ async function previewFiveSimPriceTiers() {
   const product = normalizeFiveSimProductValue(
     inputFiveSimProduct?.value || latestState?.fiveSimProduct || DEFAULT_FIVE_SIM_PRODUCT
   );
-  const maxPriceText = normalizeHeroSmsMaxPriceValue(inputHeroSmsMaxPrice?.value || '');
-  const maxPrice = maxPriceText ? Number(maxPriceText) : null;
+  const priceRange = resolvePhoneSmsPricePreviewRange(
+    typeof PHONE_SMS_PROVIDER_FIVE_SIM !== 'undefined' ? PHONE_SMS_PROVIDER_FIVE_SIM : '5sim'
+  );
+  const maxPrice = priceRange.maxPrice;
 
   displayHeroSmsPriceTiers.textContent = '查询中...';
   if (rowHeroSmsPriceTiers) {
     rowHeroSmsPriceTiers.style.display = '';
+  }
+  if (priceRange.invalid) {
+    displayHeroSmsPriceTiers.textContent = buildPhoneSmsPriceRangePreviewMessage(priceRange);
+    return;
   }
   if (!countryCodes.length) {
     displayHeroSmsPriceTiers.textContent = '请先选择至少 1 个国家，再查询价格';
@@ -6833,17 +6957,16 @@ async function previewFiveSimPriceTiers() {
         .filter((entry) => entry.count === null || entry.count > 0)
         .map((entry) => entry.price);
       const uniqueSorted = Array.from(new Set(prices)).sort((left, right) => left - right);
-      if (!uniqueSorted.length) {
-        previews.push(`${countryLabel}: 暂无可用号源`);
+      const rangePrices = filterPhoneSmsPriceValuesForPreviewRange(uniqueSorted, priceRange);
+      const filteredTierEntries = filterPhoneSmsPriceEntriesForPreviewRange(tierEntries, priceRange);
+      if (!rangePrices.length) {
+        previews.push(`${countryLabel}: ${buildPhoneSmsPriceRangePreviewMessage(priceRange)}`);
         continue;
       }
-      const lowest = uniqueSorted[0];
-      const tierText = formatPriceTiersForPreview(tierEntries, { maxPrice });
-      if (Number.isFinite(maxPrice) && maxPrice > 0 && lowest > maxPrice) {
-        previews.push(`${countryLabel}: 最低 ${lowest}（高于上限 ${maxPrice}）${tierText ? `；档位：${tierText}` : ''}`);
-      } else {
-        previews.push(`${countryLabel}: 最低 ${lowest}${tierText ? `；档位：${tierText}` : ''}`);
-      }
+      const lowest = rangePrices[0];
+      const tierText = formatPriceTiersForPreview(filteredTierEntries, { maxPrice });
+      const lowestLabel = priceRange.hasMinPrice || priceRange.hasMaxPrice ? '区间内最低' : '最低';
+      previews.push(`${countryLabel}: ${lowestLabel} ${lowest}${tierText ? `；档位：${tierText}` : ''}`);
     } catch (error) {
       previews.push(`${countryLabel}: 查询失败（${normalizeHeroSmsFetchErrorMessage(error)}）`);
     }
@@ -6864,12 +6987,17 @@ async function buildFiveSimPricePreviewLines(options = {}) {
   const product = normalizeFiveSimProductValue(
     inputFiveSimProduct?.value || latestState?.fiveSimProduct || DEFAULT_FIVE_SIM_PRODUCT
   );
-  const maxPriceText = normalizeHeroSmsMaxPriceValue(inputHeroSmsMaxPrice?.value || '');
-  const maxPrice = maxPriceText ? Number(maxPriceText) : null;
+  const priceRange = resolvePhoneSmsPricePreviewRange(
+    typeof PHONE_SMS_PROVIDER_FIVE_SIM !== 'undefined' ? PHONE_SMS_PROVIDER_FIVE_SIM : '5sim'
+  );
+  const maxPrice = priceRange.maxPrice;
   const providerLabel = String(options?.providerLabel || '5sim').trim();
 
   if (!countryCodes.length) {
     return [`${providerLabel}: 请先选择至少 1 个国家`];
+  }
+  if (priceRange.invalid) {
+    return [`${providerLabel}: ${buildPhoneSmsPriceRangePreviewMessage(priceRange)}`];
   }
 
   const collectPriceEntries = (payload, entries = []) => {
@@ -6936,17 +7064,16 @@ async function buildFiveSimPricePreviewLines(options = {}) {
         .filter((entry) => entry.count === null || entry.count > 0)
         .map((entry) => entry.price);
       const uniqueSorted = Array.from(new Set(prices)).sort((left, right) => left - right);
-      if (!uniqueSorted.length) {
-        previews.push(`${countryLabel}: 暂无可用号源`);
+      const rangePrices = filterPhoneSmsPriceValuesForPreviewRange(uniqueSorted, priceRange);
+      const filteredTierEntries = filterPhoneSmsPriceEntriesForPreviewRange(tierEntries, priceRange);
+      if (!rangePrices.length) {
+        previews.push(`${countryLabel}: ${buildPhoneSmsPriceRangePreviewMessage(priceRange)}`);
         continue;
       }
-      const lowest = uniqueSorted[0];
-      const tierText = formatPriceTiersForPreview(tierEntries, { maxPrice });
-      if (Number.isFinite(maxPrice) && maxPrice > 0 && lowest > maxPrice) {
-        previews.push(`${countryLabel}: 最低 ${lowest}（高于上限 ${maxPrice}）${tierText ? `；档位：${tierText}` : ''}`);
-      } else {
-        previews.push(`${countryLabel}: 最低 ${lowest}${tierText ? `；档位：${tierText}` : ''}`);
-      }
+      const lowest = rangePrices[0];
+      const tierText = formatPriceTiersForPreview(filteredTierEntries, { maxPrice });
+      const lowestLabel = priceRange.hasMinPrice || priceRange.hasMaxPrice ? '区间内最低' : '最低';
+      previews.push(`${countryLabel}: ${lowestLabel} ${lowest}${tierText ? `；档位：${tierText}` : ''}`);
     } catch (error) {
       previews.push(`${countryLabel}: 查询失败（${normalizeHeroSmsFetchErrorMessage(error)}）`);
     }
@@ -7018,13 +7145,18 @@ async function previewHeroSmsPriceTiers() {
         label: normalizeHeroSmsCountryLabel(country?.label, ''),
       }))
       .filter((country) => country.id > 0);
-    const maxPriceText = normalizeHeroSmsMaxPriceValue(inputHeroSmsMaxPrice?.value || '');
-    const maxPrice = maxPriceText ? Number(maxPriceText) : null;
+    const priceRange = resolvePhoneSmsPricePreviewRange(heroProviderValue);
+    const maxPrice = priceRange.maxPrice;
     const apiKey = String(inputHeroSmsApiKey?.value || '').trim();
 
     const heroLines = ['HeroSMS:'];
     if (!apiKey) {
       heroLines.push('请先填写接码 API Key');
+      previews.push(...heroLines, '');
+      continue;
+    }
+    if (priceRange.invalid) {
+      heroLines.push(buildPhoneSmsPriceRangePreviewMessage(priceRange));
       previews.push(...heroLines, '');
       continue;
     }
@@ -7152,13 +7284,18 @@ async function previewHeroSmsPriceTiers() {
           price,
           count: Math.max(0, Number(tierStockByPrice.get(price)) || 0),
         }));
-        const withinLimitInStockPrices = Number.isFinite(maxPrice) && maxPrice > 0
-          ? inStockPrices.filter((price) => price <= maxPrice)
-          : inStockPrices;
-        const tierPreviewText = formatPriceTiersWithZeroStockForPreview(tierEntries, { maxPrice });
-        if (!inStockPrices.length) {
-          if (allPrices.length) {
-            const lowestKnown = formatHeroSmsPriceForPreview(allPrices[0]) || String(allPrices[0]);
+        const rangeAllPrices = filterPhoneSmsPriceValuesForPreviewRange(allPrices, priceRange);
+        const rangeInStockPrices = filterPhoneSmsPriceValuesForPreviewRange(inStockPrices, priceRange);
+        const filteredTierEntries = filterPhoneSmsPriceEntriesForPreviewRange(tierEntries, priceRange);
+        const tierPreviewText = formatPriceTiersWithZeroStockForPreview(filteredTierEntries, { maxPrice });
+        if (!rangeInStockPrices.length) {
+          if ((priceRange.hasMinPrice || priceRange.hasMaxPrice) && allPrices.length && !rangeAllPrices.length) {
+            heroLines.push(`${countryLabel}: ${buildPhoneSmsPriceRangePreviewMessage(priceRange)}`);
+            continue;
+          }
+          if (rangeAllPrices.length || allPrices.length) {
+            const lowestKnownPrice = rangeAllPrices.length ? rangeAllPrices[0] : allPrices[0];
+            const lowestKnown = formatHeroSmsPriceForPreview(lowestKnownPrice) || String(lowestKnownPrice);
             heroLines.push(`${countryLabel}: 全档位均无库存（最低标价 ${lowestKnown}）${tierPreviewText ? `；档位：${tierPreviewText}` : ''}`);
             continue;
           }
@@ -7169,14 +7306,10 @@ async function previewHeroSmsPriceTiers() {
           heroLines.push(`${countryLabel}: 无可用价格`);
           continue;
         }
-        if (Number.isFinite(maxPrice) && maxPrice > 0 && !withinLimitInStockPrices.length) {
-          const lowestInStockText = formatHeroSmsPriceForPreview(inStockPrices[0]) || String(inStockPrices[0]);
-          heroLines.push(`${countryLabel}: 上限内无可用号源（上限 ${formatHeroSmsPriceForPreview(maxPrice) || maxPrice}，最低可用 ${lowestInStockText}）${tierPreviewText ? `；档位：${tierPreviewText}` : ''}`);
-        } else {
-          const lowestWithinLimit = withinLimitInStockPrices[0];
-          const lowestText = formatHeroSmsPriceForPreview(lowestWithinLimit) || String(lowestWithinLimit);
-          heroLines.push(`${countryLabel}: 上限内最低 ${lowestText}${tierPreviewText ? `；档位：${tierPreviewText}` : ''}`);
-        }
+        const lowestWithinRange = rangeInStockPrices[0];
+        const lowestText = formatHeroSmsPriceForPreview(lowestWithinRange) || String(lowestWithinRange);
+        const lowestLabel = priceRange.hasMinPrice || priceRange.hasMaxPrice ? '区间内最低' : '最低';
+        heroLines.push(`${countryLabel}: ${lowestLabel} ${lowestText}${tierPreviewText ? `；档位：${tierPreviewText}` : ''}`);
       } catch (error) {
         heroLines.push(`${countryLabel}: 查询失败（${normalizeHeroSmsFetchErrorMessage(error)}）`);
       }
@@ -9015,6 +9148,11 @@ function applySettingsState(state) {
     inputHeroSmsMaxPrice.value = restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_FIVE_SIM
       ? normalizeFiveSimMaxPriceValue(state?.fiveSimMaxPrice || '')
       : normalizeHeroSmsMaxPriceValue(state?.heroSmsMaxPrice || '');
+  }
+  if (typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice) {
+    inputHeroSmsMinPrice.value = restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_FIVE_SIM
+      ? normalizePhoneSmsMinPriceValue(state?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM)
+      : normalizePhoneSmsMinPriceValue(state?.heroSmsMinPrice || '', restoredPhoneSmsProvider);
   }
   if (inputFiveSimOperator) {
     inputFiveSimOperator.value = normalizeFiveSimOperator(state?.fiveSimOperator);
@@ -13441,6 +13579,7 @@ async function switchPhoneSmsProvider(nextProvider) {
 
   const currentApiKey = String(inputHeroSmsApiKey?.value || '');
   const currentMaxPrice = normalizePhoneSmsMaxPriceValue(inputHeroSmsMaxPrice?.value || '', previousProvider);
+  const currentMinPrice = normalizePhoneSmsMinPriceValue(inputHeroSmsMinPrice?.value || '', previousProvider);
   const currentSelection = typeof getPhoneSmsCountrySelectionForProvider === 'function'
     ? getPhoneSmsCountrySelectionForProvider(previousProvider, { ensureDefault: true })
     : [];
@@ -13453,6 +13592,7 @@ async function switchPhoneSmsProvider(nextProvider) {
   if (previousProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
     patch.fiveSimApiKey = currentApiKey;
     patch.fiveSimMaxPrice = currentMaxPrice;
+    patch.fiveSimMinPrice = currentMinPrice;
     patch.fiveSimCountryId = currentPrimary.id;
     patch.fiveSimCountryLabel = currentPrimary.label;
     patch.fiveSimCountryFallback = currentFallback;
@@ -13463,6 +13603,7 @@ async function switchPhoneSmsProvider(nextProvider) {
   } else {
     patch.heroSmsApiKey = currentApiKey;
     patch.heroSmsMaxPrice = currentMaxPrice;
+    patch.heroSmsMinPrice = currentMinPrice;
     patch.heroSmsCountryId = currentPrimary.id;
     patch.heroSmsCountryLabel = currentPrimary.label;
     patch.heroSmsCountryFallback = currentFallback;
@@ -13480,6 +13621,11 @@ async function switchPhoneSmsProvider(nextProvider) {
     inputHeroSmsMaxPrice.value = normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM
       ? normalizeFiveSimMaxPriceValue(latestState?.fiveSimMaxPrice || '')
       : normalizeHeroSmsMaxPriceValue(latestState?.heroSmsMaxPrice || '');
+  }
+  if (typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice) {
+    inputHeroSmsMinPrice.value = normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM
+      ? normalizePhoneSmsMinPriceValue(latestState?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM)
+      : normalizePhoneSmsMinPriceValue(latestState?.heroSmsMinPrice || '', normalizedNextProvider);
   }
   if (inputFiveSimOperator) {
     inputFiveSimOperator.value = normalizeFiveSimOperator(latestState?.fiveSimOperator);
@@ -13750,6 +13896,13 @@ inputHeroSmsMaxPrice?.addEventListener('input', () => {
 });
 inputHeroSmsMaxPrice?.addEventListener('blur', () => {
   inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(inputHeroSmsMaxPrice.value, getSelectedPhoneSmsProvider());
+  saveSettings({ silent: true }).catch(() => { });
+});
+inputHeroSmsMinPrice?.addEventListener('input', () => {
+  markSettingsDirty(true);
+});
+inputHeroSmsMinPrice?.addEventListener('blur', () => {
+  inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(inputHeroSmsMinPrice.value, getSelectedPhoneSmsProvider());
   saveSettings({ silent: true }).catch(() => { });
 });
 
@@ -14624,6 +14777,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputHeroSmsMaxPrice.value = getSelectedPhoneSmsProvider() === PHONE_SMS_PROVIDER_FIVE_SIM
           ? normalizeFiveSimMaxPriceValue(message.payload.fiveSimMaxPrice !== undefined ? message.payload.fiveSimMaxPrice : latestState?.fiveSimMaxPrice)
           : normalizeHeroSmsMaxPriceValue(message.payload.heroSmsMaxPrice !== undefined ? message.payload.heroSmsMaxPrice : latestState?.heroSmsMaxPrice);
+      }
+      if ((message.payload.heroSmsMinPrice !== undefined || message.payload.fiveSimMinPrice !== undefined) && typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice) {
+        inputHeroSmsMinPrice.value = getSelectedPhoneSmsProvider() === PHONE_SMS_PROVIDER_FIVE_SIM
+          ? normalizePhoneSmsMinPriceValue(message.payload.fiveSimMinPrice !== undefined ? message.payload.fiveSimMinPrice : latestState?.fiveSimMinPrice, PHONE_SMS_PROVIDER_FIVE_SIM)
+          : normalizePhoneSmsMinPriceValue(message.payload.heroSmsMinPrice !== undefined ? message.payload.heroSmsMinPrice : latestState?.heroSmsMinPrice, getSelectedPhoneSmsProvider());
       }
       if (message.payload.fiveSimOperator !== undefined && inputFiveSimOperator) {
         inputFiveSimOperator.value = normalizeFiveSimOperator(message.payload.fiveSimOperator);

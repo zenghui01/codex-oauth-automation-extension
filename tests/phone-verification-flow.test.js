@@ -1747,6 +1747,129 @@ test('phone verification helper climbs price tiers when NO_NUMBERS is returned a
   ]);
 });
 
+test('phone verification helper filters HeroSMS tiers by minimum price and ignores out-of-range preferred tier', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const maxPrice = parsedUrl.searchParams.get('maxPrice');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            52: {
+              dr: {
+                low: { cost: 0.04, count: 100 },
+                high: { cost: 0.09, count: 100 },
+              },
+            },
+          }),
+        };
+      }
+      if (action === 'getNumber' && maxPrice === '0.09') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_NUMBER:989899:66951112223',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action} @ ${maxPrice || 'no-price'}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    heroSmsApiKey: 'demo-key',
+    heroSmsMinPrice: '0.06',
+    heroSmsPreferredPrice: '0.04',
+  });
+
+  assert.equal(activation.activationId, '989899');
+  const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
+  assert.deepStrictEqual(actions, [
+    'getPrices:',
+    'getNumber:0.09',
+  ]);
+});
+
+test('phone verification helper rejects HeroSMS WRONG_MAX_PRICE below configured minimum price', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => buildHeroSmsPricesPayload({ cost: 0.08 }),
+        };
+      }
+      if (action === 'getNumber' || action === 'getNumberV2') {
+        return {
+          ok: false,
+          text: async () => 'WRONG_MAX_PRICE:0.05',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key', heroSmsMinPrice: '0.07' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.requestPhoneActivation({ heroSmsApiKey: 'demo-key', heroSmsMinPrice: '0.07' }),
+    /below configured minPrice=0\.07/i
+  );
+
+  const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
+  assert.deepStrictEqual(actions, [
+    'getPrices:',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+  ]);
+  assert.equal(actions.some((entry) => entry.endsWith(':0.05')), false);
+});
+
+test('phone verification helper rejects reversed price range before fetching prices', async () => {
+  let fetchCalled = false;
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async () => {
+      fetchCalled = true;
+      throw new Error('fetch should not run for an invalid range');
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.requestPhoneActivation({
+      heroSmsApiKey: 'demo-key',
+      heroSmsMinPrice: '0.2',
+      heroSmsMaxPrice: '0.1',
+    }),
+    /price range is invalid/i
+  );
+  assert.equal(fetchCalled, false);
+});
+
 test('phone verification helper stops when WRONG_MAX_PRICE exceeds configured max price limit', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({
@@ -2157,6 +2280,77 @@ test('phone verification helper rejects 5sim maxPrice with custom operator befor
   assert.deepStrictEqual(requests, []);
 });
 
+test('phone verification helper keeps 5sim maxPrice independent from HeroSMS maxPrice', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      if (parsedUrl.pathname === '/v1/guest/prices') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            openai: {
+              thailand: {
+                any: {
+                  low: { cost: 0.08, count: 2 },
+                },
+              },
+            },
+          }),
+        };
+      }
+      if (parsedUrl.pathname === '/v1/user/buy/activation/thailand/any/openai') {
+        if (parsedUrl.searchParams.get('maxPrice') === '0.08') {
+          return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({
+              id: 900010,
+              phone: '+66951112235',
+              country: 'thailand',
+              country_name: 'Thailand',
+              product: 'openai',
+            }),
+          };
+        }
+      }
+      throw new Error(`Unexpected 5sim request: ${parsedUrl.pathname}${parsedUrl.search}`);
+    },
+    getState: async () => ({
+      phoneSmsProvider: '5sim',
+      fiveSimApiKey: 'five-token',
+      fiveSimCountryOrder: ['thailand'],
+      fiveSimOperator: 'any',
+      fiveSimProduct: 'openai',
+      heroSmsMaxPrice: '0.06',
+      heroSmsActivationRetryRounds: 1,
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    phoneSmsProvider: '5sim',
+    fiveSimApiKey: 'five-token',
+    fiveSimCountryOrder: ['thailand'],
+    fiveSimOperator: 'any',
+    fiveSimProduct: 'openai',
+    heroSmsMaxPrice: '0.06',
+    heroSmsActivationRetryRounds: 1,
+  });
+
+  assert.equal(activation.phoneNumber, '+66951112235');
+  const buyRequests = requests.filter((entry) => entry.pathname === '/v1/user/buy/activation/thailand/any/openai');
+  assert.equal(buyRequests.length, 1);
+  assert.equal(buyRequests[0].searchParams.get('maxPrice'), '0.08');
+});
+
 test('phone verification helper honors price-priority ordering for 5sim countries', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({
@@ -2322,6 +2516,80 @@ test('phone verification helper tries multiple 5sim price tiers within the same 
   assert.equal(buyRequests.length, 2);
   assert.equal(buyRequests[0].includes('maxPrice=0.05'), true);
   assert.equal(buyRequests[1].includes('maxPrice=0.08'), true);
+});
+
+test('phone verification helper filters 5sim tiers by minimum price before buying', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl.pathname + parsedUrl.search);
+      if (parsedUrl.pathname === '/v1/guest/prices') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            openai: {
+              thailand: {
+                any: {
+                  low: { cost: 0.05, count: 3 },
+                  high: { cost: 0.08, count: 2 },
+                },
+              },
+            },
+          }),
+        };
+      }
+      if (parsedUrl.pathname === '/v1/user/buy/activation/thailand/any/openai') {
+        const maxPrice = parsedUrl.searchParams.get('maxPrice');
+        if (maxPrice === '0.08') {
+          return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({
+              id: 800002,
+              phone: '+66951112234',
+              country: 'thailand',
+              country_name: 'Thailand',
+              product: 'openai',
+            }),
+          };
+        }
+      }
+      throw new Error(`Unexpected 5sim request: ${parsedUrl.pathname}${parsedUrl.search}`);
+    },
+    getState: async () => ({
+      phoneSmsProvider: '5sim',
+      fiveSimApiKey: 'five-token',
+      fiveSimCountryOrder: ['thailand'],
+      fiveSimOperator: 'any',
+      fiveSimProduct: 'openai',
+      fiveSimMinPrice: '0.07',
+      heroSmsActivationRetryRounds: 1,
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    phoneSmsProvider: '5sim',
+    fiveSimApiKey: 'five-token',
+    fiveSimCountryOrder: ['thailand'],
+    fiveSimOperator: 'any',
+    fiveSimProduct: 'openai',
+    fiveSimMinPrice: '0.07',
+    heroSmsActivationRetryRounds: 1,
+  });
+
+  assert.equal(activation.phoneNumber, '+66951112234');
+  const buyRequests = requests.filter((entry) => entry.startsWith('/v1/user/buy/activation/thailand/any/openai'));
+  assert.equal(buyRequests.length, 1);
+  assert.equal(buyRequests[0].includes('maxPrice=0.08'), true);
+  assert.equal(buyRequests[0].includes('maxPrice=0.05'), false);
 });
 
 test('phone verification helper polls and parses 5sim verification codes', async () => {
@@ -2659,6 +2927,96 @@ test('phone verification helper acquires a number from NexSMS with ordered fallb
   assert.equal(requests[2].search.get('countryId'), '6');
   assert.equal(requests[3].pathname, '/api/order/purchase');
   assert.equal(requests[3].body?.countryId, 6);
+});
+
+test('phone verification helper filters NexSMS tiers by minimum price before purchase', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url, options = {}) => {
+      const parsedUrl = new URL(url);
+      const method = String(options?.method || 'GET').toUpperCase();
+      const body = options?.body ? JSON.parse(options.body) : null;
+      requests.push({
+        pathname: parsedUrl.pathname,
+        search: parsedUrl.searchParams,
+        method,
+        body,
+      });
+
+      if (parsedUrl.pathname === '/api/getCountryByService') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            code: 0,
+            data: {
+              countryId: 6,
+              countryName: 'Indonesia',
+              minPrice: 0.03,
+              priceMap: { '0.03': 4, '0.08': 2 },
+            },
+          }),
+        };
+      }
+
+      if (parsedUrl.pathname === '/api/order/purchase') {
+        if (body?.price === 0.08) {
+          return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({
+              code: 0,
+              data: {
+                countryId: 6,
+                countryName: 'Indonesia',
+                serviceCode: 'ot',
+                phoneNumbers: ['+6281234567891'],
+              },
+            }),
+          };
+        }
+      }
+
+      throw new Error(`Unexpected NexSMS request: ${parsedUrl.pathname}`);
+    },
+    getState: async () => ({
+      phoneSmsProvider: 'nexsms',
+      nexSmsApiKey: 'nex-key',
+      nexSmsCountryOrder: [6],
+      nexSmsServiceCode: 'ot',
+      heroSmsMinPrice: '0.05',
+      heroSmsActivationRetryRounds: 1,
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    phoneSmsProvider: 'nexsms',
+    nexSmsApiKey: 'nex-key',
+    nexSmsCountryOrder: [6],
+    nexSmsServiceCode: 'ot',
+    heroSmsMinPrice: '0.05',
+    heroSmsActivationRetryRounds: 1,
+  });
+
+  assert.deepStrictEqual(activation, {
+    activationId: '+6281234567891',
+    phoneNumber: '+6281234567891',
+    provider: 'nexsms',
+    serviceCode: 'ot',
+    countryId: 6,
+    countryLabel: 'Indonesia',
+    successfulUses: 0,
+    maxUses: 1,
+  });
+  const purchaseRequests = requests.filter((entry) => entry.pathname === '/api/order/purchase');
+  assert.equal(purchaseRequests.length, 1);
+  assert.equal(purchaseRequests[0].body?.price, 0.08);
 });
 
 test('phone verification helper polls and parses NexSMS verification codes', async () => {
@@ -7463,6 +7821,7 @@ test('phone verification helper logs no-supply diagnostics with consecutive stre
     heroSmsCountryId: 52,
     heroSmsCountryLabel: 'Thailand',
     heroSmsCountryFallback: [],
+    heroSmsMinPrice: '0.04',
     heroSmsMaxPrice: '0.06',
     currentPhoneActivation: null,
     reusablePhoneActivation: null,
@@ -7525,6 +7884,14 @@ test('phone verification helper logs no-supply diagnostics with consecutive stre
   assert.equal(diagnosticsLogs.every((entry) => entry.options?.stepKey === 'phone-verification'), true);
   assert.equal(diagnosticsLogs.some((entry) => entry.message.includes('无号连续失败 1 次')), true);
   assert.equal(diagnosticsLogs.some((entry) => entry.message.includes('无号连续失败 2 次')), true);
+  assert.equal(
+    diagnosticsLogs.some((entry) => entry.message.includes('priceRange=0.04~0.06')),
+    true
+  );
+  assert.equal(
+    diagnosticsLogs.some((entry) => entry.message.includes('minPrice=0.04')),
+    true
+  );
   assert.equal(
     diagnosticsLogs.some((entry) => entry.message.includes('maxPrice=0.06')),
     true
