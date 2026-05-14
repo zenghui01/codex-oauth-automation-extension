@@ -1310,7 +1310,7 @@ const tempEmailDomainPicker = createEditableListPicker({
   trigger: btnTempEmailDomainMenu,
   current: tempEmailDomainCurrent,
   menu: tempEmailDomainMenu,
-  emptyLabel: '请先添加域名',
+  emptyLabel: '请先更新域名',
   itemLabel: '域名',
   normalizeItems: normalizeCloudflareTempEmailDomains,
   normalizeValue: normalizeCloudflareTempEmailDomainValue,
@@ -2981,16 +2981,11 @@ function setCloudflareDomainEditMode(editing, options = {}) {
 
 function setCloudflareTempEmailDomainEditMode(editing, options = {}) {
   const { clearInput = false } = options;
-  cloudflareTempEmailDomainEditMode = Boolean(editing);
-  tempEmailDomainPicker.setVisible(!cloudflareTempEmailDomainEditMode);
-  inputTempEmailDomain.style.display = cloudflareTempEmailDomainEditMode ? '' : 'none';
-  btnTempEmailDomainMode.textContent = cloudflareTempEmailDomainEditMode ? '保存' : '添加';
-  if (cloudflareTempEmailDomainEditMode) {
-    if (clearInput) {
-      inputTempEmailDomain.value = '';
-    }
-    inputTempEmailDomain.focus();
-  } else if (clearInput) {
+  cloudflareTempEmailDomainEditMode = false;
+  tempEmailDomainPicker.setVisible(true);
+  inputTempEmailDomain.style.display = 'none';
+  btnTempEmailDomainMode.textContent = '更新';
+  if (clearInput) {
     inputTempEmailDomain.value = '';
   }
 }
@@ -10427,6 +10422,152 @@ async function saveCloudflareTempEmailDomainSettings(domains, activeDomain, opti
   }
 }
 
+function joinCloudflareTempEmailSettingsUrl(baseUrl, path) {
+  const normalizedBaseUrl = normalizeCloudflareTempEmailBaseUrlValue(baseUrl);
+  const normalizedPath = String(path || '').trim();
+  if (!normalizedBaseUrl || !normalizedPath) {
+    return normalizedBaseUrl || '';
+  }
+  return `${normalizedBaseUrl}${normalizedPath.startsWith('/') ? '' : '/'}${normalizedPath}`;
+}
+
+function buildCloudflareTempEmailSyncHeaders(options = {}) {
+  const { includeAdminAuth = false } = options;
+  const headers = {
+    Accept: 'application/json',
+  };
+  const customAuth = String(inputTempEmailCustomAuth?.value || '').trim();
+  if (customAuth) {
+    headers['x-custom-auth'] = customAuth;
+  }
+  if (includeAdminAuth) {
+    const adminAuth = String(inputTempEmailAdminAuth?.value || '').trim();
+    if (adminAuth) {
+      headers['x-admin-auth'] = adminAuth;
+    }
+  }
+  return headers;
+}
+
+async function requestCloudflareTempEmailSyncPayload(baseUrl, path, options = {}) {
+  const url = joinCloudflareTempEmailSettingsUrl(baseUrl, path);
+  if (!url) {
+    throw new Error('Cloudflare Temp Email 服务地址为空或格式无效。');
+  }
+
+  const response = await fetch(url, {
+    cache: 'no-store',
+    headers: buildCloudflareTempEmailSyncHeaders(options),
+  });
+  const rawText = await response.text();
+  let payload = rawText;
+  try {
+    payload = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    payload = rawText;
+  }
+
+  if (!response.ok) {
+    const message = typeof payload === 'object' && payload
+      ? (payload.message || payload.error || payload.msg)
+      : '';
+    throw new Error(message || `HTTP ${response.status}`);
+  }
+
+  return payload;
+}
+
+function mergeCloudflareTempEmailDomains(existingDomains, fetchedDomains) {
+  const mergedDomains = [];
+  const seen = new Set();
+  for (const domain of normalizeCloudflareTempEmailDomains(fetchedDomains)) {
+    if (seen.has(domain)) continue;
+    seen.add(domain);
+    mergedDomains.push(domain);
+  }
+  for (const domain of normalizeCloudflareTempEmailDomains(existingDomains)) {
+    if (seen.has(domain)) continue;
+    seen.add(domain);
+    mergedDomains.push(domain);
+  }
+  return mergedDomains;
+}
+
+async function fetchCloudflareTempEmailAvailableDomains(baseUrl) {
+  let openSettingsError = null;
+  try {
+    const payload = await requestCloudflareTempEmailSyncPayload(baseUrl, '/open_api/settings');
+    const domains = normalizeCloudflareTempEmailDomains(payload?.domains || []);
+    if (domains.length) {
+      return {
+        domains,
+        source: 'open_api/settings',
+      };
+    }
+    openSettingsError = new Error('公开设置未返回可用域名。');
+  } catch (error) {
+    openSettingsError = error;
+  }
+
+  const adminAuth = String(inputTempEmailAdminAuth?.value || '').trim();
+  if (!adminAuth) {
+    throw openSettingsError || new Error('未获取到可用域名。');
+  }
+
+  const payload = await requestCloudflareTempEmailSyncPayload(baseUrl, '/admin/worker/configs', {
+    includeAdminAuth: true,
+  });
+  const domains = normalizeCloudflareTempEmailDomains(payload?.DOMAINS || []);
+  if (!domains.length) {
+    throw openSettingsError || new Error('管理配置未返回可用域名。');
+  }
+  return {
+    domains,
+    source: 'admin/worker/configs',
+  };
+}
+
+async function syncCloudflareTempEmailDomainsFromService() {
+  const normalizedBaseUrl = normalizeCloudflareTempEmailBaseUrlValue(inputTempEmailBaseUrl?.value || '');
+  if (!normalizedBaseUrl) {
+    throw new Error('请先填写有效的 Cloudflare Temp Email 服务地址。');
+  }
+
+  const previousButtonText = btnTempEmailDomainMode.textContent;
+  btnTempEmailDomainMode.disabled = true;
+  btnTempEmailDomainMode.textContent = '更新中...';
+
+  try {
+    const { domains: fetchedDomains, source } = await fetchCloudflareTempEmailAvailableDomains(normalizedBaseUrl);
+    const { domains: existingDomains, activeDomain } = getCloudflareTempEmailDomainsFromState();
+    const currentDomain = normalizeCloudflareTempEmailDomainValue(selectTempEmailDomain.value || activeDomain);
+    const mergedDomains = mergeCloudflareTempEmailDomains(existingDomains, fetchedDomains);
+    const nextActiveDomain = mergedDomains.includes(currentDomain)
+      ? currentDomain
+      : (fetchedDomains[0] || mergedDomains[0] || '');
+    const existingSet = new Set(normalizeCloudflareTempEmailDomains(existingDomains));
+    const addedCount = fetchedDomains.filter((domain) => !existingSet.has(domain)).length;
+
+    await saveCloudflareTempEmailDomainSettings(mergedDomains, nextActiveDomain, { silent: true });
+    if (addedCount > 0) {
+      showToast(`已更新 Cloudflare Temp Email 域名，新增 ${addedCount} 个。`, 'success', 2200);
+    } else {
+      showToast('已同步 Cloudflare Temp Email 域名，暂无新增项。', 'info', 2200);
+    }
+    return {
+      domains: mergedDomains,
+      activeDomain: nextActiveDomain,
+      source,
+    };
+  } catch (error) {
+    const message = error?.message || String(error || '未知错误');
+    throw new Error(`更新 Cloudflare Temp Email 域名失败：${message}`);
+  } finally {
+    btnTempEmailDomainMode.disabled = false;
+    btnTempEmailDomainMode.textContent = previousButtonText || '更新';
+  }
+}
+
 async function handleDeleteCloudflareDomain(domain) {
   const targetDomain = normalizeCloudflareDomainValue(domain);
   if (!targetDomain) {
@@ -12736,20 +12877,7 @@ btnCfDomainMode.addEventListener('click', async () => {
 
 btnTempEmailDomainMode.addEventListener('click', async () => {
   try {
-    if (!cloudflareTempEmailDomainEditMode) {
-      setCloudflareTempEmailDomainEditMode(true, { clearInput: true });
-      return;
-    }
-
-    const newDomain = normalizeCloudflareTempEmailDomainValue(inputTempEmailDomain.value);
-    if (!newDomain) {
-      showToast('请输入有效的 Cloudflare Temp Email 域名。', 'warn');
-      inputTempEmailDomain.focus();
-      return;
-    }
-
-    const { domains } = getCloudflareTempEmailDomainsFromState();
-    await saveCloudflareTempEmailDomainSettings([...domains, newDomain], newDomain);
+    await syncCloudflareTempEmailDomainsFromService();
   } catch (err) {
     showToast(err.message, 'error');
   }
