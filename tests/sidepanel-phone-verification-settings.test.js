@@ -943,6 +943,7 @@ return { collectSettingsPayload };
   assert.equal(payload.nexSmsApiKey, 'nex-key');
   assert.deepStrictEqual(payload.nexSmsCountryOrder, [1]);
   assert.equal(payload.nexSmsServiceCode, 'ot');
+  assert.equal(payload.phoneSmsReuseEnabled, true);
   assert.equal(payload.heroSmsReuseEnabled, true);
   assert.equal(payload.freePhoneReuseEnabled, true);
   assert.equal(payload.freePhoneReuseAutoEnabled, true);

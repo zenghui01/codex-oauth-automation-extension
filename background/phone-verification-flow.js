@@ -180,6 +180,10 @@
     }
 
     function normalizePhoneSmsProvider(value = '') {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      if (rootScope.PhoneSmsProviderRegistry?.normalizeProviderId) {
+        return rootScope.PhoneSmsProviderRegistry.normalizeProviderId(value);
+      }
       const normalized = String(value || '').trim().toLowerCase();
       if (normalized === PHONE_SMS_PROVIDER_5SIM) {
         return PHONE_SMS_PROVIDER_5SIM;
@@ -189,7 +193,6 @@
       }
       return PHONE_SMS_PROVIDER_HERO;
     }
-
     function isFiveSimProvider(state = {}) {
       return normalizePhoneSmsProvider(state?.phoneSmsProvider || DEFAULT_PHONE_SMS_PROVIDER) === PHONE_SMS_PROVIDER_5SIM;
     }
@@ -515,6 +518,13 @@
       return Boolean(value);
     }
 
+    function normalizePhoneSmsReuseEnabled(state = {}) {
+      if (Object.prototype.hasOwnProperty.call(state, 'phoneSmsReuseEnabled')) {
+        return Boolean(state.phoneSmsReuseEnabled);
+      }
+      return normalizeHeroSmsReuseEnabled(state?.heroSmsReuseEnabled);
+    }
+
     function normalizeFreePhoneReuseEnabled(value) {
       return Boolean(value);
     }
@@ -536,10 +546,14 @@
     }
 
     function normalizePhoneSmsProviderOrder(value = [], fallbackOrder = []) {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      if (rootScope.PhoneSmsProviderRegistry?.normalizeProviderOrder) {
+        return rootScope.PhoneSmsProviderRegistry.normalizeProviderOrder(value, fallbackOrder);
+      }
       const source = Array.isArray(value)
         ? value
         : String(value || '')
-          .split(/[\r\n,，;；|/]+/)
+      .split(/[\r\n,]+/)
           .map((entry) => String(entry || '').trim())
           .filter(Boolean);
       const normalized = [];
@@ -573,7 +587,6 @@
 
       return fallbackNormalized.slice(0, 3);
     }
-
     function resolvePhoneProviderOrder(state = {}, preferredProvider = '') {
       const currentProvider = normalizePhoneSmsProvider(
         preferredProvider || state?.phoneSmsProvider || DEFAULT_PHONE_SMS_PROVIDER
@@ -856,10 +869,7 @@
     }
 
     function isPhoneSmsReuseEnabled(state = {}) {
-      if (normalizePhoneSmsProvider(state?.phoneSmsProvider) === PHONE_SMS_PROVIDER_FIVE_SIM) {
-        return state?.fiveSimReuseEnabled !== false;
-      }
-      return normalizeHeroSmsReuseEnabled(state?.heroSmsReuseEnabled);
+      return normalizePhoneSmsReuseEnabled(state);
     }
 
     function createResolvedFiveSimProvider() {
@@ -2658,7 +2668,7 @@
                   {
                     query: {
                       ...(candidatePrice !== null && candidatePrice !== undefined ? { maxPrice: candidatePrice } : {}),
-                      ...(normalizeHeroSmsReuseEnabled(state.heroSmsReuseEnabled) ? { reuse: 1 } : {}),
+                      ...(normalizePhoneSmsReuseEnabled(state) ? { reuse: 1 } : {}),
                     },
                   }
                 );
@@ -4850,7 +4860,7 @@
       delete nextReusableActivation.phoneCodeReceived;
       delete nextReusableActivation.phoneCodeReceivedAt;
       await upsertReusableActivationPool(nextReusableActivation, { state });
-      if (!normalizeHeroSmsReuseEnabled(state?.heroSmsReuseEnabled)) {
+      if (!normalizePhoneSmsReuseEnabled(state)) {
         await clearReusableActivation();
         return;
       }

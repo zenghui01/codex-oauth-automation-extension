@@ -81,6 +81,7 @@ test('background account history settings are normalized independently from hotm
     extractFunction('normalizeSub2ApiGroupNames'),
     extractFunction('normalizeBoundedIntegerSetting'),
     extractFunction('normalizeLocalHttpBaseUrl'),
+    extractFunction('buildPersistentSettingsPayload'),
     extractFunction('normalizePersistentSettingValue'),
   ].join('\n');
 
@@ -181,10 +182,16 @@ function normalizeCloudflareTempEmailReceiveMailbox(value) { return String(value
 function normalizeCloudflareTempEmailDomain(value) { return String(value || '').trim(); }
 function normalizeCloudflareTempEmailDomains(value) { return Array.isArray(value) ? value : []; }
 function normalizeHotmailAccounts(value) { return Array.isArray(value) ? value : []; }
+function resolveLegacyAutoStepDelaySeconds(value) {
+  return value && Object.prototype.hasOwnProperty.call(value, 'autoStepDelaySeconds')
+    ? value.autoStepDelaySeconds
+    : undefined;
+}
 ${bundle}
 return {
   normalizeAccountRunHistoryHelperBaseUrl,
   normalizePersistentSettingValue,
+  buildPersistentSettingsPayload,
 };
   `)();
 
@@ -243,6 +250,8 @@ return {
   assert.equal(api.normalizePersistentSettingValue('phoneSmsProvider', 'NEXSMS'), 'nexsms');
   assert.equal(api.normalizePersistentSettingValue('phoneSmsProvider', 'unknown'), 'hero-sms');
   assert.deepStrictEqual(api.normalizePersistentSettingValue('phoneSmsProviderOrder', ['nexsms', '5sim', 'nexsms']), ['nexsms', '5sim']);
+  assert.equal(api.normalizePersistentSettingValue('phoneSmsReuseEnabled', false), false);
+  assert.equal(api.normalizePersistentSettingValue('phoneSmsReuseEnabled', true), true);
   assert.equal(api.normalizePersistentSettingValue('fiveSimApiKey', ' demo-five '), ' demo-five ');
   assert.equal(api.normalizePersistentSettingValue('fiveSimProduct', ' OpenAI! '), 'openai');
   assert.equal(api.normalizePersistentSettingValue('fiveSimCountryId', ' England! '), 'england');
@@ -335,4 +344,26 @@ return {
       countryLabel: '',
     }
   );
+  const legacyReusePayload = api.buildPersistentSettingsPayload({
+    heroSmsReuseEnabled: false,
+  });
+  assert.equal(legacyReusePayload.phoneSmsReuseEnabled, false);
+  assert.equal(legacyReusePayload.heroSmsReuseEnabled, false);
+  const fiveSimReusePayload = api.buildPersistentSettingsPayload({
+    fiveSimReuseEnabled: false,
+  });
+  assert.equal(fiveSimReusePayload.phoneSmsReuseEnabled, false);
+  assert.equal(fiveSimReusePayload.heroSmsReuseEnabled, false);
+  const conflictingReusePayload = api.buildPersistentSettingsPayload({
+    heroSmsReuseEnabled: true,
+    fiveSimReuseEnabled: false,
+  });
+  assert.equal(conflictingReusePayload.phoneSmsReuseEnabled, true);
+  assert.equal(conflictingReusePayload.heroSmsReuseEnabled, true);
+  const newReusePayload = api.buildPersistentSettingsPayload({
+    phoneSmsReuseEnabled: false,
+    heroSmsReuseEnabled: true,
+  });
+  assert.equal(newReusePayload.phoneSmsReuseEnabled, false);
+  assert.equal(newReusePayload.heroSmsReuseEnabled, false);
 });

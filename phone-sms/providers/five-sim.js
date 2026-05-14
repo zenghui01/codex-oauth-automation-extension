@@ -582,6 +582,16 @@
     }
   }
 
+  function normalizeReuseEnabled(state = {}) {
+    if (Object.prototype.hasOwnProperty.call(state, 'phoneSmsReuseEnabled')) {
+      return state.phoneSmsReuseEnabled !== false;
+    }
+    if (Object.prototype.hasOwnProperty.call(state, 'heroSmsReuseEnabled')) {
+      return state.heroSmsReuseEnabled !== false;
+    }
+    return true;
+  }
+
   async function buyActivationWithPrice(state = {}, countryConfig, maxPrice, deps = {}) {
     const config = resolveConfig(state, deps);
     const operator = normalizeFiveSimOperator(state.fiveSimOperator);
@@ -589,7 +599,7 @@
     if (maxPrice !== null && maxPrice !== undefined) {
       query.maxPrice = maxPrice;
     }
-    if (state.fiveSimReuseEnabled !== false) {
+    if (normalizeReuseEnabled(state)) {
       query.reuse = 1;
     }
     const payload = await fetchJson(

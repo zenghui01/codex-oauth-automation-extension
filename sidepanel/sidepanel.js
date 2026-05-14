@@ -3333,9 +3333,13 @@ function collectSettingsPayload() {
   const defaultPhoneCodePollMaxRounds = typeof DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS !== 'undefined'
     ? DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS
     : 12;
-  const heroSmsReuseEnabledValue = typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled
+  const phoneSmsReuseEnabledValue = typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled
     ? normalizeHeroSmsReuseEnabledValue(inputHeroSmsReuseEnabled.checked)
-    : defaultHeroSmsReuseEnabled;
+    : normalizeHeroSmsReuseEnabledValue(
+      latestState?.phoneSmsReuseEnabled,
+      latestState?.heroSmsReuseEnabled
+    );
+  const heroSmsReuseEnabledValue = phoneSmsReuseEnabledValue;
   const freePhoneReuseEnabledValue = typeof inputFreePhoneReuseEnabled !== 'undefined' && inputFreePhoneReuseEnabled
     ? Boolean(inputFreePhoneReuseEnabled.checked)
     : Boolean(latestState?.freePhoneReuseEnabled);
@@ -3782,6 +3786,7 @@ function collectSettingsPayload() {
     nexSmsApiKey: nexSmsApiKeyValue,
     nexSmsCountryOrder: nexSmsCountryOrderValue,
     nexSmsServiceCode: nexSmsServiceCodeValue,
+    phoneSmsReuseEnabled: phoneSmsReuseEnabledValue,
     heroSmsReuseEnabled: heroSmsReuseEnabledValue,
     freePhoneReuseEnabled: freePhoneReuseEnabledValue,
     freePhoneReuseAutoEnabled: freePhoneReuseAutoEnabledValue,
@@ -3851,15 +3856,22 @@ function normalizeAccountRunHistoryHelperBaseUrlValue(value = '') {
 
 
 function normalizePhoneSmsProvider(value = '') {
-  if (typeof window !== 'undefined' && window.PhoneSmsProviderRegistry?.normalizeProviderId) {
-    return window.PhoneSmsProviderRegistry.normalizeProviderId(value);
+  const rootScope = typeof window !== 'undefined' ? window : globalThis;
+  if (rootScope.PhoneSmsProviderRegistry?.normalizeProviderId) {
+    return rootScope.PhoneSmsProviderRegistry.normalizeProviderId(value);
   }
+  const nexSmsProvider = typeof PHONE_SMS_PROVIDER_NEXSMS !== 'undefined'
+    ? PHONE_SMS_PROVIDER_NEXSMS
+    : 'nexsms';
   const normalized = String(value || '').trim().toLowerCase();
-  return normalized === PHONE_SMS_PROVIDER_FIVE_SIM
-    ? PHONE_SMS_PROVIDER_FIVE_SIM
-    : PHONE_SMS_PROVIDER_HERO_SMS;
+  if (normalized === PHONE_SMS_PROVIDER_FIVE_SIM) {
+    return PHONE_SMS_PROVIDER_FIVE_SIM;
+  }
+  if (normalized === nexSmsProvider) {
+    return nexSmsProvider;
+  }
+  return PHONE_SMS_PROVIDER_HERO_SMS;
 }
-
 function setPhoneSmsProviderSelectValue(provider) {
   const normalizedProvider = normalizePhoneSmsProvider(provider);
   if (selectPhoneSmsProvider) {
@@ -4042,21 +4054,21 @@ function normalizeHeroSmsMaxPriceValue(value = '') {
 }
 
 function normalizePhoneSmsProviderValue(value = '') {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === PHONE_SMS_PROVIDER_FIVE_SIM) {
-    return PHONE_SMS_PROVIDER_FIVE_SIM;
+  const rootScope = typeof window !== 'undefined' ? window : globalThis;
+  if (rootScope.PhoneSmsProviderRegistry?.normalizeProviderId) {
+    return rootScope.PhoneSmsProviderRegistry.normalizeProviderId(value);
   }
-  if (normalized === PHONE_SMS_PROVIDER_NEXSMS) {
-    return PHONE_SMS_PROVIDER_NEXSMS;
-  }
-  return PHONE_SMS_PROVIDER_HERO;
+  return normalizePhoneSmsProvider(value);
 }
-
 function normalizePhoneSmsProviderOrderValue(value = [], fallbackOrder = []) {
+  const rootScope = typeof window !== 'undefined' ? window : globalThis;
+  if (rootScope.PhoneSmsProviderRegistry?.normalizeProviderOrder) {
+    return rootScope.PhoneSmsProviderRegistry.normalizeProviderOrder(value, fallbackOrder);
+  }
   const source = Array.isArray(value)
     ? value
     : String(value || '')
-      .split(/[\r\n,，;；|/]+/)
+      .split(/[\r\n,]+/)
       .map((entry) => String(entry || '').trim())
       .filter(Boolean);
   const normalized = [];
@@ -4089,7 +4101,6 @@ function normalizePhoneSmsProviderOrderValue(value = [], fallbackOrder = []) {
   });
   return fallbackNormalized.slice(0, 3);
 }
-
 function formatPhoneSmsProviderOrderSummary(order = []) {
   const normalized = normalizePhoneSmsProviderOrderValue(order, []);
   if (!normalized.length) {
@@ -4593,8 +4604,11 @@ function normalizePhoneCodePollMaxRoundsValue(value, fallback = DEFAULT_PHONE_CO
   return Math.max(PHONE_CODE_POLL_MAX_ROUNDS_MIN, Math.min(PHONE_CODE_POLL_MAX_ROUNDS_MAX, parsed));
 }
 
-function normalizeHeroSmsReuseEnabledValue(value) {
+function normalizeHeroSmsReuseEnabledValue(value, fallbackValue = undefined) {
   if (value === undefined || value === null) {
+    if (fallbackValue !== undefined && fallbackValue !== null) {
+      return Boolean(fallbackValue);
+    }
     return DEFAULT_HERO_SMS_REUSE_ENABLED;
   }
   return Boolean(value);
@@ -8983,7 +8997,10 @@ function applySettingsState(state) {
       : String(state?.nexSmsServiceCode || defaultNexSmsServiceCode).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '') || defaultNexSmsServiceCode;
   }
   if (typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled) {
-    inputHeroSmsReuseEnabled.checked = normalizeHeroSmsReuseEnabledValue(state?.heroSmsReuseEnabled);
+    inputHeroSmsReuseEnabled.checked = normalizeHeroSmsReuseEnabledValue(
+      state?.phoneSmsReuseEnabled,
+      state?.heroSmsReuseEnabled
+    );
   }
   if (typeof inputFreePhoneReuseEnabled !== 'undefined' && inputFreePhoneReuseEnabled) {
     inputFreePhoneReuseEnabled.checked = Boolean(state?.freePhoneReuseEnabled);
@@ -14582,8 +14599,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.nexSmsServiceCode !== undefined && inputNexSmsServiceCode) {
         inputNexSmsServiceCode.value = normalizeNexSmsServiceCodeValue(message.payload.nexSmsServiceCode);
       }
-      if (message.payload.heroSmsReuseEnabled !== undefined && inputHeroSmsReuseEnabled) {
-        inputHeroSmsReuseEnabled.checked = normalizeHeroSmsReuseEnabledValue(message.payload.heroSmsReuseEnabled);
+      if (
+        (message.payload.phoneSmsReuseEnabled !== undefined
+          || message.payload.heroSmsReuseEnabled !== undefined)
+        && inputHeroSmsReuseEnabled
+      ) {
+        inputHeroSmsReuseEnabled.checked = normalizeHeroSmsReuseEnabledValue(
+          message.payload.phoneSmsReuseEnabled,
+          message.payload.heroSmsReuseEnabled
+        );
       }
       if (message.payload.freePhoneReuseEnabled !== undefined && inputFreePhoneReuseEnabled) {
         inputFreePhoneReuseEnabled.checked = Boolean(message.payload.freePhoneReuseEnabled);

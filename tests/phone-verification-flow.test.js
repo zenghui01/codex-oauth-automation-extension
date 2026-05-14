@@ -1948,6 +1948,178 @@ test('phone verification helper acquires a number from 5sim with fallback countr
   assert.equal(requests[3].pathname, '/v1/user/buy/activation/england/any/openai');
 });
 
+test('phone verification helper prefers phoneSmsReuseEnabled over legacy heroSmsReuseEnabled for 5sim acquisition', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url, options = {}) => {
+      const parsedUrl = new URL(url);
+      requests.push({
+        pathname: parsedUrl.pathname,
+        search: parsedUrl.searchParams,
+        headers: options?.headers || {},
+      });
+      if (parsedUrl.pathname === '/v1/guest/prices') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            openai: {
+              thailand: {
+                any: {
+                  cost: 0.08,
+                  count: 12,
+                },
+              },
+            },
+          }),
+        };
+      }
+      if (parsedUrl.pathname === '/v1/user/buy/activation/thailand/any/openai') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            id: 1234567,
+            phone: '+66880000000',
+            country: 'thailand',
+            country_name: 'Thailand',
+            product: 'openai',
+          }),
+        };
+      }
+      throw new Error(`Unexpected 5sim request: ${parsedUrl.pathname}`);
+    },
+    getState: async () => ({
+      phoneSmsProvider: '5sim',
+      fiveSimApiKey: 'five-token',
+      fiveSimCountryOrder: ['thailand'],
+      fiveSimOperator: 'any',
+      fiveSimProduct: 'openai',
+      phoneSmsReuseEnabled: false,
+      heroSmsReuseEnabled: true,
+      heroSmsActivationRetryRounds: 1,
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    phoneSmsProvider: '5sim',
+    fiveSimApiKey: 'five-token',
+    fiveSimCountryOrder: ['thailand'],
+    fiveSimOperator: 'any',
+    fiveSimProduct: 'openai',
+    phoneSmsReuseEnabled: false,
+    heroSmsReuseEnabled: true,
+    heroSmsActivationRetryRounds: 1,
+  });
+
+  assert.deepStrictEqual(activation, {
+    activationId: '1234567',
+    phoneNumber: '+66880000000',
+    provider: '5sim',
+    serviceCode: 'openai',
+    countryId: 'thailand',
+    countryCode: 'thailand',
+    countryLabel: 'Thailand',
+    successfulUses: 0,
+    maxUses: 3,
+  });
+  assert.equal(requests[0].pathname, '/v1/guest/prices');
+  assert.equal(requests[1].pathname, '/v1/user/buy/activation/thailand/any/openai');
+  assert.equal(requests[1].search.get('reuse'), null);
+});
+
+test('phone verification helper treats fiveSimReuseEnabled as legacy-only when phoneSmsReuseEnabled is absent', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url, options = {}) => {
+      const parsedUrl = new URL(url);
+      requests.push({
+        pathname: parsedUrl.pathname,
+        search: parsedUrl.searchParams,
+        headers: options?.headers || {},
+      });
+      if (parsedUrl.pathname === '/v1/guest/prices') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            openai: {
+              thailand: {
+                any: {
+                  cost: 0.08,
+                  count: 12,
+                },
+              },
+            },
+          }),
+        };
+      }
+      if (parsedUrl.pathname === '/v1/user/buy/activation/thailand/any/openai') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            id: 1234568,
+            phone: '+66880000001',
+            country: 'thailand',
+            country_name: 'Thailand',
+            product: 'openai',
+          }),
+        };
+      }
+      throw new Error(`Unexpected 5sim request: ${parsedUrl.pathname}`);
+    },
+    getState: async () => ({
+      phoneSmsProvider: '5sim',
+      fiveSimApiKey: 'five-token',
+      fiveSimCountryOrder: ['thailand'],
+      fiveSimOperator: 'any',
+      fiveSimProduct: 'openai',
+      heroSmsReuseEnabled: true,
+      fiveSimReuseEnabled: false,
+      heroSmsActivationRetryRounds: 1,
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    phoneSmsProvider: '5sim',
+    fiveSimApiKey: 'five-token',
+    fiveSimCountryOrder: ['thailand'],
+    fiveSimOperator: 'any',
+    fiveSimProduct: 'openai',
+    heroSmsReuseEnabled: true,
+    fiveSimReuseEnabled: false,
+    heroSmsActivationRetryRounds: 1,
+  });
+
+  assert.deepStrictEqual(activation, {
+    activationId: '1234568',
+    phoneNumber: '+66880000001',
+    provider: '5sim',
+    serviceCode: 'openai',
+    countryId: 'thailand',
+    countryCode: 'thailand',
+    countryLabel: 'Thailand',
+    successfulUses: 0,
+    maxUses: 3,
+  });
+  assert.equal(requests[0].pathname, '/v1/guest/prices');
+  assert.equal(requests[1].pathname, '/v1/user/buy/activation/thailand/any/openai');
+  assert.equal(requests[1].search.get('reuse'), '1');
+});
+
 test('phone verification helper rejects 5sim maxPrice with custom operator before buying', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({

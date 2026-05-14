@@ -809,6 +809,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoStepDelaySeconds: null,
   step6CookieCleanupEnabled: false,
   phoneVerificationEnabled: false,
+  phoneSmsReuseEnabled: DEFAULT_HERO_SMS_REUSE_ENABLED,
   freePhoneReuseEnabled: true,
   freePhoneReuseAutoEnabled: true,
   signupMethod: DEFAULT_SIGNUP_METHOD,
@@ -1329,12 +1330,15 @@ function normalizePhoneSmsProvider(value = '') {
   }
   return PHONE_SMS_PROVIDER_HERO_SMS;
 }
-
 function normalizePhoneSmsProviderOrder(value = [], fallbackOrder = []) {
+  const rootScope = typeof self !== 'undefined' ? self : globalThis;
+  if (rootScope.PhoneSmsProviderRegistry?.normalizeProviderOrder) {
+    return rootScope.PhoneSmsProviderRegistry.normalizeProviderOrder(value, fallbackOrder);
+  }
   const source = Array.isArray(value)
     ? value
     : String(value || '')
-      .split(/[\r\n,，;；]+/)
+      .split(/[\r\n,]+/)
       .map((entry) => String(entry || '').trim())
       .filter(Boolean);
   const normalized = [];
@@ -1373,7 +1377,6 @@ function normalizePhoneSmsProviderOrder(value = [], fallbackOrder = []) {
 
   return normalized.slice(0, DEFAULT_PHONE_SMS_PROVIDER_ORDER.length);
 }
-
 function normalizeSignupMethod(value = '') {
   return String(value || '').trim().toLowerCase() === 'phone'
     ? 'phone'
@@ -2668,6 +2671,7 @@ function normalizePersistentSettingValue(key, value) {
       return typeof value === 'boolean' ? value : true;
     case 'step6CookieCleanupEnabled':
     case 'phoneVerificationEnabled':
+    case 'phoneSmsReuseEnabled':
     case 'freePhoneReuseEnabled':
     case 'freePhoneReuseAutoEnabled':
     case 'plusModeEnabled':
@@ -2842,6 +2846,13 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
     throw new Error('\u914d\u7f6e\u5185\u5bb9\u683c\u5f0f\u65e0\u6548\u3002');
   }
 
+  const persistedSettingDefaults = typeof PERSISTED_SETTING_DEFAULTS !== 'undefined' && PERSISTED_SETTING_DEFAULTS
+    ? PERSISTED_SETTING_DEFAULTS
+    : {};
+  const persistedSettingKeys = Array.isArray(typeof PERSISTED_SETTING_KEYS !== 'undefined' ? PERSISTED_SETTING_KEYS : null)
+    ? PERSISTED_SETTING_KEYS
+    : Object.keys(persistedSettingDefaults);
+
   const normalizedInput = { ...input };
   if (normalizedInput.autoStepDelaySeconds === undefined) {
     const legacyAutoStepDelaySeconds = resolveLegacyAutoStepDelaySeconds(normalizedInput);
@@ -2860,13 +2871,27 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
 
   const payload = {};
   let matchedKeyCount = 0;
-  for (const key of PERSISTED_SETTING_KEYS) {
+  for (const key of persistedSettingKeys) {
     if (normalizedInput[key] !== undefined) {
       payload[key] = normalizePersistentSettingValue(key, normalizedInput[key]);
       matchedKeyCount += 1;
     } else if (fillDefaults) {
-      payload[key] = normalizePersistentSettingValue(key, PERSISTED_SETTING_DEFAULTS[key]);
+      payload[key] = normalizePersistentSettingValue(key, persistedSettingDefaults[key]);
     }
+  }
+
+  const hasPhoneSmsReuseEnabled = Object.prototype.hasOwnProperty.call(normalizedInput, 'phoneSmsReuseEnabled');
+  const hasHeroSmsReuseEnabled = Object.prototype.hasOwnProperty.call(normalizedInput, 'heroSmsReuseEnabled');
+  const hasFiveSimReuseEnabled = Object.prototype.hasOwnProperty.call(normalizedInput, 'fiveSimReuseEnabled');
+  if (hasPhoneSmsReuseEnabled || hasHeroSmsReuseEnabled || hasFiveSimReuseEnabled) {
+    const reuseSource = hasPhoneSmsReuseEnabled
+      ? normalizedInput.phoneSmsReuseEnabled
+      : (hasHeroSmsReuseEnabled
+        ? normalizedInput.heroSmsReuseEnabled
+        : normalizedInput.fiveSimReuseEnabled);
+    const normalizedReuseEnabled = normalizePersistentSettingValue('phoneSmsReuseEnabled', reuseSource);
+    payload.phoneSmsReuseEnabled = normalizedReuseEnabled;
+    payload.heroSmsReuseEnabled = normalizedReuseEnabled;
   }
 
   if (requireKnownKeys && matchedKeyCount === 0) {
