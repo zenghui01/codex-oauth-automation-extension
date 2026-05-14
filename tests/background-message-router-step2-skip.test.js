@@ -251,6 +251,11 @@ test('message router persists phone signup identity from step 7 completion paylo
   };
   const { router, events } = createRouter({
     state: { stepStatuses: { 7: 'completed', 8: 'pending' } },
+    getStepDefinitionForState: (step) => (
+      step === 7
+        ? { key: 'oauth-login' }
+        : (step === 8 ? { key: 'fetch-login-code' } : null)
+    ),
   });
 
   await router.handleStepData(7, {

@@ -16,6 +16,76 @@ test('tab runtime module exposes a factory', () => {
   assert.equal(typeof api?.createTabRuntime, 'function');
 });
 
+test('tab runtime accepts canonical openai-auth readiness for queued signup-page commands', async () => {
+  const runtimeSource = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const registrySource = fs.readFileSync('shared/source-registry.js', 'utf8');
+  const runtimeApi = new Function('self', `${runtimeSource}; return self.MultiPageBackgroundTabRuntime;`)({});
+  const registryApi = new Function('self', `${registrySource}; return self.MultiPageSourceRegistry;`)({});
+  const sourceRegistry = registryApi.createSourceRegistry();
+
+  const sentMessages = [];
+  let currentState = {
+    tabRegistry: {
+      'signup-page': { tabId: 91, ready: true },
+    },
+    sourceLastUrls: {
+      'signup-page': 'https://auth.openai.com/authorize',
+    },
+  };
+
+  const runtime = runtimeApi.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({
+          id: tabId,
+          windowId: 1,
+          url: 'https://auth.openai.com/authorize',
+          status: 'complete',
+        }),
+        query: async () => [],
+        sendMessage: async (tabId, message) => {
+          if (message.type === 'PING') {
+            return { ok: true, source: 'openai-auth' };
+          }
+          sentMessages.push({ tabId, message });
+          return { ok: true };
+        },
+      },
+    },
+    getSourceLabel: (source) => source || 'unknown',
+    getState: async () => currentState,
+    matchesSourceUrlFamily: (source, candidateUrl, referenceUrl) => (
+      sourceRegistry.matchesSourceUrlFamily(source, candidateUrl, referenceUrl)
+    ),
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sourceRegistry,
+    throwIfStopped: () => {},
+  });
+
+  assert.equal(await runtime.getTabId('openai-auth'), 91);
+
+  currentState = {
+    tabRegistry: {},
+    sourceLastUrls: {},
+  };
+
+  const queued = runtime.queueCommand('signup-page', { type: 'STEP2_TEST' }, 1000);
+  runtime.flushCommand('openai-auth', 55);
+  await assert.doesNotReject(queued);
+  assert.deepEqual(sentMessages, [{ tabId: 55, message: { type: 'STEP2_TEST' } }]);
+
+  await runtime.ensureContentScriptReadyOnTab('signup-page', 77, {
+    timeoutMs: 100,
+  });
+
+  assert.deepEqual(currentState.tabRegistry['openai-auth'], { tabId: 77, ready: true, windowId: 1 });
+  assert.equal(Object.prototype.hasOwnProperty.call(currentState.tabRegistry, 'signup-page'), false);
+});
+
 test('tab runtime caps per-attempt response timeout to the remaining resilient timeout budget', () => {
   const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
   const globalScope = {};

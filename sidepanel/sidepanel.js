@@ -517,6 +517,8 @@ const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
+const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+let latestState = null;
 let currentPlusModeEnabled = false;
 let currentPlusPaymentMethod = DEFAULT_PLUS_PAYMENT_METHOD;
 let currentSignupMethod = DEFAULT_SIGNUP_METHOD;
@@ -788,6 +790,7 @@ function initPhoneVerificationSectionExpandedState() {
 }
 
 function getStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
+  const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID !== 'undefined' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
   const defaultMethod = typeof DEFAULT_PLUS_PAYMENT_METHOD !== 'undefined' ? DEFAULT_PLUS_PAYMENT_METHOD : 'paypal';
   const rawPaymentMethod = typeof options === 'string'
     ? options
@@ -795,7 +798,11 @@ function getStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
   const rawSignupMethod = typeof options === 'string'
     ? currentSignupMethod
     : (options.signupMethod || currentSignupMethod || DEFAULT_SIGNUP_METHOD);
+  const activeFlowId = typeof options === 'string'
+    ? ((typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId)
+    : (options.activeFlowId || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId);
   return (window.MultiPageStepDefinitions?.getSteps?.({
+    activeFlowId: String(activeFlowId || '').trim().toLowerCase() || defaultFlowId,
     plusModeEnabled,
     plusPaymentMethod: normalizePlusPaymentMethod(rawPaymentMethod),
     signupMethod: normalizeSignupMethod(rawSignupMethod),
@@ -829,6 +836,7 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
   currentPlusPaymentMethod = normalizePlusPaymentMethod(rawPaymentMethod);
   currentSignupMethod = normalizeSignupMethod(rawSignupMethod);
   stepDefinitions = getStepDefinitionsForMode(currentPlusModeEnabled, {
+    activeFlowId: options?.activeFlowId,
     plusPaymentMethod: currentPlusPaymentMethod,
     signupMethod: currentSignupMethod,
   });
@@ -1116,7 +1124,6 @@ function validateCurrentRegistrationEmail(email = inputEmail.value.trim(), optio
   return false;
 }
 
-let latestState = null;
 let currentAutoRun = {
   autoRunning: false,
   phase: 'idle',
@@ -1930,6 +1937,39 @@ function shouldWarnCpaPhoneSignup(signupMethod = null, panelMode = null) {
         : 'cpa'
     )
   );
+
+  const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
+    ? resolveCurrentSidepanelCapabilities({
+      panelMode: resolvedPanelMode,
+      signupMethod: resolvedSignupMethod,
+      state: {
+        ...(typeof latestState !== 'undefined' ? latestState : {}),
+        panelMode: resolvedPanelMode,
+        signupMethod: resolvedSignupMethod,
+      },
+    })
+    : (() => {
+      const rootScope = typeof window !== 'undefined' ? window : globalThis;
+      const registry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+        defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+      }) || null;
+      return registry?.resolveSidepanelCapabilities
+        ? registry.resolveSidepanelCapabilities({
+          activeFlowId: typeof latestState !== 'undefined' ? latestState?.activeFlowId : '',
+          panelMode: resolvedPanelMode,
+          signupMethod: resolvedSignupMethod,
+          state: {
+            ...(typeof latestState !== 'undefined' ? latestState : {}),
+            panelMode: resolvedPanelMode,
+            signupMethod: resolvedSignupMethod,
+          },
+        })
+        : null;
+    })();
+
+  if (capabilityState && typeof capabilityState.shouldWarnCpaPhoneSignup === 'boolean') {
+    return capabilityState.shouldWarnCpaPhoneSignup && !isCpaPhoneSignupPromptDismissed();
+  }
 
   return resolvedSignupMethod === SIGNUP_METHOD_PHONE
     && resolvedPanelMode === 'cpa'
@@ -3470,6 +3510,57 @@ function collectSettingsPayload() {
         ? normalizeSignupMethod(latestState?.signupMethod)
         : (String(latestState?.signupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email'))
     );
+  const normalizePanelModeSafe = typeof normalizePanelMode === 'function'
+    ? normalizePanelMode
+    : ((value = '') => {
+      const normalized = String(value || '').trim().toLowerCase();
+      return normalized === 'sub2api' || normalized === 'codex2api' ? normalized : 'cpa';
+    });
+  const rawPanelMode = normalizePanelModeSafe(selectPanelMode?.value || latestState?.panelMode || 'cpa');
+  const rawPlusModeEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+    ? Boolean(inputPlusModeEnabled.checked)
+    : Boolean(latestState?.plusModeEnabled);
+  const rawPhoneVerificationEnabled = Boolean(inputPhoneVerificationEnabled?.checked);
+  const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
+    ? resolveCurrentSidepanelCapabilities({
+      panelMode: rawPanelMode,
+      signupMethod: selectedSignupMethod,
+      state: {
+        ...(latestState || {}),
+        panelMode: rawPanelMode,
+        plusModeEnabled: rawPlusModeEnabled,
+        phoneVerificationEnabled: rawPhoneVerificationEnabled,
+        signupMethod: selectedSignupMethod,
+      },
+    })
+    : (() => {
+      const rootScope = typeof window !== 'undefined' ? window : globalThis;
+      const registry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+        defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+      }) || null;
+      return registry?.resolveSidepanelCapabilities
+        ? registry.resolveSidepanelCapabilities({
+          activeFlowId: latestState?.activeFlowId,
+          panelMode: rawPanelMode,
+          signupMethod: selectedSignupMethod,
+          state: {
+            ...(latestState || {}),
+            panelMode: rawPanelMode,
+            plusModeEnabled: rawPlusModeEnabled,
+            phoneVerificationEnabled: rawPhoneVerificationEnabled,
+            signupMethod: selectedSignupMethod,
+          },
+        })
+        : null;
+    })();
+  const effectivePanelMode = capabilityState?.effectivePanelMode || capabilityState?.panelMode || rawPanelMode;
+  const effectivePlusModeEnabled = capabilityState
+    ? Boolean(capabilityState.runtimeLocks?.plusModeEnabled)
+    : rawPlusModeEnabled;
+  const effectivePhoneVerificationEnabled = capabilityState
+    ? Boolean(capabilityState.runtimeLocks?.phoneVerificationEnabled)
+    : rawPhoneVerificationEnabled;
+  const effectiveSignupMethod = capabilityState?.effectiveSignupMethod || selectedSignupMethod;
   const plusPaymentMethod = getSelectedPlusPaymentMethod();
   const normalizeGpcHelperPhoneModeSafe = typeof normalizeGpcHelperPhoneModeValue === 'function'
     ? normalizeGpcHelperPhoneModeValue
@@ -3527,7 +3618,7 @@ function collectSettingsPayload() {
     });
   return {
     ...(contributionModeEnabled ? {} : {
-      panelMode: selectPanelMode.value,
+      panelMode: effectivePanelMode,
     }),
     vpsUrl: inputVpsUrl.value.trim(),
     vpsPassword: inputVpsPassword.value,
@@ -3565,9 +3656,7 @@ function collectSettingsPayload() {
     ipProxyRegion: currentIpProxyServiceProfile.region,
     codex2apiUrl: inputCodex2ApiUrl.value.trim(),
     codex2apiAdminKey: inputCodex2ApiAdminKey.value.trim(),
-    plusModeEnabled: typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
-      ? Boolean(inputPlusModeEnabled.checked)
-      : Boolean(latestState?.plusModeEnabled),
+    plusModeEnabled: effectivePlusModeEnabled,
     plusPaymentMethod,
     paypalEmail: String(currentPayPalAccount?.email || latestState?.paypalEmail || '').trim(),
     paypalPassword: String(currentPayPalAccount?.password || latestState?.paypalPassword || ''),
@@ -3682,8 +3771,8 @@ function collectSettingsPayload() {
     oauthFlowTimeoutEnabled: typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled
       ? Boolean(inputOAuthFlowTimeoutEnabled.checked)
       : true,
-    phoneVerificationEnabled: Boolean(inputPhoneVerificationEnabled?.checked),
-    signupMethod: selectedSignupMethod,
+    phoneVerificationEnabled: effectivePhoneVerificationEnabled,
+    signupMethod: effectiveSignupMethod,
     phoneSmsProvider: phoneSmsProviderValue,
     phoneSmsProviderOrder: phoneSmsProviderOrderValue,
     verificationResendCount: normalizeVerificationResendCount(
@@ -7215,11 +7304,66 @@ function normalizePanelMode(value = '') {
   return 'cpa';
 }
 
+let flowCapabilityRegistry = null;
+
+function getFlowCapabilityRegistry() {
+  if (flowCapabilityRegistry) {
+    return flowCapabilityRegistry;
+  }
+  const rootScope = typeof window !== 'undefined' ? window : globalThis;
+  flowCapabilityRegistry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+    defaultFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  }) || null;
+  return flowCapabilityRegistry;
+}
+
+function resolveCurrentSidepanelCapabilities(options = {}) {
+  const registry = getFlowCapabilityRegistry();
+  if (!registry?.resolveSidepanelCapabilities) {
+    return null;
+  }
+  const state = {
+    ...(latestState || {}),
+    ...(options?.state || {}),
+  };
+  return registry.resolveSidepanelCapabilities({
+    activeFlowId: options?.activeFlowId ?? state?.activeFlowId,
+    panelMode: options?.panelMode ?? state?.panelMode,
+    signupMethod: options?.signupMethod ?? state?.signupMethod,
+    state,
+  });
+}
+
+function resolveStepDefinitionCapabilityState(state = latestState, options = {}) {
+  const nextState = {
+    ...(state || {}),
+    ...(options?.state || {}),
+  };
+  const capabilityState = resolveCurrentSidepanelCapabilities({
+    activeFlowId: options?.activeFlowId ?? nextState?.activeFlowId,
+    panelMode: options?.panelMode ?? nextState?.panelMode,
+    signupMethod: options?.signupMethod ?? nextState?.signupMethod,
+    state: nextState,
+  });
+  return {
+    capabilityState,
+    plusModeEnabled: capabilityState
+      ? Boolean(capabilityState.runtimeLocks?.plusModeEnabled)
+      : Boolean(nextState?.plusModeEnabled),
+    signupMethod: capabilityState?.effectiveSignupMethod
+      || normalizeSignupMethod((options?.signupMethod ?? nextState?.signupMethod) || DEFAULT_SIGNUP_METHOD),
+  };
+}
+
 function getSelectedPanelMode() {
   const selectedValue = typeof selectPanelMode !== 'undefined' && selectPanelMode
     ? selectPanelMode.value
     : (typeof latestState !== 'undefined' ? latestState?.panelMode : '');
-  return normalizePanelMode(selectedValue || 'cpa');
+  const resolvedPanelMode = normalizePanelMode(selectedValue || 'cpa');
+  const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
+    ? resolveCurrentSidepanelCapabilities({ panelMode: resolvedPanelMode })
+    : null;
+  return capabilityState?.effectivePanelMode || capabilityState?.panelMode || resolvedPanelMode;
 }
 
 function getSelectedSignupMethod() {
@@ -7244,6 +7388,37 @@ function canSelectPhoneSignupMethod() {
     ? Boolean(inputPlusModeEnabled.checked)
     : Boolean(latestState?.plusModeEnabled);
   const contributionModeEnabled = Boolean(latestState?.contributionMode);
+  const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
+    ? resolveCurrentSidepanelCapabilities({
+      panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : latestState?.panelMode,
+      state: {
+        ...(typeof latestState !== 'undefined' ? latestState : {}),
+        phoneVerificationEnabled: phoneEnabled,
+        plusModeEnabled,
+        contributionMode: contributionModeEnabled,
+      },
+    })
+    : (() => {
+      const rootScope = typeof window !== 'undefined' ? window : globalThis;
+      const registry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+        defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+      }) || null;
+      return registry?.resolveSidepanelCapabilities
+        ? registry.resolveSidepanelCapabilities({
+          activeFlowId: typeof latestState !== 'undefined' ? latestState?.activeFlowId : '',
+          panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : (latestState?.panelMode || 'cpa'),
+          state: {
+            ...(typeof latestState !== 'undefined' ? latestState : {}),
+            phoneVerificationEnabled: phoneEnabled,
+            plusModeEnabled,
+            contributionMode: contributionModeEnabled,
+          },
+        })
+        : null;
+    })();
+  if (capabilityState && typeof capabilityState.canSelectPhoneSignup === 'boolean') {
+    return capabilityState.canSelectPhoneSignup;
+  }
   return phoneEnabled && !plusModeEnabled && !contributionModeEnabled;
 }
 
@@ -7295,22 +7470,68 @@ function updateSignupMethodUI(options = {}) {
       }
     }
   });
-  syncStepDefinitionsForMode(
-    typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
-      ? Boolean(inputPlusModeEnabled.checked)
-      : Boolean(latestState?.plusModeEnabled),
-    {
-      plusPaymentMethod: getSelectedPlusPaymentMethod(latestState),
+  const stepDefinitionState = typeof resolveStepDefinitionCapabilityState === 'function'
+    ? resolveStepDefinitionCapabilityState({
+      ...(latestState || {}),
+      plusModeEnabled: typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+        ? Boolean(inputPlusModeEnabled.checked)
+        : Boolean(latestState?.plusModeEnabled),
       signupMethod: selectedMethod,
-    }
-  );
+    }, {
+      signupMethod: selectedMethod,
+    })
+    : {
+      plusModeEnabled: typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+        ? Boolean(inputPlusModeEnabled.checked)
+        : Boolean(latestState?.plusModeEnabled),
+      signupMethod: selectedMethod,
+    };
+  syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
+    plusPaymentMethod: getSelectedPlusPaymentMethod(latestState),
+    signupMethod: selectedMethod,
+  });
   if (typeof syncSignupPhoneInputFromState === 'function') {
     syncSignupPhoneInputFromState(latestState);
   }
 }
 
 function updatePhoneVerificationSettingsUI() {
-  const enabled = Boolean(inputPhoneVerificationEnabled?.checked);
+  const rawEnabled = Boolean(inputPhoneVerificationEnabled?.checked);
+  const rawPlusModeEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+    ? Boolean(inputPlusModeEnabled.checked)
+    : Boolean(latestState?.plusModeEnabled);
+  const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
+    ? resolveCurrentSidepanelCapabilities({
+      panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : latestState?.panelMode,
+      signupMethod: typeof getSelectedSignupMethod === 'function' ? getSelectedSignupMethod() : latestState?.signupMethod,
+      state: {
+        ...(latestState || {}),
+        phoneVerificationEnabled: rawEnabled,
+        plusModeEnabled: rawPlusModeEnabled,
+      },
+    })
+    : (() => {
+      const rootScope = typeof window !== 'undefined' ? window : globalThis;
+      const registry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+        defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+      }) || null;
+      return registry?.resolveSidepanelCapabilities
+        ? registry.resolveSidepanelCapabilities({
+          activeFlowId: latestState?.activeFlowId,
+          panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : (latestState?.panelMode || 'cpa'),
+          signupMethod: typeof getSelectedSignupMethod === 'function' ? getSelectedSignupMethod() : latestState?.signupMethod,
+          state: {
+            ...(latestState || {}),
+            phoneVerificationEnabled: rawEnabled,
+            plusModeEnabled: rawPlusModeEnabled,
+          },
+        })
+        : null;
+    })();
+  const canShowPhoneSettings = capabilityState
+    ? Boolean(capabilityState.canShowPhoneSettings)
+    : true;
+  const enabled = canShowPhoneSettings && rawEnabled;
   const showSettings = enabled && phoneVerificationSectionExpanded;
   const normalizeProvider = typeof normalizePhoneSmsProviderValue === 'function'
     ? normalizePhoneSmsProviderValue
@@ -7333,10 +7554,10 @@ function updatePhoneVerificationSettingsUI() {
   const fiveSimProvider = provider === fiveSimProviderValue;
   const nexSmsProvider = provider === nexSmsProviderValue;
   if (rowPhoneVerificationEnabled) {
-    rowPhoneVerificationEnabled.style.display = '';
+    rowPhoneVerificationEnabled.style.display = canShowPhoneSettings ? '' : 'none';
   }
   if (rowHeroSmsPlatform) {
-    rowHeroSmsPlatform.style.display = '';
+    rowHeroSmsPlatform.style.display = canShowPhoneSettings ? '' : 'none';
   }
   updateSignupMethodUI();
   if (btnTogglePhoneVerificationSection) {
@@ -7447,9 +7668,37 @@ function updatePlusModeUI() {
   const gopayValue = typeof PLUS_PAYMENT_METHOD_GOPAY !== 'undefined' ? PLUS_PAYMENT_METHOD_GOPAY : 'gopay';
   const gpcValue = typeof PLUS_PAYMENT_METHOD_GPC_HELPER !== 'undefined' ? PLUS_PAYMENT_METHOD_GPC_HELPER : 'gpc-helper';
   const defaultMethod = typeof DEFAULT_PLUS_PAYMENT_METHOD !== 'undefined' ? DEFAULT_PLUS_PAYMENT_METHOD : paypalValue;
-  const enabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+  const rawEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
     ? Boolean(inputPlusModeEnabled.checked)
     : false;
+  const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
+    ? resolveCurrentSidepanelCapabilities({
+      panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : latestState?.panelMode,
+      state: {
+        ...(latestState || {}),
+        plusModeEnabled: rawEnabled,
+      },
+    })
+    : (() => {
+      const rootScope = typeof window !== 'undefined' ? window : globalThis;
+      const registry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+        defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+      }) || null;
+      return registry?.resolveSidepanelCapabilities
+        ? registry.resolveSidepanelCapabilities({
+          activeFlowId: latestState?.activeFlowId,
+          panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : (latestState?.panelMode || 'cpa'),
+          state: {
+            ...(latestState || {}),
+            plusModeEnabled: rawEnabled,
+          },
+        })
+        : null;
+    })();
+  const supportsPlusMode = capabilityState
+    ? Boolean(capabilityState.canShowPlusSettings)
+    : true;
+  const enabled = supportsPlusMode && rawEnabled;
   const method = enabled ? getSelectedPlusPaymentMethod() : defaultMethod;
   const gpcPhoneMode = normalizeGpcHelperPhoneModeValue(
     typeof selectGpcHelperPhoneMode !== 'undefined' && selectGpcHelperPhoneMode
@@ -7476,6 +7725,9 @@ function updatePlusModeUI() {
   const canShowGpcModeSelector = gpcRowsVisible;
   const localSmsControlsVisible = gpcRowsVisible && !isGpcAutoMode;
   const effectiveLocalSmsEnabled = !isGpcAutoMode && localSmsEnabled;
+  if (typeof rowPlusMode !== 'undefined' && rowPlusMode) {
+    rowPlusMode.style.display = supportsPlusMode ? '' : 'none';
+  }
   if (typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod) {
     selectPlusPaymentMethod.value = method;
     if (selectPlusPaymentMethod.style) {
@@ -7657,7 +7909,39 @@ function syncSignupPhoneInputFromState(state = latestState) {
     const selectedMethod = typeof normalizeSignupMethod === 'function'
       ? normalizeSignupMethod(rawSignupMethod)
       : (String(rawSignupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email');
-    rowSignupPhone.style.display = phoneVerificationEnabled
+    const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
+      ? resolveCurrentSidepanelCapabilities({
+        panelMode: state?.panelMode || latestState?.panelMode,
+        signupMethod: selectedMethod,
+        state: {
+          ...(latestState || {}),
+          ...(state || {}),
+          phoneVerificationEnabled,
+        },
+      })
+      : (() => {
+        const rootScope = typeof window !== 'undefined' ? window : globalThis;
+        const registry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+          defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+        }) || null;
+        return registry?.resolveSidepanelCapabilities
+          ? registry.resolveSidepanelCapabilities({
+            activeFlowId: state?.activeFlowId || latestState?.activeFlowId,
+            panelMode: state?.panelMode || latestState?.panelMode,
+            signupMethod: selectedMethod,
+            state: {
+              ...(latestState || {}),
+              ...(state || {}),
+              phoneVerificationEnabled,
+            },
+          })
+          : null;
+      })();
+    const canShowPhoneSettings = capabilityState
+      ? Boolean(capabilityState.canShowPhoneSettings)
+      : true;
+    rowSignupPhone.style.display = canShowPhoneSettings
+      && phoneVerificationEnabled
       && (selectedMethod === 'phone' || Boolean(signupPhone) || Boolean(getSignupPhoneInputValue()) || signupPhoneInputDirty)
       ? ''
       : 'none';
@@ -8246,6 +8530,7 @@ function renderStepsList() {
 }
 
 function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOrOptions = {}, maybeOptions = {}) {
+  const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID !== 'undefined' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
   const nextPlusModeEnabled = Boolean(plusModeEnabled);
   const options = typeof plusPaymentMethodOrOptions === 'string'
     ? maybeOptions
@@ -8255,9 +8540,15 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     : (options.plusPaymentMethod || getSelectedPlusPaymentMethod(latestState));
   const nextSignupMethod = normalizeSignupMethod(options.signupMethod || currentSignupMethod || DEFAULT_SIGNUP_METHOD);
   const nextPaymentMethod = normalizePlusPaymentMethod(rawPaymentMethod);
+  const nextActiveFlowId = String(
+    options.activeFlowId
+    || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '')
+    || defaultFlowId
+  ).trim().toLowerCase() || defaultFlowId;
   const rootScope = typeof window !== 'undefined' ? window : globalThis;
   const currentPaymentStep = stepDefinitions.find((step) => step.key === 'paypal-approve');
   const nextPaymentTitle = rootScope.MultiPageStepDefinitions?.getPlusPaymentStepTitle?.({
+    activeFlowId: nextActiveFlowId,
     plusModeEnabled: nextPlusModeEnabled,
     plusPaymentMethod: nextPaymentMethod,
     signupMethod: nextSignupMethod,
@@ -8273,6 +8564,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
   }
 
   rebuildStepDefinitionState(nextPlusModeEnabled, {
+    activeFlowId: nextActiveFlowId,
     plusPaymentMethod: nextPaymentMethod,
     signupMethod: nextSignupMethod,
   });
@@ -8285,9 +8577,17 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
 
 function applySettingsState(state) {
   if (typeof syncStepDefinitionsForMode === 'function') {
-    syncStepDefinitionsForMode(Boolean(state?.plusModeEnabled), {
+    const stepDefinitionState = typeof resolveStepDefinitionCapabilityState === 'function'
+      ? resolveStepDefinitionCapabilityState(state, {
+        signupMethod: state?.signupMethod,
+      })
+      : {
+        plusModeEnabled: Boolean(state?.plusModeEnabled),
+        signupMethod: normalizeSignupMethod(state?.signupMethod || DEFAULT_SIGNUP_METHOD),
+      };
+    syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
       plusPaymentMethod: state?.plusPaymentMethod,
-      signupMethod: state?.signupMethod,
+      signupMethod: stepDefinitionState.signupMethod,
     });
   }
   const fallbackIpProxyService = '711proxy';
@@ -9776,6 +10076,30 @@ function updateMailProviderUI() {
   const icloudHostPreferenceValue = typeof selectIcloudHostPreference !== 'undefined'
     ? selectIcloudHostPreference?.value
     : latestState?.icloudHostPreference;
+  const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
+    ? resolveCurrentSidepanelCapabilities({
+      panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : latestState?.panelMode,
+      state: latestState || {},
+    })
+    : null;
+  const canShowLuckmail = capabilityState
+    ? Boolean(capabilityState.canShowLuckmail)
+    : true;
+  const mailProviderOptions = Array.from(selectMailProvider?.options || []);
+  mailProviderOptions.forEach((option) => {
+    if (!option) {
+      return;
+    }
+    if (String(option.value || '').trim().toLowerCase() === 'luckmail-api') {
+      option.hidden = !canShowLuckmail;
+    }
+  });
+  if (!canShowLuckmail && String(selectMailProvider?.value || '').trim().toLowerCase() === 'luckmail-api') {
+    const fallbackOption = mailProviderOptions.find((option) => option && !option.hidden);
+    if (fallbackOption) {
+      selectMailProvider.value = String(fallbackOption.value || '').trim();
+    }
+  }
   const use2925 = selectMailProvider.value === '2925';
   const useGmail = selectMailProvider.value === GMAIL_PROVIDER;
   const useMail2925 = selectMailProvider.value === '2925';
@@ -9806,7 +10130,7 @@ function updateMailProviderUI() {
   const useGeneratedAlias = usesGeneratedAliasMailProvider(selectMailProvider.value, mail2925Mode, selectedGenerator);
   const useInbucket = selectMailProvider.value === 'inbucket';
   const useHotmail = selectMailProvider.value === 'hotmail-api';
-  const useLuckmail = isLuckmailProvider();
+  const useLuckmail = canShowLuckmail && isLuckmailProvider();
   const useCustomEmail = isCustomMailProvider();
   const useCustomMailProviderPool = useCustomEmail && usesCustomMailProviderPool(selectMailProvider.value);
   const useIcloudProvider = isIcloudMailProvider();
@@ -10228,7 +10552,39 @@ async function handleDeleteSub2ApiGroup(groupName) {
 }
 
 function updatePanelModeUI() {
-  const panelMode = getSelectedPanelMode();
+  const rawPanelMode = normalizePanelMode(selectPanelMode?.value || latestState?.panelMode || 'cpa');
+  const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
+    ? resolveCurrentSidepanelCapabilities({
+      panelMode: rawPanelMode,
+      state: {
+        ...(latestState || {}),
+        panelMode: rawPanelMode,
+      },
+    })
+    : null;
+  const supportedPanelModes = Array.isArray(capabilityState?.supportedPanelModes)
+    ? capabilityState.supportedPanelModes
+    : [];
+  if (selectPanelMode?.options && supportedPanelModes.length) {
+    Array.from(selectPanelMode.options).forEach((option) => {
+      if (!option) {
+        return;
+      }
+      const optionMode = normalizePanelMode(option.value || '');
+      const enabled = supportedPanelModes.includes(optionMode);
+      option.disabled = !enabled;
+      option.hidden = !enabled;
+    });
+  } else if (selectPanelMode?.options) {
+    Array.from(selectPanelMode.options).forEach((option) => {
+      if (!option) {
+        return;
+      }
+      option.disabled = false;
+      option.hidden = false;
+    });
+  }
+  const panelMode = capabilityState?.effectivePanelMode || capabilityState?.panelMode || getSelectedPanelMode();
   if (selectPanelMode) {
     selectPanelMode.value = panelMode;
   }
@@ -11492,6 +11848,37 @@ async function startAutoRunFromCurrentSettings() {
   if (typeof persistCurrentSettingsForAction === 'function') {
     await persistCurrentSettingsForAction();
   }
+  const autoRunStartValidation = (() => {
+    const rootScope = typeof window !== 'undefined' ? window : globalThis;
+    const registry = rootScope.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
+      defaultFlowId: typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai',
+    }) || null;
+    if (!registry?.validateAutoRunStart) {
+      return { ok: true, errors: [] };
+    }
+    const validationState = {
+      ...(latestState || {}),
+      panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : latestState?.panelMode,
+      signupMethod: typeof getSelectedSignupMethod === 'function' ? getSelectedSignupMethod() : latestState?.signupMethod,
+      phoneVerificationEnabled: typeof inputPhoneVerificationEnabled !== 'undefined' && inputPhoneVerificationEnabled
+        ? Boolean(inputPhoneVerificationEnabled.checked)
+        : Boolean(latestState?.phoneVerificationEnabled),
+      plusModeEnabled: typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+        ? Boolean(inputPlusModeEnabled.checked)
+        : Boolean(latestState?.plusModeEnabled),
+      contributionMode: Boolean(latestState?.contributionMode),
+    };
+    return registry.validateAutoRunStart({
+      activeFlowId: validationState.activeFlowId,
+      panelMode: validationState.panelMode,
+      signupMethod: validationState.signupMethod,
+      state: validationState,
+    });
+  })();
+  if (autoRunStartValidation?.ok === false) {
+    clearPendingAutoRunStartRunCount();
+    throw new Error(autoRunStartValidation.errors?.[0]?.message || '当前设置不支持启动自动流程。');
+  }
   if (!(await ensureGpcApiKeyReadyForStart())) {
     clearPendingAutoRunStartRunCount();
     return false;
@@ -11799,7 +12186,22 @@ inputPassword.addEventListener('blur', () => {
 inputPlusModeEnabled?.addEventListener('change', () => {
   updatePlusModeUI();
   updateSignupMethodUI({ notify: true });
-  syncStepDefinitionsForMode(Boolean(inputPlusModeEnabled.checked), getSelectedPlusPaymentMethod(), { render: true });
+  const stepDefinitionState = typeof resolveStepDefinitionCapabilityState === 'function'
+    ? resolveStepDefinitionCapabilityState({
+      ...(latestState || {}),
+      plusModeEnabled: Boolean(inputPlusModeEnabled.checked),
+      signupMethod: getSelectedSignupMethod(),
+    }, {
+      signupMethod: getSelectedSignupMethod(),
+    })
+    : {
+      plusModeEnabled: Boolean(inputPlusModeEnabled.checked),
+      signupMethod: getSelectedSignupMethod(),
+    };
+  syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, getSelectedPlusPaymentMethod(), {
+    render: true,
+    signupMethod: stepDefinitionState.signupMethod,
+  });
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -11811,7 +12213,22 @@ inputOperationDelayEnabled?.addEventListener('change', () => {
 selectPlusPaymentMethod?.addEventListener('change', () => {
   selectPlusPaymentMethod.value = normalizePlusPaymentMethod(selectPlusPaymentMethod.value);
   updatePlusModeUI();
-  syncStepDefinitionsForMode(Boolean(inputPlusModeEnabled?.checked), selectPlusPaymentMethod.value, { render: true });
+  const stepDefinitionState = typeof resolveStepDefinitionCapabilityState === 'function'
+    ? resolveStepDefinitionCapabilityState({
+      ...(latestState || {}),
+      plusModeEnabled: Boolean(inputPlusModeEnabled?.checked),
+      signupMethod: getSelectedSignupMethod(),
+    }, {
+      signupMethod: getSelectedSignupMethod(),
+    })
+    : {
+      plusModeEnabled: Boolean(inputPlusModeEnabled?.checked),
+      signupMethod: getSelectedSignupMethod(),
+    };
+  syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, selectPlusPaymentMethod.value, {
+    render: true,
+    signupMethod: stepDefinitionState.signupMethod,
+  });
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -11873,9 +12290,22 @@ btnGpcHelperBalance?.addEventListener('click', async () => {
 
 selectPlusPaymentMethod?.addEventListener('change', () => {
   updatePlusModeUI();
-  syncStepDefinitionsForMode(Boolean(inputPlusModeEnabled?.checked), {
+  const stepDefinitionState = typeof resolveStepDefinitionCapabilityState === 'function'
+    ? resolveStepDefinitionCapabilityState({
+      ...(latestState || {}),
+      plusModeEnabled: Boolean(inputPlusModeEnabled?.checked),
+      signupMethod: getSelectedSignupMethod(),
+    }, {
+      signupMethod: getSelectedSignupMethod(),
+    })
+    : {
+      plusModeEnabled: Boolean(inputPlusModeEnabled?.checked),
+      signupMethod: getSelectedSignupMethod(),
+    };
+  syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
     render: true,
     plusPaymentMethod: selectPlusPaymentMethod.value,
+    signupMethod: stepDefinitionState.signupMethod,
   });
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
@@ -12011,7 +12441,9 @@ checkboxAutoDeleteIcloud?.addEventListener('change', () => {
 
 selectPanelMode.addEventListener('change', async () => {
   const previousPanelMode = normalizePanelMode(latestState?.panelMode || 'cpa');
-  const nextPanelMode = normalizePanelMode(selectPanelMode.value);
+  const rawNextPanelMode = normalizePanelMode(selectPanelMode.value);
+  selectPanelMode.value = rawNextPanelMode;
+  const nextPanelMode = getSelectedPanelMode();
   selectPanelMode.value = nextPanelMode;
   const confirmed = await confirmCpaPhoneSignupIfNeeded({
     signupMethod: getSelectedSignupMethod(),
@@ -13845,10 +14277,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.gopayHelperOtpChannel !== undefined
         || message.payload.gopayHelperLocalSmsHelperEnabled !== undefined
       ) {
+        const stepDefinitionState = typeof resolveStepDefinitionCapabilityState === 'function'
+          ? resolveStepDefinitionCapabilityState(latestState, {
+            signupMethod: latestState?.signupMethod,
+          })
+          : {
+            plusModeEnabled: Boolean(latestState?.plusModeEnabled),
+            signupMethod: normalizeSignupMethod(latestState?.signupMethod || DEFAULT_SIGNUP_METHOD),
+          };
         syncStepDefinitionsForMode(
-          Boolean(latestState?.plusModeEnabled),
+          stepDefinitionState.plusModeEnabled,
           latestState?.plusPaymentMethod,
-          { render: true }
+          {
+            render: true,
+            signupMethod: stepDefinitionState.signupMethod,
+          }
         );
         updatePlusModeUI();
         updateSignupMethodUI({ notify: true });
