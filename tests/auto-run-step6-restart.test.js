@@ -83,6 +83,65 @@ const defaultStepDefinitions = {
   10: { key: 'platform-verify' },
 };
 
+const PHONE_IDENTITY_STATE_KEYS = [
+  'phoneNumber',
+  'signupPhoneNumber',
+  'signupPhoneActivation',
+  'signupPhoneCompletedActivation',
+  'signupPhoneVerificationRequestedAt',
+  'signupPhoneVerificationPurpose',
+  'accountIdentifierType',
+  'accountIdentifier',
+];
+
+function createDownstreamResetHarness(stepKey = '') {
+  return new Function(`
+function getStepExecutionKeyForState() {
+  return ${JSON.stringify(stepKey)};
+}
+${extractFunction('getDownstreamStateResets')}
+return { getDownstreamStateResets };
+`)();
+}
+
+test('downstream restarts after account creation preserve phone signup identity fields', () => {
+  const numericResetHarness = createDownstreamResetHarness('');
+  const stepKeyResetHarnesses = [
+    createDownstreamResetHarness('oauth-login'),
+    createDownstreamResetHarness('fetch-login-code'),
+    createDownstreamResetHarness('confirm-oauth'),
+  ];
+  const phoneState = {
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+447780579093',
+    signupPhoneNumber: '+447780579093',
+    signupPhoneActivation: { activationId: 'active', phoneNumber: '+447780579093' },
+    signupPhoneCompletedActivation: { activationId: 'done', phoneNumber: '+447780579093' },
+  };
+
+  for (const step of [5, 6, 7, 8, 9]) {
+    const resets = numericResetHarness.getDownstreamStateResets(step, phoneState);
+    for (const key of PHONE_IDENTITY_STATE_KEYS) {
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(resets, key),
+        false,
+        `step ${step} reset must not clear ${key}`
+      );
+    }
+  }
+
+  for (const harness of stepKeyResetHarnesses) {
+    const resets = harness.getDownstreamStateResets(10, phoneState);
+    for (const key of PHONE_IDENTITY_STATE_KEYS) {
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(resets, key),
+        false,
+        `${key} must not be cleared by step-key reset`
+      );
+    }
+  }
+});
+
 function createHarness(options = {}) {
   const {
     startStep = 7,

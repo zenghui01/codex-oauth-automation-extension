@@ -266,6 +266,7 @@ test('step 8 submits add-email before polling the email verification code', asyn
     resolvedStates: [],
     setStates: [],
     mailStates: [],
+    persistCalls: [],
   };
 
   const executor = api.createStep8Executor({
@@ -300,6 +301,9 @@ test('step 8 submits add-email before polling the email verification code', asyn
     isTabAlive: async () => true,
     isVerificationMailPollingError: () => false,
     LUCKMAIL_PROVIDER: 'luckmail-api',
+    persistRegistrationEmailState: async (state, email, options) => {
+      calls.persistCalls.push({ state, email, options });
+    },
     resolveSignupEmailForFlow: async (state, options = {}) => {
       calls.resolvedStates.push(state);
       calls.resolveOptions = options;
@@ -338,14 +342,14 @@ test('step 8 submits add-email before polling the email verification code', asyn
   assert.equal(calls.contentMessages.length, 1);
   assert.equal(calls.resolvedStates.length, 1);
   assert.equal(calls.resolveOptions.preserveAccountIdentity, true);
+  assert.equal(calls.persistCalls.length, 1);
+  assert.equal(calls.persistCalls[0].email, 'new.user@example.com');
+  assert.equal(calls.persistCalls[0].options.preserveAccountIdentity, true);
+  assert.equal(calls.persistCalls[0].options.source, 'step8_add_email');
   assert.equal(calls.mailStates[0].email, 'new.user@example.com');
   assert.equal(calls.resolvedVerification.state.email, 'new.user@example.com');
   assert.equal(calls.resolvedVerification.options.targetEmail, 'new.user@example.com');
   assert.deepStrictEqual(calls.setStates, [
-    {
-      email: 'new.user@example.com',
-      step8VerificationTargetEmail: 'new.user@example.com',
-    },
     {
       step8VerificationTargetEmail: 'new.user@example.com',
     },
@@ -407,6 +411,14 @@ test('step 8 reruns step 7 with preserved phone login identity after add-email v
     isTabAlive: async () => true,
     isVerificationMailPollingError: () => false,
     LUCKMAIL_PROVIDER: 'luckmail-api',
+    persistRegistrationEmailState: async (_state, email, options) => {
+      assert.equal(email, 'new.user@example.com');
+      assert.equal(options.preserveAccountIdentity, true);
+      runtimeState = {
+        ...runtimeState,
+        email,
+      };
+    },
     resolveSignupEmailForFlow: async (_state, options = {}) => {
       assert.equal(options.preserveAccountIdentity, true);
       runtimeState = {
@@ -457,6 +469,106 @@ test('step 8 reruns step 7 with preserved phone login identity after add-email v
   assert.equal(calls.rerunStates[0].email, 'new.user@example.com');
   assert.equal(calls.rerunStates[0].accountIdentifierType, 'phone');
   assert.equal(calls.rerunStates[0].accountIdentifier, '+447780579093');
+  assert.equal(calls.rerunStates[0].signupPhoneNumber, '+447780579093');
+});
+
+test('step 8 add-email rereads persisted phone identity before rerunning step 7', async () => {
+  const calls = {
+    resolveCalls: 0,
+    rerunStates: [],
+  };
+  let runtimeState = {
+    visibleStep: 8,
+    email: '',
+    password: 'secret',
+    oauthUrl: 'https://oauth.example/latest',
+    accountIdentifierType: 'email',
+    accountIdentifier: 'stale@example.com',
+    signupMethod: 'phone',
+    resolvedSignupMethod: 'phone',
+    phoneVerificationEnabled: true,
+    signupPhoneNumber: '',
+  };
+
+  const executor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    confirmCustomVerificationStepBypass: async () => {},
+    ensureStep8VerificationPageReady: async () => ({ state: 'add_email_page', url: 'https://auth.openai.com/add-email' }),
+    getOAuthFlowRemainingMs: async () => 8000,
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => Math.min(defaultTimeoutMs, 8000),
+    getMailConfig: () => ({
+      provider: 'qq',
+      label: 'QQ 邮箱',
+      source: 'mail-qq',
+      url: 'https://mail.qq.com',
+      navigateOnReuse: false,
+    }),
+    getState: async () => ({ ...runtimeState }),
+    getTabId: async (sourceName) => (sourceName === 'signup-page' ? 1 : 2),
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isTabAlive: async () => true,
+    isVerificationMailPollingError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    persistRegistrationEmailState: async (_state, email, options) => {
+      assert.equal(email, 'new.user@example.com');
+      assert.equal(options.preserveAccountIdentity, true);
+      runtimeState = {
+        ...runtimeState,
+        email,
+        accountIdentifierType: 'phone',
+        accountIdentifier: '+447780579093',
+        signupPhoneNumber: '+447780579093',
+        signupPhoneCompletedActivation: {
+          activationId: 'signup-done',
+          phoneNumber: '+447780579093',
+        },
+      };
+    },
+    resolveSignupEmailForFlow: async (_state, options = {}) => {
+      assert.equal(options.preserveAccountIdentity, true);
+      return 'new.user@example.com';
+    },
+    resolveVerificationStep: async (_step, state) => {
+      calls.resolveCalls += 1;
+      assert.equal(state.accountIdentifierType, 'phone');
+      assert.equal(state.signupPhoneNumber, '+447780579093');
+      throw new Error('STEP8_RESTART_STEP7::step 8 verification page fell into login timeout retry state');
+    },
+    rerunStep7ForStep8Recovery: async () => {
+      calls.rerunStates.push({ ...runtimeState });
+    },
+    reuseOrCreateTab: async () => {},
+    sendToContentScriptResilient: async () => ({
+      submitted: true,
+      displayedEmail: 'new.user@example.com',
+      url: 'https://auth.openai.com/email-verification',
+    }),
+    setState: async (payload) => {
+      runtimeState = {
+        ...runtimeState,
+        ...payload,
+      };
+    },
+    shouldUseCustomRegistrationEmail: () => false,
+    STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS: 25000,
+    STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS: 2,
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executeStep8({ ...runtimeState }),
+    /STEP8_RESTART_STEP7::/
+  );
+
+  assert.equal(calls.resolveCalls, 2);
+  assert.equal(calls.rerunStates.length, 1);
+  assert.equal(calls.rerunStates[0].accountIdentifierType, 'phone');
   assert.equal(calls.rerunStates[0].signupPhoneNumber, '+447780579093');
 });
 
@@ -944,7 +1056,7 @@ test('step 8 completes when polling fails but recovery probe shows oauth consent
   ]);
 });
 
-test('step 8 uses a fixed 10-minute lookback window and disables resend interval for 2925 mailbox polling', async () => {
+test('step 8 uses a fixed 10-minute lookback window and plans 2925 polling as 2/3/15', async () => {
   let capturedOptions = null;
   let ensureCalls = 0;
   let ensureOptions = null;
@@ -1036,6 +1148,9 @@ test('step 8 uses a fixed 10-minute lookback window and disables resend interval
   ]);
   assert.equal(capturedOptions.filterAfterTimestamp, 300000);
   assert.equal(capturedOptions.resendIntervalMs, 0);
+  assert.equal(capturedOptions.maxResendRequests, 2);
+  assert.equal(capturedOptions.initialPollMaxAttempts, 5);
+  assert.deepStrictEqual(capturedOptions.pollAttemptPlan, [2, 3, 15]);
   assert.equal(capturedOptions.targetEmail, '');
   assert.equal(capturedOptions.beforeSubmit, undefined);
   assert.equal(typeof capturedOptions.getRemainingTimeMs, 'function');

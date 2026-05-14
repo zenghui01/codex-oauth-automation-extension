@@ -872,6 +872,153 @@ test('verification flow keeps 2925 mailbox polling at 15 refresh attempts even w
   assert.ok(pollCall.options.timeoutMs >= 250000);
 });
 
+test('verification flow can run a 2/3/15 2925 resend polling plan', async () => {
+  const events = [];
+  const pollMaxAttempts = [];
+  let pollCalls = 0;
+
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async () => {},
+    chrome: { tabs: { update: async () => {} } },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeStepFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    sendToContentScript: async (_source, message) => {
+      if (message.type === 'RESEND_VERIFICATION_CODE') {
+        events.push('resend');
+        return { resent: true };
+      }
+      if (message.type === 'FILL_CODE') {
+        events.push('fill');
+      }
+      return {};
+    },
+    sendToContentScriptResilient: async () => ({}),
+    sendToMailContentScriptResilient: async (_mail, message) => {
+      events.push('poll');
+      pollMaxAttempts.push(message.payload.maxAttempts);
+      pollCalls += 1;
+      return pollCalls <= 2
+        ? { error: '步骤 8：邮箱轮询结束，但未获取到验证码。' }
+        : { code: '654321', emailTimestamp: 123 };
+    },
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  await helpers.resolveVerificationStep(
+    8,
+    {
+      email: 'user@example.com',
+      mailProvider: '2925',
+      lastLoginCode: null,
+    },
+    { provider: '2925', label: '2925 邮箱' },
+    {
+      maxResendRequests: 2,
+      initialPollMaxAttempts: 5,
+      pollAttemptPlan: [2, 3, 15],
+      requestFreshCodeFirst: false,
+      filterAfterTimestamp: 123,
+      resendIntervalMs: 0,
+    }
+  );
+
+  assert.deepStrictEqual(events.slice(0, 5), ['poll', 'resend', 'poll', 'resend', 'poll']);
+  assert.deepStrictEqual(pollMaxAttempts.slice(0, 3), [2, 3, 15]);
+  assert.equal(events.filter((event) => event === 'resend').length, 2);
+});
+
+test('verification flow uses full 2925 polling window after a rejected login code', async () => {
+  const pollMaxAttempts = [];
+  const submittedCodes = [];
+  let pollCalls = 0;
+
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async () => {},
+    chrome: { tabs: { update: async () => {} } },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeStepFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    sendToContentScript: async (_source, message) => {
+      if (message.type === 'RESEND_VERIFICATION_CODE') {
+        return { resent: true };
+      }
+      if (message.type === 'FILL_CODE') {
+        submittedCodes.push(message.payload.code);
+        return message.payload.code === '111111'
+          ? { invalidCode: true, errorText: 'Incorrect code' }
+          : { success: true };
+      }
+      return {};
+    },
+    sendToContentScriptResilient: async () => ({}),
+    sendToMailContentScriptResilient: async (_mail, message) => {
+      if (message.type !== 'POLL_EMAIL') {
+        return {};
+      }
+      pollCalls += 1;
+      pollMaxAttempts.push(message.payload.maxAttempts);
+      return pollCalls === 1
+        ? { code: '111111', emailTimestamp: 1 }
+        : { code: '222222', emailTimestamp: 2 };
+    },
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  await helpers.resolveVerificationStep(
+    8,
+    {
+      email: 'user@example.com',
+      mailProvider: '2925',
+      lastLoginCode: null,
+    },
+    { provider: '2925', label: '2925 邮箱' },
+    {
+      maxResendRequests: 0,
+      initialPollMaxAttempts: 5,
+      pollAttemptPlan: [2, 3, 15],
+      requestFreshCodeFirst: false,
+      filterAfterTimestamp: 123,
+      resendIntervalMs: 0,
+    }
+  );
+
+  assert.deepStrictEqual(pollMaxAttempts, [2, 15]);
+  assert.deepStrictEqual(submittedCodes, ['111111', '222222']);
+});
+
 test('verification flow keeps Hotmail request timestamp filtering on the first poll', async () => {
   const pollPayloads = [];
 

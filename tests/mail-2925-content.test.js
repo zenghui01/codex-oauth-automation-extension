@@ -179,6 +179,10 @@ function extractVerificationCode(text) {
 
 async function sleep() {}
 async function sleepRandom() {}
+async function waitForMailboxReady() {
+  const items = findMailItems();
+  return { ready: true, items, empty: items.length === 0 };
+}
 
 async function returnToInbox() {
   clickOrder.push('inbox');
@@ -277,6 +281,10 @@ function extractVerificationCode(text) {
 
 async function sleep() {}
 async function sleepRandom() {}
+async function waitForMailboxReady() {
+  const items = findMailItems();
+  return { ready: true, items, empty: items.length === 0 };
+}
 async function returnToInbox() {
   return true;
 }
@@ -371,6 +379,10 @@ function extractVerificationCode(text) {
 
 async function sleep() {}
 async function sleepRandom() {}
+async function waitForMailboxReady() {
+  const items = findMailItems();
+  return { ready: true, items, empty: items.length === 0 };
+}
 async function returnToInbox() {
   return true;
 }
@@ -488,6 +500,10 @@ function extractVerificationCode(text) {
 
 async function sleep() {}
 async function sleepRandom() {}
+async function waitForMailboxReady() {
+  const items = findMailItems();
+  return { ready: true, items, empty: items.length === 0 };
+}
 async function returnToInbox() {
   return true;
 }
@@ -691,6 +707,10 @@ function simulateClick(node) {
 
 async function sleep() {}
 async function sleepRandom() {}
+async function waitForMailboxReady() {
+  const items = findMailItems();
+  return { ready: items.length > 0, items, empty: items.length === 0 };
+}
 
 ${bundle}
 
@@ -764,6 +784,10 @@ function simulateClick(node) {
 
 async function sleep() {}
 async function sleepRandom() {}
+async function waitForMailboxReady() {
+  const items = findMailItems();
+  return { ready: items.length > 0, items, empty: items.length === 0 };
+}
 const console = { warn() {} };
 const MAIL2925_PREFIX = '[MultiPage:mail-2925]';
 

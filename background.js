@@ -3181,14 +3181,22 @@ function isPhoneActivationForNumber(activation, phoneNumber) {
 
 async function setEmailStateSilently(email, options = {}) {
   const currentState = await getState();
-  const updates = buildRegistrationEmailStateUpdates(currentState, {
-    currentEmail: email,
-    preservePrevious: Boolean(options?.preservePrevious),
-    source: options?.source || '',
-  });
+  const preserveAccountIdentity = Boolean(options?.preserveAccountIdentity);
+  const updates = preserveAccountIdentity
+    ? buildFlowRegistrationEmailStateUpdates(currentState, {
+        currentEmail: email,
+        preservePrevious: Boolean(options?.preservePrevious),
+        preserveAccountIdentity: true,
+        source: options?.source || '',
+      })
+    : buildRegistrationEmailStateUpdates(currentState, {
+        currentEmail: email,
+        preservePrevious: Boolean(options?.preservePrevious),
+        source: options?.source || '',
+      });
   const normalizedEmail = updates.email;
 
-  if (normalizedEmail) {
+  if (!preserveAccountIdentity && normalizedEmail) {
     updates.accountIdentifierType = 'email';
     updates.accountIdentifier = normalizedEmail;
     updates.phoneNumber = '';
@@ -3197,7 +3205,7 @@ async function setEmailStateSilently(email, options = {}) {
     updates.signupPhoneCompletedActivation = null;
     updates.signupPhoneVerificationRequestedAt = null;
     updates.signupPhoneVerificationPurpose = '';
-  } else if (String(currentState?.accountIdentifierType || '').trim().toLowerCase() === 'email') {
+  } else if (!preserveAccountIdentity && String(currentState?.accountIdentifierType || '').trim().toLowerCase() === 'email') {
     updates.accountIdentifierType = null;
     updates.accountIdentifier = '';
   }
@@ -9165,6 +9173,34 @@ async function handleStepData(step, payload) {
     return messageRouter.handleStepData(step, payload);
   }
 
+  function shouldPreservePhoneIdentityForStepEmailPayload(state = {}, stepPayload = {}) {
+    if (String(stepPayload.accountIdentifierType || '').trim().toLowerCase() === 'email') {
+      return false;
+    }
+    return Boolean(
+      String(state.signupPhoneNumber || '').trim()
+      || (String(state.accountIdentifierType || '').trim().toLowerCase() === 'phone'
+        && String(state.accountIdentifier || '').trim())
+      || state.signupPhoneActivation
+      || state.signupPhoneCompletedActivation
+    );
+  }
+
+  async function persistStepEmailPayload(email, stepPayload = {}, source = 'step_identity') {
+    if (!email) {
+      return;
+    }
+    const currentState = await getState();
+    if (shouldPreservePhoneIdentityForStepEmailPayload(currentState, stepPayload)) {
+      await persistRegistrationEmailState(currentState, email, {
+        source,
+        preserveAccountIdentity: true,
+      });
+      return;
+    }
+    await setEmailState(email);
+  }
+
   switch (step) {
     case 1: {
       const updates = {};
@@ -9193,8 +9229,8 @@ async function handleStepData(step, payload) {
       break;
     }
     case 2:
-      if (payload.email) await setEmailState(payload.email);
-      if (payload.accountIdentifierType || payload.accountIdentifier || payload.signupPhoneNumber || payload.signupPhoneActivation) {
+      await persistStepEmailPayload(payload.email, payload, 'step2_identity');
+      if (!payload.email && (payload.accountIdentifierType || payload.accountIdentifier || payload.signupPhoneNumber || payload.signupPhoneActivation)) {
         await setState({
           accountIdentifierType: payload.accountIdentifierType || null,
           accountIdentifier: String(payload.accountIdentifier || '').trim(),
@@ -9213,7 +9249,7 @@ async function handleStepData(step, payload) {
       }
       break;
     case 3:
-      if (payload.email) await setEmailState(payload.email);
+      await persistStepEmailPayload(payload.email, payload, 'step3_identity');
       if (payload.signupVerificationRequestedAt) {
         await setState({ signupVerificationRequestedAt: payload.signupVerificationRequestedAt });
       }
@@ -9230,6 +9266,15 @@ async function handleStepData(step, payload) {
       }
       break;
     case 7:
+      if (payload.accountIdentifierType || payload.accountIdentifier || payload.signupPhoneNumber || payload.signupPhoneActivation || payload.signupPhoneCompletedActivation) {
+        await setState({
+          accountIdentifierType: payload.accountIdentifierType || null,
+          accountIdentifier: String(payload.accountIdentifier || '').trim(),
+          signupPhoneNumber: String(payload.signupPhoneNumber || '').trim(),
+          signupPhoneActivation: payload.signupPhoneActivation || null,
+          signupPhoneCompletedActivation: payload.signupPhoneCompletedActivation || null,
+        });
+      }
       if (payload.loginVerificationRequestedAt) {
         await setState({ loginVerificationRequestedAt: payload.loginVerificationRequestedAt });
       }
@@ -11737,6 +11782,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   LUCKMAIL_PROVIDER,
   resolveVerificationStep: verificationFlowHelpers.resolveVerificationStep,
   resolveSignupEmailForFlow,
+  persistRegistrationEmailState,
   phoneVerificationHelpers,
   rerunStep7ForStep8Recovery: (...args) => rerunStep7ForStep8Recovery(...args),
   resolveSignupMethod,
@@ -11982,6 +12028,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   setContributionMode,
   setEmailState,
   setEmailStateSilently,
+  persistRegistrationEmailState,
   setFreeReusablePhoneActivation,
   setSignupPhoneState,
   setSignupPhoneStateSilently,

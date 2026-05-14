@@ -158,6 +158,7 @@
       setContributionMode,
       setEmailState,
       setEmailStateSilently,
+      persistRegistrationEmailState,
       setFreeReusablePhoneActivation,
       setSignupPhoneState,
       setSignupPhoneStateSilently,
@@ -264,6 +265,42 @@
         : '';
     }
 
+    function hasPhoneSignupIdentity(state = {}) {
+      const identifierType = String(state?.accountIdentifierType || '').trim().toLowerCase();
+      return Boolean(
+        String(state?.signupPhoneNumber || '').trim()
+        || (identifierType === 'phone' && String(state?.accountIdentifier || '').trim())
+        || state?.signupPhoneActivation
+        || state?.signupPhoneCompletedActivation
+      );
+    }
+
+    function shouldPreservePhoneIdentityForEmailPayload(payload = {}, state = {}) {
+      const identifierType = String(payload?.accountIdentifierType || '').trim().toLowerCase();
+      if (identifierType === 'email') {
+        return false;
+      }
+      return hasPhoneSignupIdentity(state);
+    }
+
+    async function persistEmailIdentityFromStepPayload(email, payload = {}, source = 'step_payload') {
+      if (!email) {
+        return;
+      }
+      const state = await getState();
+      const preserveAccountIdentity = shouldPreservePhoneIdentityForEmailPayload(payload, state);
+      if (preserveAccountIdentity && typeof persistRegistrationEmailState === 'function') {
+        await persistRegistrationEmailState(state, email, {
+          source,
+          preserveAccountIdentity: true,
+        });
+        return;
+      }
+      await setEmailState(email, preserveAccountIdentity
+        ? { source, preserveAccountIdentity: true }
+        : { source });
+    }
+
     function normalizeAutomationWindowId(value) {
       if (value === null || value === undefined || value === '') {
         return null;
@@ -316,7 +353,10 @@
       const email = resolveEmailIdentityPayload(payload);
       if (identifierType === 'email' || email) {
         if (email) {
-          await setEmailState(email);
+          await persistEmailIdentityFromStepPayload(email, payload, 'step_identity');
+        }
+        if (email) {
+          return;
         }
         const updates = {
           phoneNumber: '',
@@ -454,6 +494,7 @@
       const stepKey = getStepKeyForState(step, stateForStep);
 
       if (stepKey === 'oauth-login') {
+        await syncStepAccountIdentityFromPayload(payload);
         if (payload.skipLoginVerificationStep) {
           await setState({ loginVerificationRequestedAt: null });
           const latestState = await getState();
@@ -589,6 +630,12 @@
                 await addLog('步骤 4：检测到账号已直接进入已登录态，已自动跳过步骤 5。', 'warn');
               }
             }
+          }
+          break;
+        case 7:
+          await syncStepAccountIdentityFromPayload(payload);
+          if (payload.loginVerificationRequestedAt) {
+            await setState({ loginVerificationRequestedAt: payload.loginVerificationRequestedAt });
           }
           break;
         case 8:
