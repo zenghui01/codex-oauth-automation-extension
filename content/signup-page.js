@@ -6544,10 +6544,65 @@ async function waitForStep5SubmitButton(timeout = 5000) {
 }
 
 function isStep5SubmitButtonClickable(button) {
-  return Boolean(button)
-    && isVisibleElement(button)
-    && !button.disabled
-    && button.getAttribute?.('aria-disabled') !== 'true';
+  if (
+    !button
+    || !isVisibleElement(button)
+    || button.disabled
+    || button.getAttribute?.('aria-disabled') === 'true'
+  ) {
+    return false;
+  }
+
+  const ariaBusy = String(button.getAttribute?.('aria-busy') || '').trim().toLowerCase();
+  if (ariaBusy === 'true') {
+    return false;
+  }
+
+  const pendingAttr = [
+    button.getAttribute?.('data-loading'),
+    button.getAttribute?.('data-pending'),
+    button.getAttribute?.('data-submitting'),
+    button.getAttribute?.('data-state'),
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' ');
+  if (/\b(?:true|loading|pending|submitting|busy)\b/.test(pendingAttr)) {
+    return false;
+  }
+
+  const pendingAncestor = button.closest?.([
+    '[aria-busy="true"]',
+    '[data-loading="true"]',
+    '[data-pending="true"]',
+    '[data-submitting="true"]',
+    '[data-state="loading"]',
+    '[data-state="pending"]',
+    '[data-state="submitting"]',
+  ].join(', '));
+  if (pendingAncestor) {
+    return false;
+  }
+
+  let style = null;
+  try {
+    style = typeof window !== 'undefined' && window.getComputedStyle
+      ? window.getComputedStyle(button)
+      : null;
+  } catch {
+    style = null;
+  }
+
+  if (style?.pointerEvents === 'none') {
+    return false;
+  }
+
+  const opacity = Number.parseFloat(style?.opacity || '');
+  if (Number.isFinite(opacity) && opacity < 0.8) {
+    return false;
+  }
+
+  return true;
 }
 
 function isStep5ProfileStillVisible() {

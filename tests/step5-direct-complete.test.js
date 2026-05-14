@@ -814,6 +814,91 @@ return {
   assert.equal(snapshot.logs.some(({ message }) => /仍停留在资料页，正在重新点击/.test(message)), true);
 });
 
+test('step 5 waits instead of retrying while profile submit is pending', async () => {
+  const api = new Function(`
+const realDateNow = Date.now;
+let now = 0;
+const clicks = [];
+const completeButton = {
+  tagName: 'BUTTON',
+  type: 'submit',
+  textContent: 'Complete account creation',
+  hidden: false,
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+  closest() {
+    return null;
+  },
+};
+const location = { href: 'https://auth.openai.com/u/signup/profile' };
+const document = {
+  querySelector(selector) {
+    if (selector === 'button[type="submit"], input[type="submit"]') return completeButton;
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'button, [role="button"], input[type="button"], input[type="submit"]') return [completeButton];
+    return [];
+  },
+};
+const window = {
+  getComputedStyle() {
+    return { opacity: '0.5', pointerEvents: 'auto' };
+  },
+};
+
+Date.now = () => now;
+function throwIfStopped() {}
+function log() {}
+async function sleep(ms = 0) { now += ms || 250; }
+async function humanPause() {}
+function simulateClick(el) { clicks.push(el?.textContent || 'clicked'); }
+function isVisibleElement(el) { return Boolean(el) && !el.hidden; }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled && el.getAttribute?.('aria-disabled') !== 'true'; }
+function getActionText(el) { return el?.textContent || ''; }
+function getSignupAuthRetryPathPatterns() { return []; }
+function getAuthTimeoutErrorPageState() { return null; }
+async function recoverCurrentAuthRetryPage() { throw new Error('should not recover retry page'); }
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function createAuthMaxCheckAttemptsError() { return new Error('max_check_attempts'); }
+function getStep5ErrorText() { return ''; }
+function isStep5Ready() { return true; }
+function isLikelyLoggedInChatgptHomeUrl() { return false; }
+function isOAuthConsentPage() { return false; }
+function isAddPhonePageReady() { return false; }
+
+${extractFunction('isSignupProfilePageUrl')}
+${getStep5OutcomeBundle()}
+
+return {
+  run() {
+    return waitForStep5SubmitOutcome({ timeoutMs: 4000, retryClickIntervalMs: 3500 });
+  },
+  snapshot() {
+    return { clicks, now };
+  },
+  restore() {
+    Date.now = realDateNow;
+  },
+};
+`)();
+
+  try {
+    await assert.rejects(
+      () => api.run(),
+      /已点击提交 1\/3 次/
+    );
+    const snapshot = api.snapshot();
+    assert.deepStrictEqual(snapshot.clicks, []);
+    assert.ok(snapshot.now >= 4000);
+  } finally {
+    api.restore();
+  }
+});
+
 test('step 5 recovers auth retry page after profile submit', async () => {
   const api = new Function(`
 let retryVisible = true;
