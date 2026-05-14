@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "codex-oauth-automation-extension",
-  "version": "9.7",
-  "version_name": "Ultra9.7",
+  "version": "9.9",
+  "version_name": "Ultra9.9",
   "description": "用于自动执行多步骤 OAuth 注册流程",
   "permissions": [
     "sidePanel",
