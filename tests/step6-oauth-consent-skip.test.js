@@ -132,3 +132,47 @@ return {
   assert.equal(result.directOAuthConsentPage, true);
   assert.equal(logs.some(({ level }) => level === 'ok'), true);
 });
+
+test('step 7 classifies interactive /log-in page even while document is still loading', async () => {
+  const api = new Function(`
+let now = 0;
+
+Date.now = () => now;
+
+const location = {
+  href: 'https://auth.openai.com/log-in',
+};
+
+const document = {
+  readyState: 'loading',
+};
+
+function inspectLoginAuthState() {
+  return {
+    state: 'email_page',
+    url: location.href,
+    emailInput: { id: 'email' },
+  };
+}
+
+function throwIfStopped() {}
+async function sleep(ms) {
+  now += ms;
+}
+
+${extractFunction('normalizeStep6Snapshot')}
+${extractFunction('waitForKnownLoginAuthState')}
+
+return {
+  async run() {
+    const snapshot = await waitForKnownLoginAuthState(15000);
+    return { snapshot, now };
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.snapshot.state, 'email_page');
+  assert.equal(result.now, 0);
+});

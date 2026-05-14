@@ -2999,6 +2999,11 @@ function isOAuthConsentPage() {
     return true;
   }
 
+  const path = `${location.pathname || ''} ${location.href || ''}`;
+  if (/\/authorize(?:[/?#]|$)/i.test(path) && Boolean(getPrimaryContinueButton())) {
+    return true;
+  }
+
   return /\bcodex\b/i.test(pageText) && /\bchatgpt\b/i.test(pageText) && Boolean(getPrimaryContinueButton());
 }
 
@@ -3610,6 +3615,26 @@ function isLoginPhoneUsernameKind(rawUrl = location.href) {
   }
 }
 
+function hasVisibleLoginEmailMarker() {
+  const selectors = [
+    'input[type="email"]',
+    'input[autocomplete="email"]',
+    'input[name="email"]',
+    'input[name*="email" i]',
+    'input[id*="email" i]',
+    'input[placeholder*="email" i]',
+    'input[placeholder*="邮箱"]',
+    'input[placeholder*="电子邮件"]',
+    'input[aria-label*="email" i]',
+    'input[aria-label*="邮箱"]',
+    'input[aria-label*="电子邮件"]',
+  ];
+  return selectors.some((selector) => {
+    const candidate = document.querySelector(selector);
+    return Boolean(candidate && isVisibleElement(candidate));
+  });
+}
+
 function isLoginPhoneEntryPageText(pageText = getPageTextSnapshot()) {
   const normalizedText = String(pageText || '').replace(/\s+/g, ' ').trim();
   if (!normalizedText) {
@@ -3617,6 +3642,10 @@ function isLoginPhoneEntryPageText(pageText = getPageTextSnapshot()) {
   }
 
   if (isAddPhonePageReady() || isPhoneVerificationPageReady()) {
+    return false;
+  }
+
+  if (hasVisibleLoginEmailMarker()) {
     return false;
   }
 
@@ -3752,28 +3781,60 @@ function isLoginEmailLikeInput(input) {
 }
 
 function getLoginEmailInput() {
-  const input = Array.from(document.querySelectorAll([
+  if (isLoginPhoneUsernameKind() || isLoginPhoneEntryPageText()) {
+    return null;
+  }
+
+  const primaryInput = document.querySelector([
     'input[type="email"]',
     'input[autocomplete="email"]',
+    'input[autocomplete="username"]:not([maxlength="6"])',
     'input[name="email"]',
-    'input[name="username"]',
-    'input[autocomplete="username"]',
+    'input[name="username"]:not([maxlength="6"])',
+    'input[name*="email" i]',
+    'input[name*="username" i]:not([maxlength="6"])',
     'input[id*="email" i]',
+    'input[id*="username" i]:not([maxlength="6"])',
     'input[placeholder*="email" i]',
-    'input[placeholder*="Email"]',
-    'input[placeholder*="电子邮件"]',
     'input[placeholder*="邮箱"]',
+    'input[placeholder*="电子邮件"]',
     'input[aria-label*="email" i]',
-    'input[aria-label*="电子邮件"]',
     'input[aria-label*="邮箱"]',
-  ].join(', '))).find((candidate) => isVisibleElement(candidate)) || null;
-  if (!input) {
+    'input[aria-label*="电子邮件"]',
+  ].join(', '));
+  if (primaryInput && isVisibleElement(primaryInput) && isLoginEmailLikeInput(primaryInput)) {
+    return primaryInput;
+  }
+
+  if (!/\/log-in(?:[/?#]|$)/i.test(location.pathname || '')) {
     return null;
   }
-  if ((isLoginPhoneUsernameKind() || isLoginPhoneEntryPageText()) && !isLoginEmailLikeInput(input)) {
-    return null;
-  }
-  return input;
+
+  const fallbackInputs = Array.from(document.querySelectorAll([
+    'input:not([type])',
+    'input[type="text"]',
+    'input[type="search"]',
+    'input[inputmode="email"]',
+  ].join(', ')));
+  return fallbackInputs.find((candidate) => {
+    if (!candidate || !isVisibleElement(candidate) || !isActionEnabled(candidate)) {
+      return false;
+    }
+    if (candidate.matches?.('[maxlength="6"], input[type="password"], input[type="tel"], input[type="hidden"]')) {
+      return false;
+    }
+    const autocomplete = String(candidate.getAttribute?.('autocomplete') || '').trim().toLowerCase();
+    const inputMode = String(candidate.getAttribute?.('inputmode') || '').trim().toLowerCase();
+    return autocomplete === 'username'
+      || autocomplete === 'email'
+      || inputMode === 'email'
+      || /email|邮箱|电子邮件|username|account|login/i.test([
+        candidate.getAttribute?.('name') || '',
+        candidate.getAttribute?.('id') || '',
+        candidate.getAttribute?.('placeholder') || '',
+        candidate.getAttribute?.('aria-label') || '',
+      ].join(' '));
+  }) || null;
 }
 
 function getLoginPhoneInput() {
@@ -4194,6 +4255,80 @@ function inspectLoginAuthState() {
   return baseState;
 }
 
+function getLoginAuthUnknownDiagnostics(snapshot = null) {
+  const resolvedSnapshot = normalizeStep6Snapshot(snapshot || inspectLoginAuthState());
+  const actionCandidates = Array.from(document.querySelectorAll?.(
+    'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]'
+  ) || []);
+  const inputCandidates = Array.from(document.querySelectorAll?.('input, textarea, select') || []);
+  const visibleActions = actionCandidates
+    .filter((el) => {
+      try {
+        return isVisibleElement(el);
+      } catch {
+        return false;
+      }
+    })
+    .slice(0, 10)
+    .map((el) => ({
+      tag: (el?.tagName || '').toLowerCase(),
+      type: el?.getAttribute?.('type') || el?.type || '',
+      role: el?.getAttribute?.('role') || '',
+      text: getActionText(el).slice(0, 80),
+      enabled: isActionEnabled(el),
+    }))
+    .filter((item) => item.text);
+  const visibleInputs = inputCandidates
+    .filter((el) => {
+      try {
+        return isVisibleElement(el);
+      } catch {
+        return false;
+      }
+    })
+    .slice(0, 10)
+    .map((el) => ({
+      tag: (el?.tagName || '').toLowerCase(),
+      type: el?.getAttribute?.('type') || el?.type || '',
+      name: el?.getAttribute?.('name') || el?.name || '',
+      autocomplete: el?.getAttribute?.('autocomplete') || '',
+      placeholder: String(el?.getAttribute?.('placeholder') || '').slice(0, 80),
+    }));
+
+  return {
+    state: resolvedSnapshot?.state || 'unknown',
+    url: resolvedSnapshot?.url || location.href,
+    path: resolvedSnapshot?.path || location.pathname || '',
+    title: document.title || '',
+    readyState: getDocumentReadyStateSnapshot(),
+    flags: {
+      hasVerificationTarget: Boolean(resolvedSnapshot?.verificationTarget),
+      hasPasswordInput: Boolean(resolvedSnapshot?.passwordInput),
+      hasEmailInput: Boolean(resolvedSnapshot?.emailInput),
+      hasPhoneInput: Boolean(resolvedSnapshot?.phoneInput),
+      hasSubmitButton: Boolean(resolvedSnapshot?.submitButton),
+      hasSwitchTrigger: Boolean(resolvedSnapshot?.switchTrigger),
+      hasLoginEntryTrigger: Boolean(resolvedSnapshot?.loginEntryTrigger),
+      hasPhoneEntryTrigger: Boolean(resolvedSnapshot?.phoneEntryTrigger),
+      hasMoreOptionsTrigger: Boolean(resolvedSnapshot?.moreOptionsTrigger),
+      verificationVisible: Boolean(resolvedSnapshot?.verificationVisible),
+      addPhonePage: Boolean(resolvedSnapshot?.addPhonePage),
+      addEmailPage: Boolean(resolvedSnapshot?.addEmailPage),
+      phoneVerificationPage: Boolean(resolvedSnapshot?.phoneVerificationPage),
+      oauthConsentPage: Boolean(resolvedSnapshot?.oauthConsentPage),
+      consentReady: Boolean(resolvedSnapshot?.consentReady),
+    },
+    visibleActions,
+    visibleInputs,
+    bodyTextPreview: getPageTextSnapshot().slice(0, 300),
+  };
+}
+
+function buildStep6UnknownStateErrorMessage(snapshot = null) {
+  const diagnostics = getLoginAuthUnknownDiagnostics(snapshot);
+  return `无法识别当前登录页面状态。诊断：${JSON.stringify(diagnostics)}`;
+}
+
 function serializeLoginAuthState(snapshot) {
   return {
     state: snapshot?.state || 'unknown',
@@ -4571,7 +4706,7 @@ function throwForStep6FatalState(snapshot, visibleStep = 7) {
     case 'add_phone_page':
       throw new Error(`当前页面已进入手机号页面，未经过登录验证码页，无法完成步骤 ${visibleStep}。URL: ${snapshot.url}`);
     case 'unknown':
-      throw new Error(`无法识别当前登录页面状态。URL: ${snapshot?.url || location.href}`);
+      throw new Error(buildStep6UnknownStateErrorMessage(snapshot));
     default:
       return;
   }
@@ -6026,7 +6161,7 @@ async function step6_login(payload) {
   }
 
   throwForStep6FatalState(snapshot, visibleStep);
-  throw new Error(`无法识别当前登录页面状态。URL: ${snapshot?.url || location.href}`);
+  throw new Error(buildStep6UnknownStateErrorMessage(snapshot));
 }
 
 async function waitForAddEmailPageReady(timeout = 15000) {

@@ -10,6 +10,7 @@
   const SIGNUP_METHOD_PHONE = 'phone';
 
   const NORMAL_STEP_DEFINITIONS = [
+    { id: 0, order: 0, key: 'prefetch-add-phone-number', title: '预取接码手机号码' },
     { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网' },
     { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱' },
     { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续' },
@@ -23,6 +24,7 @@
   ];
 
   const PLUS_PAYPAL_STEP_DEFINITIONS = [
+    { id: 0, order: 0, key: 'prefetch-add-phone-number', title: '预取接码手机号码' },
     { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网' },
     { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱' },
     { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续' },
@@ -39,6 +41,7 @@
   ];
 
   const PLUS_GOPAY_STEP_DEFINITIONS = [
+    { id: 0, order: 0, key: 'prefetch-add-phone-number', title: '预取接码手机号码' },
     { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网' },
     { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱' },
     { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续' },
@@ -53,6 +56,7 @@
   ];
 
   const PLUS_GPC_STEP_DEFINITIONS = [
+    { id: 0, order: 0, key: 'prefetch-add-phone-number', title: '预取接码手机号码' },
     { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网' },
     { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱' },
     { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续' },

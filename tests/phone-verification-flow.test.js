@@ -1459,20 +1459,20 @@ test('phone verification helper retries acquisition rounds when at least one cou
       { id: 6, label: 'Canada' },
       { id: 5, label: 'Japan' },
     ],
-    // Simulate stale state value; helper should still perform at least 2 rounds.
+    // Simulate stale finite retry value; HeroSMS should keep retrying until success.
     heroSmsActivationRetryRounds: 1,
   });
 
   assert.equal(activation.countryId, 52);
   assert.equal(activation.phoneNumber, '66951112233');
   assert.equal(sleeps.length, 1);
-  assert.equal(sleeps[0], 2000);
+  assert.equal(sleeps[0], 30000);
   assert.equal(
     logs.filter((entry) => String(entry.message || '').includes('HeroSMS 正在获取手机号')).length >= 2,
     true
   );
   assert.equal(
-    logs.some((entry) => String(entry.message || '').includes('HeroSMS 暂无可用号码（第 1/2 轮）')),
+    logs.some((entry) => String(entry.message || '').includes('HeroSMS 暂无可用号码（第 1 轮）')),
     true
   );
 });
@@ -1587,6 +1587,7 @@ test('phone verification helper uses HeroSMS getStatusV2 after acquiring a numbe
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   const result = await helpers.completePhoneVerificationFlow(1, {
     addPhonePage: true,
     phoneVerificationPage: false,
@@ -1747,10 +1748,15 @@ test('phone verification helper climbs price tiers when NO_NUMBERS is returned a
   ]);
 });
 
-test('phone verification helper stops when WRONG_MAX_PRICE exceeds configured max price limit', async () => {
+test('phone verification helper keeps retrying HeroSMS price-cap no-supply until stopped', async () => {
   const requests = [];
+  const logs = [];
+  const sleeps = [];
+  let stopped = false;
   const helpers = api.createPhoneVerificationHelpers({
-    addLog: async () => {},
+    addLog: async (message) => {
+      logs.push(String(message || ''));
+    },
     ensureStep8SignupPageReady: async () => {},
     fetchImpl: async (url) => {
       const parsedUrl = new URL(url);
@@ -1773,21 +1779,89 @@ test('phone verification helper stops when WRONG_MAX_PRICE exceeds configured ma
     getState: async () => ({ heroSmsApiKey: 'demo-key', heroSmsMaxPrice: '0.05' }),
     sendToContentScriptResilient: async () => ({}),
     setState: async () => {},
-    sleepWithStop: async () => {},
-    throwIfStopped: () => {},
+    sleepWithStop: async (ms) => {
+      sleeps.push(ms);
+      if (sleeps.length >= 2) {
+        stopped = true;
+      }
+    },
+    throwIfStopped: () => {
+      if (stopped) {
+        throw new Error('stopped after continuous retry verification');
+      }
+    },
   });
 
   await assert.rejects(
     helpers.requestPhoneActivation({ heroSmsApiKey: 'demo-key', heroSmsMaxPrice: '0.05' }),
-    /exceeds configured maxPrice=0\.05/i
+    /stopped after continuous retry verification/
   );
 
   const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
   assert.deepStrictEqual(actions, [
     'getPrices:',
     'getNumber:0.05',
-    'getNumberV2:0.05',
+    'getPrices:',
+    'getNumber:0.05',
   ]);
+  assert.equal(logs.filter((message) => message.includes('HeroSMS 正在获取手机号')).length, 2);
+  assert.deepStrictEqual(sleeps, [30000, 30000]);
+});
+
+test('phone verification helper stops HeroSMS continuous retry during retry sleep', async () => {
+  const requests = [];
+  const sleeps = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            52: {
+              dr: {
+                cost: 0.08,
+                count: 10,
+                physicalCount: 10,
+              },
+            },
+          }),
+        };
+      }
+      if (action === 'getNumber' || action === 'getNumberV2') {
+        return { ok: true, text: async () => 'NO_NUMBERS' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async (ms) => {
+      sleeps.push(ms);
+      throw new Error('流程已被用户停止。');
+    },
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.requestPhoneActivation({
+      heroSmsApiKey: 'demo-key',
+      heroSmsCountryId: 52,
+      heroSmsCountryLabel: 'Thailand',
+      heroSmsMaxPrice: '0.08',
+    }),
+    /流程已被用户停止/
+  );
+
+  assert.deepStrictEqual(sleeps, [30000]);
+  assert.equal(
+    requests.filter((url) => ['getNumber', 'getNumberV2'].includes(url.searchParams.get('action'))).length,
+    2
+  );
 });
 
 test('phone verification helper falls back to plain getNumber when priced request fails to fetch', async () => {
@@ -2634,6 +2708,7 @@ test('phone verification helper completes add-phone flow, clears current activat
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   const result = await helpers.completePhoneVerificationFlow(1, {
     addPhonePage: true,
     phoneVerificationPage: false,
@@ -2738,6 +2813,7 @@ test('phone verification helper forwards signup profile payload when submitting 
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   const result = await helpers.completePhoneVerificationFlow(1, {
     addPhonePage: true,
     phoneVerificationPage: false,
@@ -2832,6 +2908,7 @@ test('phone verification helper uses the configured HeroSMS country for both num
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   const result = await helpers.completePhoneVerificationFlow(1, {
     addPhonePage: true,
     phoneVerificationPage: false,
@@ -3056,7 +3133,15 @@ test('phone verification helper honors timeout-window and poll-round settings be
     phoneCodeTimeoutWindows: 1,
     phoneCodePollIntervalSeconds: 1,
     phoneCodePollMaxRounds: 1,
-    currentPhoneActivation: null,
+    currentPhoneActivation: {
+      activationId: 'single-cleanup',
+      phoneNumber: '66954440000',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
     reusablePhoneActivation: null,
   };
 
@@ -3109,6 +3194,7 @@ test('phone verification helper honors timeout-window and poll-round settings be
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   await assert.rejects(
     helpers.completePhoneVerificationFlow(1, {
       addPhonePage: true,
@@ -4046,6 +4132,383 @@ test('phone verification helper rotates number when submitPhoneVerificationCode 
   ]);
 });
 
+test('phone verification helper preserves restart reason and discards dead preferred activation records', async () => {
+  const requests = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    verificationResendCount: 0,
+    phoneVerificationReplacementLimit: 1,
+    phoneCodeWaitSeconds: 60,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 1,
+    currentPhoneActivation: {
+      activationId: 'dead-preferred',
+      phoneNumber: '66953330000',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    phonePreferredActivation: {
+      activationId: 'dead-preferred',
+      phoneNumber: '66953330000',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    reusablePhoneActivation: {
+      activationId: 'dead-preferred',
+      phoneNumber: '66953330000',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    phoneReusableActivationPool: [{
+      activationId: 'dead-preferred',
+      phoneNumber: '66953330000',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    }],
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        throw new Error('activation not found');
+      }
+      if (action === 'setStatus') {
+        setStatusCalls.push(parsedUrl.searchParams.get('status'));
+        return { ok: true, text: async () => 'STATUS_UPDATED' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async (_source, message) => {
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.completePhoneVerificationFlow(1, {
+      addPhonePage: false,
+      phoneVerificationPage: true,
+      url: 'https://auth.openai.com/phone-verification',
+    }),
+    /PHONE_RESTART_STEP7::.*activation_not_found.*66953330000/
+  );
+
+  assert.equal(currentState.currentPhoneActivation, null);
+  assert.equal(currentState.phonePreferredActivation, null);
+  assert.equal(currentState.reusablePhoneActivation, null);
+  assert.deepStrictEqual(currentState.phoneReusableActivationPool, []);
+});
+
+test('phone verification helper does not double-clean provider state after restart-to-step7 control errors', async () => {
+  const setStatusCalls = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    verificationResendCount: 0,
+    phoneVerificationReplacementLimit: 1,
+    phoneCodeWaitSeconds: 60,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 1,
+    currentPhoneActivation: {
+      activationId: 'single-cleanup',
+      phoneNumber: '66954440000',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    reusablePhoneActivation: null,
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getPrices') {
+        return { ok: true, text: async () => buildHeroSmsPricesPayload() };
+      }
+      if (action === 'getNumber') {
+        return { ok: true, text: async () => 'ACCESS_NUMBER:single-cleanup:66954440000' };
+      }
+      if (action === 'getStatus') {
+        throw new Error('activation not found');
+      }
+      if (action === 'setStatus') {
+        setStatusCalls.push(parsedUrl.searchParams.get('status'));
+        return { ok: true, text: async () => 'STATUS_UPDATED' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'SUBMIT_PHONE_NUMBER') {
+        return {
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.completePhoneVerificationFlow(1, {
+      addPhonePage: true,
+      phoneVerificationPage: false,
+      url: 'https://auth.openai.com/add-phone',
+    }),
+    /PHONE_RESTART_STEP7::.*activation_not_found.*66954440000/
+  );
+
+  assert.deepStrictEqual(setStatusCalls, ['8']);
+});
+
+test('phone verification helper never acquires a number inside step 9 when current activation is missing', async () => {
+  const providerRequests = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    verificationResendCount: 0,
+    phoneVerificationReplacementLimit: 1,
+    currentPhoneActivation: null,
+    reusablePhoneActivation: null,
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      providerRequests.push(new URL(url));
+      throw new Error('Step 9 must not call provider acquisition APIs without currentPhoneActivation');
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async (_source, message) => {
+      throw new Error(`Step 9 should not touch auth page without current activation: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.completePhoneVerificationFlow(1, {
+      addPhonePage: true,
+      phoneVerificationPage: false,
+      url: 'https://auth.openai.com/add-phone',
+    }),
+    /PHONE_RESTART_STEP7::.*missing_current_phone_activation/
+  );
+
+  assert.deepStrictEqual(providerRequests, []);
+  assert.equal(currentState.currentPhoneActivation, null);
+});
+
+test('phone verification helper persists step 0 selection hints after sms timeout', async () => {
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    phoneSmsProvider: 'hero-sms',
+    heroSmsCountryId: 52,
+    heroSmsCountryLabel: 'Thailand',
+    verificationResendCount: 0,
+    phoneVerificationReplacementLimit: 1,
+    phoneCodeWaitSeconds: 60,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 1,
+    currentPhoneActivation: {
+      activationId: 'timeout-hint',
+      phoneNumber: '66950004444',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      countryLabel: 'Thailand',
+      price: 0.08,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    step0PhoneBlockedCountryIds: [],
+    step0PhoneCountryPriceFloorByCountryId: {},
+    reusablePhoneActivation: null,
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        return { ok: true, text: async () => 'STATUS_WAIT_CODE' };
+      }
+      if (action === 'setStatus') {
+        return { ok: true, text: async () => 'STATUS_CANCEL' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'SUBMIT_PHONE_NUMBER') {
+        return {
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.completePhoneVerificationFlow(1, {
+      addPhonePage: true,
+      phoneVerificationPage: false,
+      url: 'https://auth.openai.com/add-phone',
+    }),
+    /PHONE_MANUAL_REPICK::.*sms_timeout_after_1_windows/
+  );
+
+  assert.deepStrictEqual(currentState.step0PhoneBlockedCountryIds, []);
+  assert.deepStrictEqual(currentState.step0PhoneCountryPriceFloorByCountryId, { 52: 0.08 });
+  assert.equal(currentState.currentPhoneActivation, null);
+});
+
+test('phone verification helper routes current activation operations by activation provider', async () => {
+  const requests = [];
+  let currentState = {
+    phoneSmsProvider: 'hero-sms',
+    heroSmsApiKey: 'hero-key',
+    fiveSimApiKey: 'five-key',
+    fiveSimCountryId: 'vietnam',
+    fiveSimCountryLabel: '越南 (Vietnam)',
+    fiveSimOperator: 'any',
+    verificationResendCount: 0,
+    phoneVerificationReplacementLimit: 1,
+    phoneCodeWaitSeconds: 60,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 1,
+    currentPhoneActivation: {
+      activationId: '5001',
+      phoneNumber: '+84901122334',
+      provider: '5sim',
+      serviceCode: 'openai',
+      countryId: 'vietnam',
+      countryLabel: '越南 (Vietnam)',
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    reusablePhoneActivation: null,
+  };
+
+  const fiveSimSource = fs.readFileSync('phone-sms/providers/five-sim.js', 'utf8');
+  const fiveSimModule = new Function('self', `${fiveSimSource}; return self.PhoneSmsFiveSimProvider;`)({});
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    createFiveSimProvider: fiveSimModule.createProvider,
+    fetchImpl: async (url, options = {}) => {
+      const parsedUrl = new URL(url);
+      requests.push({ url: parsedUrl, options });
+      if (parsedUrl.pathname === '/v1/user/check/5001') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            id: 5001,
+            phone: '+84901122334',
+            status: 'RECEIVED',
+            sms: [{ text: 'OpenAI code 123456' }],
+          }),
+        };
+      }
+      if (parsedUrl.pathname === '/v1/user/finish/5001') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ status: 'FINISHED' }),
+        };
+      }
+      throw new Error(`Unexpected provider path: ${parsedUrl.pathname}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'SUBMIT_PHONE_NUMBER') {
+        return { phoneVerificationPage: true, url: 'https://auth.openai.com/phone-verification' };
+      }
+      if (message.type === 'SUBMIT_PHONE_VERIFICATION_CODE') {
+        return { success: true, consentReady: true, url: 'https://auth.openai.com/authorize' };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const result = await helpers.completePhoneVerificationFlow(1, {
+    addPhonePage: true,
+    phoneVerificationPage: false,
+    url: 'https://auth.openai.com/add-phone',
+  });
+
+  assert.deepStrictEqual(result, {
+    success: true,
+    consentReady: true,
+    url: 'https://auth.openai.com/authorize',
+  });
+  assert.equal(currentState.currentPhoneActivation, null);
+  assert.equal(currentState.reusablePhoneActivation.provider, '5sim');
+  assert.deepStrictEqual(
+    requests.map((entry) => entry.url.pathname),
+    ['/v1/user/check/5001', '/v1/user/finish/5001']
+  );
+  assert.equal(requests[0].options.headers.Authorization, 'Bearer five-key');
+  assert.equal(requests[1].options.headers.Authorization, 'Bearer five-key');
+});
+
 test('phone verification helper replaces number when add-phone submission fails with country selection mismatch', async () => {
   const requests = [];
   const messages = [];
@@ -4397,6 +4860,7 @@ test('phone verification helper gives automatic free reuse priority over paid re
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   const result = await helpers.completePhoneVerificationFlow(1, {
     addPhonePage: true,
     phoneVerificationPage: false,
@@ -4421,238 +4885,6 @@ test('phone verification helper gives automatic free reuse priority over paid re
   assert.equal(currentState.freeReusablePhoneActivation.successfulUses, 1);
   assert.equal(currentState.freeReusablePhoneActivation.activationId, 'free-priority');
   assert.equal(currentState.reusablePhoneActivation.activationId, 'paid-reuse');
-});
-
-test('phone verification helper hands off manual-only free reuse even when automatic free reuse is enabled', async () => {
-  const requests = [];
-  const messages = [];
-  const stops = [];
-  let currentState = {
-    heroSmsApiKey: 'demo-key',
-    heroSmsReuseEnabled: true,
-    freePhoneReuseEnabled: true,
-    freePhoneReuseAutoEnabled: true,
-    verificationResendCount: 0,
-    currentPhoneActivation: null,
-    reusablePhoneActivation: {
-      activationId: 'paid-reuse',
-      phoneNumber: '66950003333',
-      provider: 'hero-sms',
-      serviceCode: 'dr',
-      countryId: 52,
-      countryLabel: 'Thailand',
-      successfulUses: 0,
-      maxUses: 3,
-    },
-    freeReusablePhoneActivation: {
-      phoneNumber: '84943328460',
-      provider: 'hero-sms',
-      serviceCode: 'dr',
-      countryId: 52,
-      countryLabel: 'Thailand',
-      successfulUses: 1,
-      maxUses: 3,
-      source: 'free-manual-reuse',
-      manualOnly: true,
-    },
-  };
-
-  const helpers = api.createPhoneVerificationHelpers({
-    addLog: async () => {},
-    ensureStep8SignupPageReady: async () => {},
-    fetchImpl: async (url) => {
-      const parsedUrl = new URL(url);
-      requests.push(parsedUrl);
-      throw new Error(`HeroSMS should not be called for manual-only free reuse: ${parsedUrl.searchParams.get('action')}`);
-    },
-    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
-    getState: async () => ({ ...currentState }),
-    requestStop: async (payload) => {
-      stops.push(payload);
-    },
-    sendToContentScriptResilient: async (_source, message) => {
-      messages.push(message);
-      if (message.type === 'SUBMIT_PHONE_NUMBER') {
-        assert.equal(message.payload.phoneNumber, '84943328460');
-        return { phoneVerificationPage: true, url: 'https://auth.openai.com/phone-verification' };
-      }
-      throw new Error(`Unexpected content-script message: ${message.type}`);
-    },
-    setState: async (updates) => {
-      currentState = { ...currentState, ...updates };
-    },
-    sleepWithStop: async () => {},
-    throwIfStopped: () => {},
-  });
-
-  await assert.rejects(
-    helpers.completePhoneVerificationFlow(1, {
-      addPhonePage: true,
-      phoneVerificationPage: false,
-      url: 'https://auth.openai.com/add-phone',
-    }),
-    (error) => {
-      assert.match(error.message, /^PHONE_MANUAL_FREE_REUSE::/);
-      assert.equal(error.result?.manualFreePhoneReuse, true);
-      assert.equal(error.result?.phoneNumber, '84943328460');
-      assert.deepStrictEqual(error.result?.fillResult, {
-        phoneVerificationPage: true,
-        url: 'https://auth.openai.com/phone-verification',
-      });
-      return true;
-    }
-  );
-
-  assert.deepStrictEqual(messages.map((message) => message.type), ['SUBMIT_PHONE_NUMBER']);
-  assert.equal(stops.length, 1);
-  assert.match(stops[0].logMessage, /开始手动复用手机 84943328460/);
-  assert.deepStrictEqual(requests, []);
-  assert.equal(currentState.currentPhoneActivation, null);
-  assert.equal(currentState.reusablePhoneActivation.activationId, 'paid-reuse');
-  assert.equal(currentState.freeReusablePhoneActivation.phoneNumber, '84943328460');
-});
-
-test('phone verification helper infers manual free reuse country from phone prefix', async () => {
-  const messages = [];
-  const stops = [];
-  let currentState = {
-    heroSmsApiKey: 'demo-key',
-    heroSmsCountryId: 52,
-    heroSmsCountryLabel: 'Thailand',
-    freePhoneReuseEnabled: true,
-    freePhoneReuseAutoEnabled: true,
-    verificationResendCount: 0,
-    currentPhoneActivation: null,
-    freeReusablePhoneActivation: {
-      phoneNumber: '84943328460',
-      provider: 'hero-sms',
-      serviceCode: 'dr',
-      successfulUses: 1,
-      maxUses: 3,
-      source: 'free-manual-reuse',
-      manualOnly: true,
-    },
-  };
-
-  const helpers = api.createPhoneVerificationHelpers({
-    addLog: async () => {},
-    ensureStep8SignupPageReady: async () => {},
-    fetchImpl: async (url) => {
-      const parsedUrl = new URL(url);
-      throw new Error(`HeroSMS should not be called for manual-only free reuse: ${parsedUrl.searchParams.get('action')}`);
-    },
-    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
-    getState: async () => ({ ...currentState }),
-    requestStop: async (payload) => {
-      stops.push(payload);
-    },
-    sendToContentScriptResilient: async (_source, message) => {
-      messages.push(message);
-      if (message.type === 'SUBMIT_PHONE_NUMBER') {
-        return { phoneVerificationPage: true, url: 'https://auth.openai.com/phone-verification' };
-      }
-      throw new Error(`Unexpected content-script message: ${message.type}`);
-    },
-    setState: async (updates) => {
-      currentState = { ...currentState, ...updates };
-    },
-    sleepWithStop: async () => {},
-    throwIfStopped: () => {},
-  });
-
-  await assert.rejects(
-    helpers.completePhoneVerificationFlow(1, {
-      addPhonePage: true,
-      phoneVerificationPage: false,
-      url: 'https://auth.openai.com/add-phone',
-    }),
-    (error) => {
-      assert.match(error.message, /^PHONE_MANUAL_FREE_REUSE::/);
-      return true;
-    }
-  );
-
-  assert.equal(stops.length, 1);
-  assert.deepStrictEqual(messages.map((message) => message.type), ['SUBMIT_PHONE_NUMBER']);
-  assert.equal(messages[0].payload.phoneNumber, '84943328460');
-  assert.equal(messages[0].payload.countryId, 10);
-  assert.equal(messages[0].payload.countryLabel, 'Vietnam');
-});
-
-test('phone verification helper infers major HeroSMS countries from phone prefixes', async () => {
-  const cases = [
-    { phoneNumber: '12025550123', countryId: 187, countryLabel: 'USA' },
-    { phoneNumber: '447911123456', countryId: 16, countryLabel: 'United Kingdom' },
-    { phoneNumber: '819012345678', countryId: 151, countryLabel: 'Japan' },
-    { phoneNumber: '4915112345678', countryId: 43, countryLabel: 'Germany' },
-    { phoneNumber: '33612345678', countryId: 73, countryLabel: 'France' },
-    { phoneNumber: '84943328460', countryId: 10, countryLabel: 'Vietnam' },
-    { phoneNumber: '66950003333', countryId: 52, countryLabel: 'Thailand' },
-    { phoneNumber: '628111111111', countryId: 6, countryLabel: 'Indonesia' },
-  ];
-
-  for (const testCase of cases) {
-    const messages = [];
-    let currentState = {
-      heroSmsApiKey: 'demo-key',
-      heroSmsCountryId: 52,
-      heroSmsCountryLabel: 'Thailand',
-      freePhoneReuseEnabled: true,
-      freePhoneReuseAutoEnabled: true,
-      verificationResendCount: 0,
-      currentPhoneActivation: null,
-      freeReusablePhoneActivation: {
-        phoneNumber: testCase.phoneNumber,
-        provider: 'hero-sms',
-        serviceCode: 'dr',
-        successfulUses: 1,
-        maxUses: 3,
-        source: 'free-manual-reuse',
-        manualOnly: true,
-      },
-    };
-
-    const helpers = api.createPhoneVerificationHelpers({
-      addLog: async () => {},
-      ensureStep8SignupPageReady: async () => {},
-      fetchImpl: async (url) => {
-        const parsedUrl = new URL(url);
-        throw new Error(`HeroSMS should not be called for manual-only free reuse: ${parsedUrl.searchParams.get('action')}`);
-      },
-      getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
-      getState: async () => ({ ...currentState }),
-      requestStop: async () => {},
-      sendToContentScriptResilient: async (_source, message) => {
-        messages.push(message);
-        if (message.type === 'SUBMIT_PHONE_NUMBER') {
-          return { phoneVerificationPage: true, url: 'https://auth.openai.com/phone-verification' };
-        }
-        throw new Error(`Unexpected content-script message: ${message.type}`);
-      },
-      setState: async (updates) => {
-        currentState = { ...currentState, ...updates };
-      },
-      sleepWithStop: async () => {},
-      throwIfStopped: () => {},
-    });
-
-    await assert.rejects(
-      helpers.completePhoneVerificationFlow(1, {
-        addPhonePage: true,
-        phoneVerificationPage: false,
-        url: 'https://auth.openai.com/add-phone',
-      }),
-      (error) => {
-        assert.match(error.message, /^PHONE_MANUAL_FREE_REUSE::/);
-        return true;
-      }
-    );
-
-    assert.equal(messages.length, 1, testCase.phoneNumber);
-    assert.equal(messages[0].payload.phoneNumber, testCase.phoneNumber);
-    assert.equal(messages[0].payload.countryId, testCase.countryId, testCase.phoneNumber);
-    assert.equal(messages[0].payload.countryLabel, testCase.countryLabel, testCase.phoneNumber);
-  }
 });
 
 test('phone verification helper accepts HeroSMS WAIT_RETRY as free-reuse ready without using its suffix as code', async () => {
@@ -4724,6 +4956,7 @@ test('phone verification helper accepts HeroSMS WAIT_RETRY as free-reuse ready w
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   const result = await helpers.completePhoneVerificationFlow(1, {
     addPhonePage: true,
     phoneVerificationPage: false,
@@ -4812,12 +5045,10 @@ test('phone verification helper stops failed automatic free reuse without buying
       phoneVerificationPage: false,
       url: 'https://auth.openai.com/add-phone',
     }),
-    /PHONE_AUTO_FREE_REUSE_PREPARE::/
+    /PHONE_RESTART_STEP7::.*free_reuse_prepare_failed/
   );
 
   assert.deepStrictEqual(messages, []);
-  assert.equal(stops.length, 1);
-  assert.match(stops[0].logMessage, /不购买新 HeroSMS 号码/);
   assert.equal(currentState.freeReusablePhoneActivation, null);
   assert.equal(
     requests.some((requestUrl) => ['reactivate', 'getPrices', 'getNumber', 'getNumberV2'].includes(requestUrl.searchParams.get('action'))),
@@ -4884,19 +5115,18 @@ test('phone verification helper stops never-ready automatic free reuse without b
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   await assert.rejects(
     helpers.completePhoneVerificationFlow(1, {
       addPhonePage: true,
       phoneVerificationPage: false,
       url: 'https://auth.openai.com/add-phone',
     }),
-    /PHONE_AUTO_FREE_REUSE_PREPARE::/
+    /PHONE_RESTART_STEP7::.*free_reuse_prepare_failed/
   );
 
   assert.deepStrictEqual(messages, []);
-  assert.equal(stops.length, 1);
-  assert.match(stops[0].logMessage, /不购买新 HeroSMS 号码/);
-  assert.equal(currentState.freeReusablePhoneActivation.activationId, 'never-ready-free');
+  assert.equal(currentState.freeReusablePhoneActivation, null);
   assert.equal(
     requests.some((requestUrl) => ['reactivate', 'getPrices', 'getNumber', 'getNumberV2'].includes(requestUrl.searchParams.get('action'))),
     false
@@ -4969,6 +5199,7 @@ test('phone verification helper accepts HeroSMS WAIT_RESEND as free-reuse ready 
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   const result = await helpers.completePhoneVerificationFlow(1, {
     addPhonePage: true,
     phoneVerificationPage: false,
@@ -5059,6 +5290,7 @@ test('phone verification helper accepts HeroSMS WAIT_RESEND suffix as free-reuse
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   const result = await helpers.completePhoneVerificationFlow(1, {
     addPhonePage: true,
     phoneVerificationPage: false,
@@ -5139,6 +5371,7 @@ test('phone verification helper retires automatic free reuse record at max uses'
     throwIfStopped: () => {},
   });
 
+  await helpers.prepareAddPhoneActivation(currentState);
   await helpers.completePhoneVerificationFlow(1, {
     addPhonePage: true,
     phoneVerificationPage: false,
@@ -5146,6 +5379,8 @@ test('phone verification helper retires automatic free reuse record at max uses'
   });
 
   assert.equal(currentState.freeReusablePhoneActivation, null);
+  assert.equal(currentState.pendingPhoneActivationConfirmation.activationId, 'free-max');
+  assert.equal(currentState.pendingPhoneActivationConfirmation.successfulUses, 3);
   assert.deepStrictEqual(
     requests.map((requestUrl) => requestUrl.searchParams.get('action')),
     ['setStatus', 'getStatus', 'getStatus']
@@ -5156,6 +5391,107 @@ test('phone verification helper retires automatic free reuse record at max uses'
       .map((requestUrl) => requestUrl.searchParams.get('status')),
     ['3']
   );
+
+  await helpers.finalizePendingPhoneActivationConfirmation(currentState);
+
+  assert.equal(currentState.pendingPhoneActivationConfirmation, null);
+  assert.deepStrictEqual(
+    requests
+      .filter((requestUrl) => requestUrl.searchParams.get('action') === 'setStatus')
+      .map((requestUrl) => requestUrl.searchParams.get('status')),
+    ['3', '6']
+  );
+});
+
+test('phone verification helper skips previously used codes for automatic free reuse and requests a fresh SMS', async () => {
+  const requests = [];
+  const submittedCodes = [];
+  let statusPollCount = 0;
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    freePhoneReuseEnabled: true,
+    freePhoneReuseAutoEnabled: true,
+    verificationResendCount: 0,
+    currentPhoneActivation: null,
+    freeReusablePhoneActivation: {
+      activationId: 'free-seen-codes',
+      phoneNumber: '66950001234',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      countryLabel: 'Thailand',
+      successfulUses: 0,
+      maxUses: 3,
+      source: 'free-manual-reuse',
+      freeReuseSeenCodes: ['111111'],
+    },
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const id = parsedUrl.searchParams.get('id');
+      const status = parsedUrl.searchParams.get('status');
+      if (action === 'setStatus' && id === 'free-seen-codes' && status === '3') {
+        return { ok: true, text: async () => 'ACCESS_RETRY_GET' };
+      }
+      if (action === 'getStatus' && id === 'free-seen-codes') {
+        statusPollCount += 1;
+        if (statusPollCount === 1) {
+          return { ok: true, text: async () => 'STATUS_WAIT_CODE' };
+        }
+        if (statusPollCount === 2) {
+          return { ok: true, text: async () => 'STATUS_OK:111111' };
+        }
+        return { ok: true, text: async () => 'STATUS_OK:222222' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}:${id || ''}:${status || ''}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'SUBMIT_PHONE_NUMBER') {
+        assert.equal(message.payload.phoneNumber, '66950001234');
+        return { phoneVerificationPage: true, url: 'https://auth.openai.com/phone-verification' };
+      }
+      if (message.type === 'SUBMIT_PHONE_VERIFICATION_CODE') {
+        submittedCodes.push(message.payload.code);
+        return { success: true, consentReady: true, url: 'https://auth.openai.com/authorize' };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await helpers.prepareAddPhoneActivation(currentState);
+  const result = await helpers.completePhoneVerificationFlow(1, {
+    addPhonePage: true,
+    phoneVerificationPage: false,
+    url: 'https://auth.openai.com/add-phone',
+  });
+
+  assert.deepStrictEqual(result, {
+    success: true,
+    consentReady: true,
+    url: 'https://auth.openai.com/authorize',
+  });
+  assert.deepStrictEqual(submittedCodes, ['222222']);
+  assert.deepStrictEqual(
+    requests
+      .filter((requestUrl) => requestUrl.searchParams.get('action') === 'setStatus')
+      .map((requestUrl) => requestUrl.searchParams.get('status')),
+    ['3', '3']
+  );
+  assert.deepStrictEqual(currentState.freeReusablePhoneActivation.freeReuseSeenCodes, ['111111', '222222']);
+  assert.equal(currentState.freeReusablePhoneActivation.successfulUses, 1);
 });
 
 test('phone verification helper preserves coded free-reuse activation when code submission errors', async () => {
@@ -5226,6 +5562,8 @@ test('phone verification helper preserves coded free-reuse activation when code 
 
   assert.equal(currentState.freeReusablePhoneActivation.activationId, 'new-free-save');
   assert.equal(currentState.freeReusablePhoneActivation.phoneNumber, '66950006666');
+  assert.equal(currentState.freeReusablePhoneActivation.successfulUses, 0);
+  assert.equal(currentState.pendingFreeReusablePhoneActivationSuccess, null);
   assert.equal(
     requests.some((requestUrl) => (
       requestUrl.searchParams.get('action') === 'setStatus'
@@ -5242,6 +5580,57 @@ test('phone verification helper preserves coded free-reuse activation when code 
       ))
       .map((requestUrl) => requestUrl.searchParams.get('status')),
     []
+  );
+});
+
+test('phone verification helper immediately saves a newly acquired HeroSMS number as free reuse candidate', async () => {
+  const requests = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    heroSmsCountryId: 52,
+    heroSmsCountryLabel: 'Thailand',
+    freePhoneReuseEnabled: true,
+    currentPhoneActivation: null,
+    freeReusablePhoneActivation: null,
+    reusablePhoneActivation: null,
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getPrices') {
+        return { ok: true, text: async () => buildHeroSmsPricesPayload() };
+      }
+      if (action === 'getNumber') {
+        return { ok: true, text: async () => 'ACCESS_NUMBER:new-free-default:66950008881' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async () => {
+      throw new Error('prepareAddPhoneActivation should not touch auth page');
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.prepareAddPhoneActivation(currentState);
+
+  assert.equal(activation.activationId, 'new-free-default');
+  assert.equal(currentState.currentPhoneActivation.activationId, 'new-free-default');
+  assert.equal(currentState.freeReusablePhoneActivation.activationId, 'new-free-default');
+  assert.equal(currentState.freeReusablePhoneActivation.phoneNumber, '66950008881');
+  assert.equal(currentState.freeReusablePhoneActivation.source, 'free-manual-reuse');
+  assert.equal(
+    requests.filter((requestUrl) => requestUrl.searchParams.get('action') === 'getNumber').length,
+    1
   );
 });
 
@@ -5313,8 +5702,10 @@ test('phone verification helper preserves newly saved free-reuse activation afte
   assert.equal(currentState.freeReusablePhoneActivation.activationId, 'new-free-success');
   assert.equal(currentState.freeReusablePhoneActivation.phoneNumber, '66950007777');
   assert.equal(currentState.freeReusablePhoneActivation.source, 'free-manual-reuse');
-  assert.equal(currentState.freeReusablePhoneActivation.successfulUses, 1);
+  assert.equal(currentState.freeReusablePhoneActivation.successfulUses, 0);
   assert.equal(currentState.freeReusablePhoneActivation.maxUses, 3);
+  assert.equal(currentState.pendingFreeReusablePhoneActivationSuccess.activationId, 'new-free-success');
+  assert.equal(currentState.pendingFreeReusablePhoneActivationSuccess.phoneNumber, '66950007777');
   assert.equal(
     requests.some((requestUrl) => (
       requestUrl.searchParams.get('action') === 'setStatus'
@@ -5322,6 +5713,105 @@ test('phone verification helper preserves newly saved free-reuse activation afte
       && ['6', '8'].includes(requestUrl.searchParams.get('status'))
     )),
     false
+  );
+
+  await helpers.finalizePendingFreeReusablePhoneActivationSuccess(currentState);
+
+  assert.equal(currentState.pendingFreeReusablePhoneActivationSuccess, null);
+  assert.equal(currentState.freeReusablePhoneActivation.activationId, 'new-free-success');
+  assert.equal(currentState.freeReusablePhoneActivation.successfulUses, 1);
+});
+
+test('phone verification helper retires freshly saved free-reuse candidate after step9 sms timeout', async () => {
+  const requests = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    heroSmsCountryId: 52,
+    heroSmsCountryLabel: 'Thailand',
+    freePhoneReuseEnabled: true,
+    verificationResendCount: 0,
+    phoneVerificationReplacementLimit: 1,
+    phoneCodeWaitSeconds: 60,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 1,
+    currentPhoneActivation: {
+      activationId: 'fresh-timeout-free',
+      phoneNumber: '66950008882',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      countryLabel: 'Thailand',
+      successfulUses: 0,
+      maxUses: 3,
+      source: 'hero-sms-new',
+    },
+    freeReusablePhoneActivation: {
+      activationId: 'fresh-timeout-free',
+      phoneNumber: '66950008882',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      countryLabel: 'Thailand',
+      successfulUses: 0,
+      maxUses: 3,
+      source: 'free-manual-reuse',
+    },
+    reusablePhoneActivation: null,
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const id = parsedUrl.searchParams.get('id');
+      const status = parsedUrl.searchParams.get('status');
+      if (action === 'getStatus' && id === 'fresh-timeout-free') {
+        return { ok: true, text: async () => 'STATUS_WAIT_CODE' };
+      }
+      if (action === 'setStatus' && id === 'fresh-timeout-free' && status === '8') {
+        return { ok: true, text: async () => 'STATUS_CANCEL' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}:${id || ''}:${status || ''}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'SUBMIT_PHONE_NUMBER') {
+        return {
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.completePhoneVerificationFlow(1, {
+      addPhonePage: true,
+      phoneVerificationPage: false,
+      url: 'https://auth.openai.com/add-phone',
+    }),
+    /PHONE_MANUAL_REPICK::.*白嫖失败，等待人工处理/
+  );
+
+  assert.equal(currentState.currentPhoneActivation, null);
+  assert.equal(currentState.freeReusablePhoneActivation.activationId, 'fresh-timeout-free');
+  assert.equal(currentState.freeReusablePhoneActivation.phoneNumber, '66950008882');
+  assert.deepStrictEqual(
+    requests
+      .filter((requestUrl) => requestUrl.searchParams.get('action') === 'setStatus')
+      .map((requestUrl) => requestUrl.searchParams.get('status')),
+    []
   );
 });
 

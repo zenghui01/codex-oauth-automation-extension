@@ -5,10 +5,14 @@
     const {
       addLog,
       chrome,
+      clearPendingFreeReusablePhoneActivationSuccess,
+      clearPendingPhoneActivationConfirmation,
       cleanupStep8NavigationListeners,
       clickWithDebugger,
       completeStepFromBackground,
       ensureStep8SignupPageReady,
+      finalizePendingFreeReusablePhoneActivationSuccess,
+      finalizePendingPhoneActivationConfirmation,
       getOAuthFlowRemainingMs,
       getOAuthFlowStepTimeoutMs,
       getStep8CallbackUrlFromNavigation,
@@ -59,6 +63,13 @@
       if (!activeState.oauthUrl) {
         const authLoginStep = getAuthLoginStepForVisibleStep(visibleStep);
         throw new Error(`缺少登录用 OAuth 链接，请先完成步骤 ${authLoginStep}。`);
+      }
+
+      if (typeof clearPendingPhoneActivationConfirmation === 'function') {
+        await clearPendingPhoneActivationConfirmation('步骤 9 重新开始，避免旧 OAuth 流程的 pending 激活被误完成。');
+      }
+      if (typeof clearPendingFreeReusablePhoneActivationSuccess === 'function') {
+        await clearPendingFreeReusablePhoneActivationSuccess('步骤 9 重新开始，避免旧 OAuth 流程的白嫖首用确认被误完成。');
       }
 
       await addStepLog(visibleStep, '正在监听 localhost 回调地址...');
@@ -123,6 +134,29 @@
 
           addStepLog(visibleStep, `已捕获 localhost 地址：${callbackUrl}`, 'ok').then(() => {
             return completeStepFromBackground(visibleStep, { localhostUrl: callbackUrl });
+          }).then(async () => {
+            if (typeof finalizePendingFreeReusablePhoneActivationSuccess === 'function') {
+              try {
+                await finalizePendingFreeReusablePhoneActivationSuccess();
+              } catch (error) {
+                await addStepLog(
+                  visibleStep,
+                  `OAuth 回调已保存，但确认白嫖首用次数失败：${error.message || error}`,
+                  'warn'
+                );
+              }
+            }
+            if (typeof finalizePendingPhoneActivationConfirmation === 'function') {
+              try {
+                await finalizePendingPhoneActivationConfirmation();
+              } catch (error) {
+                await addStepLog(
+                  visibleStep,
+                  `OAuth 回调已保存，但完成 pending 接码激活失败：${error.message || error}`,
+                  'warn'
+                );
+              }
+            }
           }).then(() => {
             resolve();
           }).catch((err) => {

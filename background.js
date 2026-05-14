@@ -34,6 +34,7 @@ importScripts(
   'background/steps/registry.js',
   'data/step-definitions.js',
   'data/address-sources.js',
+  'background/steps/prefetch-add-phone-number.js',
   'background/steps/open-chatgpt.js',
   'background/steps/submit-signup-email.js',
   'background/steps/fill-password.js',
@@ -421,6 +422,7 @@ const IP_PROXY_TARGET_HOST_PATTERNS = [
   'myip.ipip.net',
 ];
 const AUTO_RUN_TIMER_ALARM_NAME = 'auto-run-timer';
+const STEP0_PREFETCH_RETRY_ALARM_NAME = 'step0-prefetch-retry';
 const IP_PROXY_AUTO_SYNC_ALARM_NAME = 'ip-proxy-auto-sync';
 const AUTO_RUN_TIMER_KIND_SCHEDULED_START = 'scheduled_start';
 const AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS = 'between_rounds';
@@ -1006,6 +1008,9 @@ const DEFAULT_STATE = {
   currentPhoneVerificationCountdownEndsAt: 0,
   currentPhoneVerificationCountdownWindowIndex: 0,
   currentPhoneVerificationCountdownWindowTotal: 0,
+  step0PrefetchRetry: null,
+  step0PhoneBlockedCountryIds: [],
+  step0PhoneCountryPriceFloorByCountryId: {},
   reusablePhoneActivation: null,
   freeReusablePhoneActivation: null,
   phoneReusableActivationPool: [],
@@ -3587,6 +3592,7 @@ async function resetState() {
       'accounts',
       'tabRegistry',
       'sourceLastUrls',
+      'phonePreferredActivation',
       'reusablePhoneActivation',
       'freeReusablePhoneActivation',
       'phoneReusableActivationPool',
@@ -3629,6 +3635,7 @@ async function resetState() {
       .map((entry) => normalizePhonePreferredActivation(entry))
       .filter(Boolean)
     : [];
+  const phonePreferredActivation = normalizePhonePreferredActivation(prev.phonePreferredActivation);
   const freeReusablePhoneActivation = (
     prev.freeReusablePhoneActivation
     && typeof prev.freeReusablePhoneActivation === 'object'
@@ -3663,6 +3670,7 @@ async function resetState() {
     currentLuckmailPurchase: null,
     currentLuckmailMailCursor: null,
     // Keep reusable phone activation across round resets so the same number can be reactivated up to maxUses.
+    phonePreferredActivation,
     reusablePhoneActivation,
     // Keep free reuse phone activation until the user clears or the flow retires it.
     freeReusablePhoneActivation,
@@ -8263,6 +8271,17 @@ function getDownstreamStateResets(step, state = {}) {
     gopayHelperOtpReferenceId: '',
   };
 
+  if (step === 0) {
+    return {
+      currentPhoneActivation: null,
+      currentPhoneVerificationCode: '',
+      currentPhoneVerificationCountdownEndsAt: 0,
+      currentPhoneVerificationCountdownWindowIndex: 0,
+      currentPhoneVerificationCountdownWindowTotal: 0,
+      pendingPhoneActivationConfirmation: null,
+      localhostUrl: null,
+    };
+  }
   if (step <= 1) {
     return {
       ...plusRuntimeResets,
@@ -8490,7 +8509,7 @@ function resolveAccountRunRecordStatusForStop(status, state = {}) {
   const normalizedStatus = String(status || '').trim().toLowerCase();
   if (normalizedStatus === 'stopped') {
     const inferredStep = inferStoppedRecordStep(state);
-    if (Number.isInteger(inferredStep) && inferredStep > 0) {
+    if (Number.isInteger(inferredStep) && inferredStep >= 0) {
       return `step${inferredStep}_stopped`;
     }
   }
@@ -8503,7 +8522,7 @@ function extractStoppedStepFromRecordStatus(status = '') {
     return null;
   }
   const step = Number(match[1]);
-  return Number.isInteger(step) && step > 0 ? step : null;
+  return Number.isInteger(step) && step >= 0 ? step : null;
 }
 
 function resolveAccountRunRecordReasonForStop(status, reason = '') {
@@ -8548,6 +8567,7 @@ function getAutoRunStatusPayload(phase, payload = {}) {
       || phase === 'running'
       || phase === 'waiting_step'
       || phase === 'waiting_email'
+      || phase === 'waiting_phone_code'
       || phase === 'retrying'
       || phase === 'waiting_interval',
     autoRunPhase: phase,
@@ -8594,13 +8614,15 @@ function isAutoRunLockedState(state) {
     && (
       state.autoRunPhase === 'running'
       || state.autoRunPhase === 'waiting_step'
+      || state.autoRunPhase === 'waiting_phone_code'
       || state.autoRunPhase === 'retrying'
       || state.autoRunPhase === 'waiting_interval'
     );
 }
 
 function isAutoRunPausedState(state) {
-  return Boolean(state.autoRunning) && state.autoRunPhase === 'waiting_email';
+  return Boolean(state.autoRunning)
+    && (state.autoRunPhase === 'waiting_email' || state.autoRunPhase === 'waiting_phone_code');
 }
 
 function isAutoRunScheduledState(state) {
@@ -8651,6 +8673,141 @@ async function ensureAutoRunTimerAlarm(fireAt) {
 
 async function clearAutoRunTimerAlarm() {
   await chrome.alarms.clear(AUTO_RUN_TIMER_ALARM_NAME);
+}
+
+function normalizeStep0PrefetchRetryState(record) {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+  const retryAt = Number(record.retryAt || 0);
+  const attempt = Math.max(1, Math.floor(Number(record.attempt) || 1));
+  if (!Number.isFinite(retryAt) || retryAt <= 0) {
+    return null;
+  }
+  return {
+    retryAt,
+    attempt,
+    lastError: String(record.lastError || ''),
+  };
+}
+
+async function ensureStep0PrefetchRetryAlarm(fireAt) {
+  if (!Number.isFinite(fireAt) || fireAt <= Date.now()) {
+    return false;
+  }
+
+  const existingAlarm = await chrome.alarms.get(STEP0_PREFETCH_RETRY_ALARM_NAME);
+  if (!existingAlarm || Math.abs((existingAlarm.scheduledTime || 0) - fireAt) > 1000) {
+    await chrome.alarms.clear(STEP0_PREFETCH_RETRY_ALARM_NAME);
+    await chrome.alarms.create(STEP0_PREFETCH_RETRY_ALARM_NAME, { when: fireAt });
+  }
+
+  return true;
+}
+
+async function clearStep0PrefetchRetryAlarm() {
+  await chrome.alarms.clear(STEP0_PREFETCH_RETRY_ALARM_NAME);
+}
+
+async function clearStep0PrefetchRetryState(reason = '') {
+  const state = await getState();
+  const hasRetryState = Boolean(normalizeStep0PrefetchRetryState(state.step0PrefetchRetry));
+  const hadAlarm = await chrome.alarms.get(STEP0_PREFETCH_RETRY_ALARM_NAME);
+  if (!hasRetryState && !hadAlarm) {
+    return false;
+  }
+  await setState({ step0PrefetchRetry: null });
+  await clearStep0PrefetchRetryAlarm();
+  if (reason) {
+    await addLog(reason, 'info', {
+      step: 0,
+      stepKey: 'prefetch-add-phone-number',
+    });
+  }
+  return true;
+}
+
+async function resumeAutoRunAfterStep0PrefetchRetryIfNeeded() {
+  const state = await getState();
+  if (autoRunActive || !state.autoRunning) {
+    return false;
+  }
+  if (!['running', 'waiting_step'].includes(String(state.autoRunPhase || '').trim().toLowerCase())) {
+    return false;
+  }
+  const step0Status = state.stepStatuses?.[0] || 'pending';
+  if (step0Status !== 'completed' && step0Status !== 'skipped') {
+    return false;
+  }
+
+  await addLog('步骤 0：检测到 chrome.alarms 已恢复预取流程，正在续跑自动流程。', 'info', {
+    step: 0,
+    stepKey: 'prefetch-add-phone-number',
+  });
+  startAutoRunLoop(state.autoRunTotalRuns || 1, {
+    autoRunSessionId: normalizeAutoRunSessionId(state.autoRunSessionId),
+    autoRunSkipFailures: Boolean(state.autoRunSkipFailures),
+    mode: 'continue',
+    resumeCurrentRun: state.autoRunCurrentRun || 1,
+    resumeAttemptRun: state.autoRunAttemptRun || 1,
+    resumeRoundSummaries: state.autoRunRoundSummaries,
+  });
+  return true;
+}
+
+let step0PrefetchRetryResuming = false;
+
+async function resumeStep0PrefetchRetryFromAlarm(trigger = 'alarm') {
+  if (step0PrefetchRetryResuming) {
+    return false;
+  }
+  step0PrefetchRetryResuming = true;
+  try {
+    const state = await getState();
+    const retryState = normalizeStep0PrefetchRetryState(state.step0PrefetchRetry);
+    if (!retryState) {
+      await clearStep0PrefetchRetryAlarm();
+      return false;
+    }
+    if (retryState.retryAt > Date.now()) {
+      await ensureStep0PrefetchRetryAlarm(retryState.retryAt);
+      return false;
+    }
+
+    await addLog(`步骤 0：chrome.alarms 已触发，继续执行第 ${retryState.attempt} 轮预取。`, 'info', {
+      step: 0,
+      stepKey: 'prefetch-add-phone-number',
+    });
+    await executeStep(0);
+
+    const latestState = await getState();
+    if (!normalizeStep0PrefetchRetryState(latestState.step0PrefetchRetry)) {
+      await resumeAutoRunAfterStep0PrefetchRetryIfNeeded();
+    } else if (trigger === 'restore') {
+      const latestRetryState = normalizeStep0PrefetchRetryState(latestState.step0PrefetchRetry);
+      if (latestRetryState) {
+        await ensureStep0PrefetchRetryAlarm(latestRetryState.retryAt);
+      }
+    }
+    return true;
+  } finally {
+    step0PrefetchRetryResuming = false;
+  }
+}
+
+async function restoreStep0PrefetchRetryAlarmIfNeeded() {
+  const state = await getState();
+  const retryState = normalizeStep0PrefetchRetryState(state.step0PrefetchRetry);
+  if (!retryState) {
+    await clearStep0PrefetchRetryAlarm();
+    return false;
+  }
+  if (retryState.retryAt <= Date.now()) {
+    await resumeStep0PrefetchRetryFromAlarm('restore');
+    return true;
+  }
+  await ensureStep0PrefetchRetryAlarm(retryState.retryAt);
+  return true;
 }
 
 async function persistAutoRunTimerPlan(plan, extraState = {}) {
@@ -9302,6 +9459,7 @@ const AUTO_RUN_BACKGROUND_COMPLETED_STEP_KEYS = new Set([
   'confirm-oauth',
 ]);
 const STEP_COMPLETION_SIGNAL_STEP_KEYS = new Set([
+  'prefetch-add-phone-number',
   'fill-password',
   'fill-profile',
   'gopay-subscription-confirm',
@@ -9678,6 +9836,33 @@ function isAuthChainStep(step, state = {}) {
   return AUTH_CHAIN_STEP_IDS.has(Number(step));
 }
 
+async function ensurePrefetchedAddPhoneActivationBeforeStep(step, state = {}) {
+  const normalizedStep = Number(step);
+  if (normalizedStep === 0 || !isAuthChainStep(normalizedStep, state)) {
+    return;
+  }
+  if (!Boolean(state?.phoneVerificationEnabled)) {
+    return;
+  }
+  const stepKey = String(getStepDefinitionForState(normalizedStep, state)?.key || '').trim();
+  if (stepKey !== 'confirm-oauth' && stepKey !== 'fetch-login-code' && stepKey !== 'oauth-login') {
+    return;
+  }
+  const activation = phoneVerificationHelpers?.normalizeActivation?.(state?.currentPhoneActivation);
+  if (activation) {
+    return;
+  }
+  const step0Definition = getStepDefinitionForState(0, state);
+  if (!step0Definition) {
+    return;
+  }
+  await addLog(`步骤 ${normalizedStep}：当前缺少预取接码号码，先补跑步骤 0。`, 'info', {
+    step: normalizedStep,
+    stepKey,
+  });
+  await executeStep(0);
+}
+
 async function acquireTopLevelAuthChainExecution(step, state = {}) {
   const normalizedStep = Number(step);
   if (!isAuthChainStep(normalizedStep, state)) {
@@ -9813,6 +9998,7 @@ async function requestStop(options = {}) {
     resumeWaiter = null;
   }
 
+  await clearStep0PrefetchRetryState();
   await markRunningStepsStopped();
   autoRunActive = false;
   await broadcastAutoRunStatus('stopped', {
@@ -9849,6 +10035,9 @@ async function executeStep(step, options = {}) {
   let executionError = null;
   throwIfStopped();
   try {
+    if (typeof ensurePrefetchedAddPhoneActivationBeforeStep === 'function') {
+      await ensurePrefetchedAddPhoneActivationBeforeStep(step, state);
+    }
     await setStepStatus(step, 'running');
     await addLog('开始执行', 'info', { step });
     await humanStepDelay();
@@ -11093,6 +11282,11 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
     await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：第 ${attemptRuns} 次尝试，阶段 1，打开官网并进入密码页 ===`, 'info');
   }
 
+  const currentRunState = await getState();
+  if (currentStartStep <= 1 && getStepDefinitionForState(0, currentRunState)) {
+    await executeStepAndWait(0, AUTO_STEP_DELAYS[0] || 0);
+  }
+
   if (currentStartStep <= 1) {
     try {
       await executeStepAndWaitWithAutoRunIdleLogWatchdog(1, AUTO_STEP_DELAYS[1]);
@@ -11411,7 +11605,7 @@ async function autoRunLoop(totalRuns, options = {}) {
 async function resumeAutoRun() {
   throwIfStopped();
   const state = await getState();
-  if (!state.email) {
+  if (state.autoRunPhase === 'waiting_email' && !state.email) {
     await addLog('无法继续：当前没有邮箱地址，请先在侧边栏填写邮箱。', 'error');
     return false;
   }
@@ -11419,6 +11613,37 @@ async function resumeAutoRun() {
   const resumedInMemory = await resumeAutoRunIfWaitingForEmail({ silent: true });
   if (resumedInMemory) {
     return true;
+  }
+
+  if (state.autoRunPhase === 'waiting_phone_code') {
+    await addLog('人工确认继续后，自动流程将回到步骤 0 重新选号，并从步骤 7 重新开始授权链。', 'info');
+    const latestState = await getState();
+    const statuses = { ...(latestState.stepStatuses || {}) };
+    const authChainStartStep = typeof getAuthChainStartStepId === 'function'
+      ? getAuthChainStartStepId(latestState)
+      : FINAL_OAUTH_CHAIN_START_STEP;
+    const activeStepIds = typeof getStepIdsForState === 'function'
+      ? getStepIdsForState(latestState)
+      : STEP_IDS;
+    const changedSteps = [];
+    activeStepIds.forEach((stepId) => {
+      if (stepId === 0 || stepId >= authChainStartStep) {
+        if (statuses[stepId] !== 'pending') {
+          statuses[stepId] = 'pending';
+          changedSteps.push(stepId);
+        }
+      }
+    });
+    await setState({
+      ...getDownstreamStateResets(0, latestState),
+      stepStatuses: statuses,
+    });
+    changedSteps.forEach((stepId) => {
+      chrome.runtime.sendMessage({
+        type: 'STEP_STATUS_CHANGED',
+        payload: { step: stepId, status: 'pending' },
+      }).catch(() => {});
+    });
   }
 
   if (!isAutoRunPausedState(state)) {
@@ -11611,6 +11836,17 @@ const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   addLog,
   completeStepFromBackground,
   openSignupEntryTab,
+});
+const step0Executor = self.MultiPageBackgroundPrefetchAddPhoneNumber?.createPrefetchAddPhoneNumberExecutor({
+  addLog,
+  clearStep0PrefetchRetryState: (...args) => clearStep0PrefetchRetryState(...args),
+  completeStepFromBackground,
+  ensureStep0PrefetchRetryAlarm: (...args) => ensureStep0PrefetchRetryAlarm(...args),
+  getState,
+  phoneVerificationHelpers,
+  setStepStatus,
+  setState,
+  throwIfStopped,
 });
 const step2Executor = self.MultiPageBackgroundStep2?.createStep2Executor({
   addLog,
@@ -11860,6 +12096,7 @@ const step10Executor = self.MultiPageBackgroundStep10?.createStep10Executor({
   SUB2API_STEP9_RESPONSE_TIMEOUT_MS,
 });
 const stepExecutorsByKey = {
+  'prefetch-add-phone-number': (state) => step0Executor.executeStep0(state),
   'open-chatgpt': () => step1Executor.executeStep1(),
   'submit-signup-email': (state) => step2Executor.executeStep2(state),
   'fill-password': (state) => step3Executor.executeStep3(state),
@@ -12455,7 +12692,7 @@ async function getPostStep6AutoRestartDecision(step, error) {
 
   const normalizedStep = Number(step);
   const errorMessage = getErrorMessage(error);
-  const shouldForceRestartFromStep7 = /restart step 7 with a new number/i.test(errorMessage);
+  const shouldForceRestartFromStep7 = /restart step 7 with a new number|PHONE_RESTART_STEP7::|回到步骤\s*7|重新开始授权链|重新获取新号码/i.test(errorMessage);
   const latestState = await getState();
   const authChainStartStep = typeof getAuthChainStartStepId === 'function'
     ? getAuthChainStartStepId(latestState)
@@ -12493,22 +12730,22 @@ async function getPostStep6AutoRestartDecision(step, error) {
     };
   }
 
-  if (isPhoneVerificationLocalFailure(errorMessage)) {
+  if (shouldForceRestartFromStep7) {
     return {
-      shouldRestart: false,
-      blockedByAddPhone: true,
-      forcedByPhoneVerificationTimeout: false,
+      shouldRestart: true,
+      blockedByAddPhone: false,
+      forcedByPhoneVerificationTimeout: true,
       restartStep: authChainStartStep,
       errorMessage,
       authState: null,
     };
   }
 
-  if (shouldForceRestartFromStep7) {
+  if (isPhoneVerificationLocalFailure(errorMessage)) {
     return {
-      shouldRestart: true,
-      blockedByAddPhone: false,
-      forcedByPhoneVerificationTimeout: true,
+      shouldRestart: false,
+      blockedByAddPhone: true,
+      forcedByPhoneVerificationTimeout: false,
       restartStep: authChainStartStep,
       errorMessage,
       authState: null,
@@ -13465,10 +13702,22 @@ async function recoverOAuthLocalhostTimeout(details = {}) {
 const step9Executor = self.MultiPageBackgroundStep9?.createStep9Executor({
   addLog,
   chrome,
+  clearPendingFreeReusablePhoneActivationSuccess: (...args) => (
+    phoneVerificationHelpers?.clearPendingFreeReusablePhoneActivationSuccess?.(...args)
+  ),
+  clearPendingPhoneActivationConfirmation: (...args) => (
+    phoneVerificationHelpers?.clearPendingPhoneActivationConfirmation?.(...args)
+  ),
   cleanupStep8NavigationListeners,
   clickWithDebugger,
   completeStepFromBackground,
   ensureStep8SignupPageReady,
+  finalizePendingFreeReusablePhoneActivationSuccess: (...args) => (
+    phoneVerificationHelpers?.finalizePendingFreeReusablePhoneActivationSuccess?.(...args)
+  ),
+  finalizePendingPhoneActivationConfirmation: (...args) => (
+    phoneVerificationHelpers?.finalizePendingPhoneActivationConfirmation?.(...args)
+  ),
   getOAuthFlowStepTimeoutMs,
   getStep8CallbackUrlFromNavigation,
   getStep8CallbackUrlFromTabUpdate,
@@ -13610,6 +13859,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     });
     return;
   }
+  if (alarm.name === STEP0_PREFETCH_RETRY_ALARM_NAME) {
+    resumeStep0PrefetchRetryFromAlarm('alarm').catch((err) => {
+      console.error(LOG_PREFIX, 'Failed to resume step 0 prefetch retry from alarm:', err);
+    });
+    return;
+  }
   if (alarm.name === IP_PROXY_AUTO_SYNC_ALARM_NAME) {
     runIpProxyAutoSync('alarm').catch((err) => {
       console.error(LOG_PREFIX, 'Failed to run IP proxy auto sync alarm:', err);
@@ -13620,6 +13875,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onStartup.addListener(() => {
   restoreAutoRunTimerIfNeeded().catch((err) => {
     console.error(LOG_PREFIX, 'Failed to restore auto run timer on startup:', err);
+  });
+  restoreStep0PrefetchRetryAlarmIfNeeded().catch((err) => {
+    console.error(LOG_PREFIX, 'Failed to restore step 0 prefetch retry alarm on startup:', err);
   });
   if (IP_PROXY_INIT_AUTO_APPLY) {
     ensureIpProxySettingsAppliedFromCurrentState({
@@ -13638,6 +13896,9 @@ chrome.runtime.onInstalled.addListener(() => {
   restoreAutoRunTimerIfNeeded().catch((err) => {
     console.error(LOG_PREFIX, 'Failed to restore auto run timer on install/update:', err);
   });
+  restoreStep0PrefetchRetryAlarmIfNeeded().catch((err) => {
+    console.error(LOG_PREFIX, 'Failed to restore step 0 prefetch retry alarm on install/update:', err);
+  });
   if (IP_PROXY_INIT_AUTO_APPLY) {
     ensureIpProxySettingsAppliedFromCurrentState({
       skipExitProbe: !IP_PROXY_INIT_ENABLE_EXIT_PROBE,
@@ -13653,6 +13914,9 @@ chrome.runtime.onInstalled.addListener(() => {
 
 restoreAutoRunTimerIfNeeded().catch((err) => {
   console.error(LOG_PREFIX, 'Failed to restore auto run timer:', err);
+});
+restoreStep0PrefetchRetryAlarmIfNeeded().catch((err) => {
+  console.error(LOG_PREFIX, 'Failed to restore step 0 prefetch retry alarm:', err);
 });
 if (IP_PROXY_INIT_AUTO_APPLY) {
   ensureIpProxySettingsAppliedFromCurrentState({

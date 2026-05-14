@@ -129,6 +129,28 @@ let currentState = {
     successfulUses: 1,
     maxUses: 3,
   },
+  phonePreferredActivation: {
+    activationId: 'preferred-001',
+    phoneNumber: '66950000001',
+    provider: 'hero-sms',
+    successfulUses: 0,
+    maxUses: 3,
+  },
+  freeReusablePhoneActivation: {
+    activationId: 'free-001',
+    phoneNumber: '66950000002',
+    provider: 'hero-sms',
+    successfulUses: 2,
+    maxUses: 3,
+    source: 'free-manual-reuse',
+  },
+  phoneReusableActivationPool: [{
+    activationId: 'pool-001',
+    phoneNumber: '66950000003',
+    provider: 'hero-sms',
+    successfulUses: 1,
+    maxUses: 3,
+  }],
   tabRegistry: {},
   sourceLastUrls: {},
 };
@@ -189,6 +211,10 @@ async function resetState() {
     inbucketMailbox: prev.inbucketMailbox,
     cloudflareDomain: prev.cloudflareDomain,
     cloudflareDomains: [...(prev.cloudflareDomains || [])],
+    phonePreferredActivation: null,
+    reusablePhoneActivation: null,
+    freeReusablePhoneActivation: null,
+    phoneReusableActivationPool: [],
     tabRegistry: { ...(prev.tabRegistry || {}) },
     sourceLastUrls: { ...(prev.sourceLastUrls || {}) },
   };
@@ -371,6 +397,40 @@ return {
       maxUses: 3,
     },
     'reusable phone activation should survive fresh-attempt reset'
+  );
+  assert.deepStrictEqual(
+    snapshot.currentState.phonePreferredActivation,
+    {
+      activationId: 'preferred-001',
+      phoneNumber: '66950000001',
+      provider: 'hero-sms',
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    'preferred phone activation should survive fresh-attempt reset'
+  );
+  assert.deepStrictEqual(
+    snapshot.currentState.freeReusablePhoneActivation,
+    {
+      activationId: 'free-001',
+      phoneNumber: '66950000002',
+      provider: 'hero-sms',
+      successfulUses: 2,
+      maxUses: 3,
+      source: 'free-manual-reuse',
+    },
+    'free reusable phone activation should survive fresh-attempt reset'
+  );
+  assert.deepStrictEqual(
+    snapshot.currentState.phoneReusableActivationPool,
+    [{
+      activationId: 'pool-001',
+      phoneNumber: '66950000003',
+      provider: 'hero-sms',
+      successfulUses: 1,
+      maxUses: 3,
+    }],
+    'phone reusable activation pool should survive fresh-attempt reset'
   );
 
   console.log('auto-run fresh attempt reset tests passed');

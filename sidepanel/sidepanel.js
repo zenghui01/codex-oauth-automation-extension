@@ -2436,7 +2436,7 @@ function syncAutoRunState(source = {}) {
   const autoRunning = source.autoRunning !== undefined
     ? Boolean(source.autoRunning)
     : (source.autoRunPhase !== undefined || source.phase !== undefined
-      ? ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying', 'waiting_interval'].includes(phase)
+      ? ['scheduled', 'running', 'waiting_step', 'waiting_email', 'waiting_phone_code', 'retrying', 'waiting_interval'].includes(phase)
       : currentAutoRun.autoRunning);
 
   currentAutoRun = {
@@ -2474,7 +2474,7 @@ function isAutoRunLockedPhase() {
 }
 
 function isAutoRunPausedPhase() {
-  return currentAutoRun.phase === 'waiting_email';
+  return currentAutoRun.phase === 'waiting_email' || currentAutoRun.phase === 'waiting_phone_code';
 }
 
 function isAutoRunWaitingStepPhase() {
@@ -2486,7 +2486,7 @@ function isAutoRunScheduledPhase() {
 }
 
 function isAutoRunSourceSyncPhase(phase) {
-  return ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying', 'waiting_interval'].includes(phase);
+  return ['scheduled', 'running', 'waiting_step', 'waiting_email', 'waiting_phone_code', 'retrying', 'waiting_interval'].includes(phase);
 }
 
 function shouldSyncRunCountFromAutoRunSource(source = {}) {
@@ -3343,10 +3343,10 @@ function collectSettingsPayload() {
     : defaultHeroSmsReuseEnabled;
   const freePhoneReuseEnabledValue = typeof inputFreePhoneReuseEnabled !== 'undefined' && inputFreePhoneReuseEnabled
     ? Boolean(inputFreePhoneReuseEnabled.checked)
-    : Boolean(latestState?.freePhoneReuseEnabled);
+    : latestState?.freePhoneReuseEnabled !== false;
   const freePhoneReuseAutoEnabledValue = typeof inputFreePhoneReuseAutoEnabled !== 'undefined' && inputFreePhoneReuseAutoEnabled
     ? Boolean(inputFreePhoneReuseAutoEnabled.checked)
-    : Boolean(latestState?.freePhoneReuseAutoEnabled);
+    : latestState?.freePhoneReuseAutoEnabled !== false;
   const defaultHeroSmsAcquirePriority = typeof DEFAULT_HERO_SMS_ACQUIRE_PRIORITY !== 'undefined'
     ? DEFAULT_HERO_SMS_ACQUIRE_PRIORITY
     : (typeof HERO_SMS_ACQUIRE_PRIORITY_COUNTRY !== 'undefined' ? HERO_SMS_ACQUIRE_PRIORITY_COUNTRY : 'country');
@@ -7633,9 +7633,6 @@ function updatePhoneVerificationSettingsUI() {
   const freePhoneReuseAutoAvailable = showSettings && freePhoneReuseEnabled;
   if (typeof inputFreePhoneReuseAutoEnabled !== 'undefined' && inputFreePhoneReuseAutoEnabled) {
     inputFreePhoneReuseAutoEnabled.disabled = !freePhoneReuseAutoAvailable;
-    if (!freePhoneReuseAutoAvailable) {
-      inputFreePhoneReuseAutoEnabled.checked = false;
-    }
   }
   setFreePhoneReuseControlsLocked(isAutoRunLockedPhase() || isAutoRunScheduledPhase());
   if (typeof rowFreePhoneReuseAutoEnabled !== 'undefined' && rowFreePhoneReuseAutoEnabled) {
@@ -8422,7 +8419,7 @@ function applyAutoRunStatus(payload = currentAutoRun) {
     : 0;
   const isSyncPhase = typeof isAutoRunSourceSyncPhase === 'function'
     ? isAutoRunSourceSyncPhase
-    : (phase) => ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying', 'waiting_interval'].includes(phase);
+    : (phase) => ['scheduled', 'running', 'waiting_step', 'waiting_email', 'waiting_phone_code', 'retrying', 'waiting_interval'].includes(phase);
   const shouldSyncRunCount = typeof shouldSyncRunCountFromAutoRunSource === 'function'
     ? shouldSyncRunCountFromAutoRunSource(currentAutoRun)
     : (currentAutoRun.autoRunning || isSyncPhase(currentAutoRun.phase));
@@ -8444,6 +8441,10 @@ function applyAutoRunStatus(payload = currentAutoRun) {
     case 'waiting_email':
       autoContinueBar.style.display = 'flex';
       btnAutoRun.innerHTML = `已暂停${runLabel}`;
+      break;
+    case 'waiting_phone_code':
+      autoContinueBar.style.display = 'flex';
+      btnAutoRun.innerHTML = `待继续${runLabel}`;
       break;
     case 'running':
       autoContinueBar.style.display = 'none';
@@ -8991,10 +8992,10 @@ function applySettingsState(state) {
     inputHeroSmsReuseEnabled.checked = normalizeHeroSmsReuseEnabledValue(state?.heroSmsReuseEnabled);
   }
   if (typeof inputFreePhoneReuseEnabled !== 'undefined' && inputFreePhoneReuseEnabled) {
-    inputFreePhoneReuseEnabled.checked = Boolean(state?.freePhoneReuseEnabled);
+    inputFreePhoneReuseEnabled.checked = state?.freePhoneReuseEnabled !== false;
   }
   if (typeof inputFreePhoneReuseAutoEnabled !== 'undefined' && inputFreePhoneReuseAutoEnabled) {
-    inputFreePhoneReuseAutoEnabled.checked = Boolean(state?.freePhoneReuseAutoEnabled);
+    inputFreePhoneReuseAutoEnabled.checked = state?.freePhoneReuseAutoEnabled !== false;
   }
   if (typeof selectHeroSmsAcquirePriority !== 'undefined' && selectHeroSmsAcquirePriority) {
     selectHeroSmsAcquirePriority.value = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
@@ -9080,7 +9081,7 @@ function applySettingsState(state) {
   }
   const isSyncPhase = typeof isAutoRunSourceSyncPhase === 'function'
     ? isAutoRunSourceSyncPhase
-    : (phase) => ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying', 'waiting_interval'].includes(phase);
+    : (phase) => ['scheduled', 'running', 'waiting_step', 'waiting_email', 'waiting_phone_code', 'retrying', 'waiting_interval'].includes(phase);
   const shouldSyncInitialRunCount = typeof shouldSyncRunCountFromAutoRunSource === 'function'
     ? shouldSyncRunCountFromAutoRunSource(state)
     : (Boolean(state?.autoRunning) || isSyncPhase(state?.autoRunPhase ?? state?.phase));
@@ -10668,7 +10669,7 @@ function updateButtonStates() {
 
     if (anyRunning || autoLocked || autoScheduled) {
       btn.disabled = true;
-    } else if (step === 1) {
+    } else if (step === STEP_IDS[0]) {
       btn.disabled = false;
     } else {
       const currentIndex = STEP_IDS.indexOf(step);
@@ -10762,7 +10763,9 @@ function updateStatusDisplay(state) {
   }
 
   if (isAutoRunPausedPhase()) {
-    displayStatus.textContent = `自动已暂停${getAutoRunLabel()}，等待邮箱后继续`;
+    displayStatus.textContent = currentAutoRun.phase === 'waiting_phone_code'
+      ? `自动已暂停${getAutoRunLabel()}，等待人工继续后回到步骤 0 重选号`
+      : `自动已暂停${getAutoRunLabel()}，等待邮箱后继续`;
     statusBar.classList.add('paused');
     return;
   }
@@ -10811,7 +10814,7 @@ function updateStatusDisplay(state) {
   if (lastCompleted === STEP_IDS[STEP_IDS.length - 1]) {
     displayStatus.textContent = (state.stepStatuses[lastCompleted] === 'manual_completed' || state.stepStatuses[lastCompleted] === 'skipped') ? '全部步骤已跳过/完成' : '全部步骤已完成';
     statusBar.classList.add('completed');
-  } else if (lastCompleted) {
+  } else if (lastCompleted !== undefined) {
     displayStatus.textContent = (state.stepStatuses[lastCompleted] === 'manual_completed' || state.stepStatuses[lastCompleted] === 'skipped')
       ? `步骤 ${lastCompleted} 已跳过`
       : `步骤 ${lastCompleted} 已完成`;
@@ -10829,8 +10832,12 @@ function appendLog(entry) {
   const line = document.createElement('div');
   line.className = `log-line log-${entry.level}`;
 
-  const normalizedStep = Math.floor(Number(entry.step) || 0);
-  const stepNum = normalizedStep > 0 ? String(normalizedStep) : null;
+  const rawStep = entry?.step;
+  const numericStep = rawStep === null || rawStep === undefined || rawStep === ''
+    ? NaN
+    : Number(rawStep);
+  const normalizedStep = Number.isFinite(numericStep) ? Math.floor(numericStep) : null;
+  const stepNum = normalizedStep !== null && normalizedStep >= 0 ? String(normalizedStep) : null;
 
   let html = `<span class="log-time">${time}</span> `;
   html += `<span class="log-level log-level-${entry.level}">${levelLabel}</span> `;
@@ -11970,6 +11977,11 @@ btnAutoRun.addEventListener('click', async () => {
 });
 
 btnAutoContinue.addEventListener('click', async () => {
+  if (currentAutoRun.phase === 'waiting_phone_code') {
+    autoContinueBar.style.display = 'none';
+    await chrome.runtime.sendMessage({ type: 'RESUME_AUTO_RUN', source: 'sidepanel', payload: {} });
+    return;
+  }
   const email = inputEmail.value.trim();
   if (!email) {
     showToast(
@@ -13539,9 +13551,6 @@ inputHeroSmsReuseEnabled?.addEventListener('change', () => {
 });
 
 inputFreePhoneReuseEnabled?.addEventListener('change', () => {
-  if (!inputFreePhoneReuseEnabled.checked && inputFreePhoneReuseAutoEnabled) {
-    inputFreePhoneReuseAutoEnabled.checked = false;
-  }
   updatePhoneVerificationSettingsUI();
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
@@ -14669,7 +14678,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     case 'AUTO_RUN_STATUS': {
       syncLatestState({
-        autoRunning: ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying', 'waiting_interval'].includes(message.payload.phase),
+        autoRunning: ['scheduled', 'running', 'waiting_step', 'waiting_email', 'waiting_phone_code', 'retrying', 'waiting_interval'].includes(message.payload.phase),
         autoRunPhase: message.payload.phase,
         autoRunCurrentRun: message.payload.currentRun,
         autoRunTotalRuns: message.payload.totalRuns,

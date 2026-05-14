@@ -210,6 +210,16 @@
       return true;
     }
 
+    function isPhoneManualRepickFailure(errorLike) {
+      const message = String(
+        typeof errorLike === 'string'
+          ? errorLike
+          : (errorLike?.message || errorLike || '')
+      ).trim();
+      return /^PHONE_MANUAL_REPICK::/i.test(message)
+        || /接码平台.*拿不到验证码|等待人工继续后回到步骤 0 重选号|人工介入后重新选号/i.test(message);
+    }
+
     function shouldKeepCustomMailProviderPoolEmail(state = {}) {
       return String(state?.mailProvider || '').trim().toLowerCase() === 'custom'
         && Array.isArray(state?.customMailProviderPool)
@@ -520,7 +530,10 @@
               inbucketMailbox: prevState.inbucketMailbox,
               cloudflareDomain: prevState.cloudflareDomain,
               cloudflareDomains: prevState.cloudflareDomains,
+              phonePreferredActivation: prevState.phonePreferredActivation,
               reusablePhoneActivation: prevState.reusablePhoneActivation,
+              freeReusablePhoneActivation: prevState.freeReusablePhoneActivation,
+              phoneReusableActivationPool: prevState.phoneReusableActivationPool,
               autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
               autoRunSessionId: sessionId,
               tabRegistry: {},
@@ -613,9 +626,13 @@
             roundSummary.failureReasons.push(reason);
             const blockedByPhoneSmsRateLimit = typeof isPhoneSmsPlatformRateLimitFailure === 'function'
               && isPhoneSmsPlatformRateLimitFailure(err);
+            const waitingForPhoneManualRepick = !blockedByPhoneSmsRateLimit
+              && isPhoneManualRepickFailure(err);
             const blockedByPhoneNoSupply = !blockedByPhoneSmsRateLimit
+              && !waitingForPhoneManualRepick
               && isPhoneNumberSupplyExhaustedFailure(err);
             const blockedByAddPhone = !blockedByPhoneSmsRateLimit
+              && !waitingForPhoneManualRepick
               && !blockedByPhoneNoSupply
               && typeof isAddPhoneAuthFailure === 'function'
               && isAddPhoneAuthFailure(err);
@@ -640,6 +657,22 @@
             await setState({
               autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
             });
+
+            if (waitingForPhoneManualRepick) {
+              await addLog(
+                `第 ${targetRun}/${totalRuns} 轮手机号验证码长时间未到，自动流程已暂停；你点继续后会回到步骤 0 重选号，并从步骤 7 重新开始。`,
+                'warn'
+              );
+              await broadcastAutoRunStatus('waiting_phone_code', {
+                currentRun: targetRun,
+                totalRuns,
+                attemptRun,
+                sessionId,
+              });
+              runtime.set({ autoRunActive: false });
+              clearStopRequest();
+              return;
+            }
 
             if (blockedByAddPhone) {
               roundSummary.status = 'failed';

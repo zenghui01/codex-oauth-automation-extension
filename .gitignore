@@ -16,3 +16,7 @@ __pycache__/
 .worktrees/
 # Local exported runtime settings
 /config.json
+# Local Claude Code workspace settings (not shared)
+/.claude/
+# Local Trae workspace settings (not shared)
+/.trae/

@@ -409,3 +409,51 @@ test('tab runtime does not query all windows when the locked window is unavailab
 
   assert.deepEqual(queries, [{ active: true, windowId: 55 }]);
 });
+
+test('tab runtime marks force-created tabs pending before content script ready', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+
+  const state = {
+    tabRegistry: {
+      'signup-page': { tabId: 1, ready: true },
+    },
+    sourceLastUrls: {},
+  };
+  const updates = [];
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        create: async () => ({
+          id: 42,
+          url: 'https://auth.openai.com/oauth',
+          status: 'loading',
+        }),
+        get: async () => ({ id: 42, url: 'https://auth.openai.com/oauth', status: 'complete' }),
+        query: async () => [],
+        onUpdated: {
+          addListener: () => {},
+          removeListener: () => {},
+        },
+      },
+    },
+    getState: async () => state,
+    matchesSourceUrlFamily: () => false,
+    setState: async (nextUpdates) => {
+      updates.push(nextUpdates);
+      Object.assign(state, nextUpdates);
+    },
+    throwIfStopped: () => {},
+  });
+
+  const tabId = await runtime.reuseOrCreateTab('signup-page', 'https://auth.openai.com/oauth', {
+    forceNew: true,
+  });
+
+  assert.equal(tabId, 42);
+  assert.deepStrictEqual(state.tabRegistry['signup-page'], { tabId: 42, ready: false });
+  assert.ok(updates.some((entry) => entry.tabRegistry?.['signup-page']?.ready === false));
+});

@@ -43,8 +43,15 @@
     }
 
     function normalizeLogStep(value) {
-      const step = Math.floor(Number(value) || 0);
-      return step > 0 ? step : null;
+      if (value === null || value === undefined || value === '') {
+        return null;
+      }
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return null;
+      }
+      const step = Math.floor(numeric);
+      return step >= 0 ? step : null;
     }
 
     function buildLogEntry(message, level = 'info', options = {}) {
@@ -178,6 +185,7 @@
           || phase === 'running'
           || phase === 'waiting_step'
           || phase === 'waiting_email'
+          || phase === 'waiting_phone_code'
           || phase === 'retrying'
           || phase === 'waiting_interval',
         autoRunPhase: phase,

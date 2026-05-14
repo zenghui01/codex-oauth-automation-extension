@@ -631,12 +631,19 @@
 
         case 'LOG': {
           const { message: msg, level, step: payloadStep, stepKey } = message.payload;
-          const logStep = Math.floor(Number(message.step || payloadStep) || 0);
+          const rawStep = message.step ?? payloadStep;
+          const logStep = rawStep === null || rawStep === undefined || rawStep === ''
+            ? null
+            : (
+              Number.isFinite(Number(rawStep))
+                ? Math.floor(Number(rawStep))
+                : null
+            );
           await addLog(
             `[${getSourceLabel(message.source)}] ${msg}`,
             level,
             {
-              step: logStep > 0 ? logStep : null,
+              step: logStep !== null && logStep >= 0 ? logStep : null,
               stepKey,
             }
           );

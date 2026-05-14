@@ -15,7 +15,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   const gpcSteps = api.getSteps({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' });
 
   assert.equal(Array.isArray(steps), true);
-  assert.equal(steps.length, 10);
+  assert.equal(steps.length, 11);
   assert.equal(steps.every((step) => step.flowId === 'openai'), true);
   assert.deepStrictEqual(
     steps.map((step) => step.order),
@@ -24,6 +24,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.deepStrictEqual(
     steps.map((step) => step.key),
     [
+      'prefetch-add-phone-number',
       'open-chatgpt',
       'submit-signup-email',
       'fill-password',
@@ -36,14 +37,16 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'platform-verify',
     ]
   );
-  assert.equal(steps[0].title, '打开 ChatGPT 官网');
-  assert.equal(steps[5].title, '等待注册成功');
-  assert.equal(phoneSteps[1].title, '注册并输入手机号');
-  assert.equal(phoneSteps[3].title, '获取手机验证码');
+  assert.equal(steps[0].title, '预取接码手机号码');
+  assert.equal(steps[1].title, '打开 ChatGPT 官网');
+  assert.equal(steps[6].title, '等待注册成功');
+  assert.equal(phoneSteps[2].title, '注册并输入手机号');
+  assert.equal(phoneSteps[4].title, '获取手机验证码');
 
   assert.deepStrictEqual(
     plusSteps.map((step) => step.key),
     [
+      'prefetch-add-phone-number',
       'open-chatgpt',
       'submit-signup-email',
       'fill-password',
@@ -62,24 +65,25 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(plusSteps.some((step) => step.key === 'wait-registration-success'), false);
   assert.equal(plusSteps.some((step) => step.key === 'fetch-login-code'), true);
   assert.equal(plusSteps.find((step) => step.key === 'paypal-approve')?.title, 'PayPal 登录与授权');
-  assert.equal(plusPhoneSteps[1].title, '注册并输入手机号');
-  assert.equal(plusPhoneSteps[3].title, '获取手机验证码');
+  assert.equal(plusPhoneSteps[2].title, '注册并输入手机号');
+  assert.equal(plusPhoneSteps[4].title, '获取手机验证码');
   assert.equal(goPaySteps.some((step) => step.key === 'paypal-approve'), false);
   assert.equal(api.getStepById(8, { plusModeEnabled: true, plusPaymentMethod: 'gopay' }), null);
   assert.equal(api.getPlusPaymentStepTitle({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), '');
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true }), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
   assert.equal(api.getLastStepId({ plusModeEnabled: true }), 13);
   assert.equal(api.hasFlow('openai'), true);
   assert.equal(api.hasFlow('site-a'), false);
   assert.deepStrictEqual(api.getRegisteredFlowIds(), ['openai']);
   assert.deepStrictEqual(api.getSteps({ activeFlowId: 'site-a' }), []);
   assert.equal(api.getStepById(2, { activeFlowId: 'site-a' }), null);
-  assert.equal(plusSteps[5].title, '创建 Plus Checkout');
-  assert.equal(plusSteps[7].title, 'PayPal 登录与授权');
+  assert.equal(plusSteps[6].title, '创建 Plus Checkout');
+  assert.equal(plusSteps[8].title, 'PayPal 登录与授权');
 
   assert.deepStrictEqual(
     goPaySteps.map((step) => step.key),
     [
+      'prefetch-add-phone-number',
       'open-chatgpt',
       'submit-signup-email',
       'fill-password',
@@ -93,14 +97,15 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'platform-verify',
     ]
   );
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), [0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]);
   assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), 13);
-  assert.equal(goPaySteps[5].title, '打开 GoPay 订阅页');
-  assert.equal(goPaySteps[6].title, '等待 GoPay 订阅确认');
+  assert.equal(goPaySteps[6].title, '打开 GoPay 订阅页');
+  assert.equal(goPaySteps[7].title, '等待 GoPay 订阅确认');
 
   assert.deepStrictEqual(
     gpcSteps.map((step) => step.key),
     [
+      'prefetch-add-phone-number',
       'open-chatgpt',
       'submit-signup-email',
       'fill-password',
@@ -114,10 +119,10 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'platform-verify',
     ]
   );
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), [0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]);
   assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), 13);
-  assert.equal(gpcSteps[5].title, '创建 GPC 订单');
-  assert.equal(gpcSteps[6].title, '等待 GPC 任务完成');
+  assert.equal(gpcSteps[6].title, '创建 GPC 订单');
+  assert.equal(gpcSteps[7].title, '等待 GPC 任务完成');
 });
 
 test('sidepanel html loads shared step definitions before sidepanel bootstrap', () => {

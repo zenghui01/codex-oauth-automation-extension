@@ -288,6 +288,30 @@ test('verification flow runs beforeSubmit hook before filling the code', async (
   ]);
 });
 
+test('verification flow skips persisted used codes when polling email verification', async () => {
+  const helpers = createVerificationFlowTestHelpers({
+    sendToMailContentScriptResilient: async () => ({
+      code: '654321',
+      emailTimestamp: 123,
+    }),
+  });
+
+  await assert.rejects(
+    helpers.pollFreshVerificationCode(
+      4,
+      {
+        email: 'user@example.com',
+        mailProvider: 'qq',
+        lastSignupCode: null,
+        signupVerificationUsedCodes: ['654321'],
+      },
+      { provider: 'qq', label: 'QQ 邮箱' },
+      { filterAfterTimestamp: 123456, maxResendRequests: 0 }
+    ),
+    /再次收到了相同的注册验证码/
+  );
+});
+
 test('verification flow skips 2925 mailbox preclear when using a fixed login mail window and still clears after success', async () => {
   const mailMessages = [];
 

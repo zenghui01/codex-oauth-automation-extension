@@ -116,6 +116,10 @@ function getLoginSubmitButton() {
   return ${JSON.stringify(overrides.submitButton || null)};
 }
 
+function getPrimaryContinueButton() {
+  return ${JSON.stringify(overrides.primaryContinueButton || null)};
+}
+
 function isVerificationPageStillVisible() {
   return ${JSON.stringify(Boolean(overrides.verificationVisible))};
 }
@@ -248,6 +252,18 @@ return {
 
 {
   const api = createApi({
+    pathname: '/authorize',
+    href: 'https://auth.openai.com/authorize?client_id=codex',
+    primaryContinueButton: { id: 'continue' },
+    consentReady: true,
+  });
+
+  const snapshot = api.inspectLoginAuthState();
+  assert.strictEqual(snapshot.state, 'oauth_consent_page');
+}
+
+{
+  const api = createApi({
     loginEntryTrigger: { id: 'continue-email' },
   });
 
@@ -292,6 +308,11 @@ assert.ok(
 assert.ok(
   extractFunction('inspectLoginAuthState').includes("state: 'add_email_page'"),
   'inspectLoginAuthState 应产出 add_email_page 状态'
+);
+
+assert.ok(
+  extractFunction('isOAuthConsentPage').includes('/authorize'),
+  'OAuth 授权页识别应支持 /authorize 路径兜底'
 );
 
 console.log('step6 login state tests passed');

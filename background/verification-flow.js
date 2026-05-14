@@ -75,8 +75,50 @@
       return step === 4 ? 'lastSignupCode' : 'lastLoginCode';
     }
 
+    function getVerificationCodeHistoryStateKey(step) {
+      return step === 4 ? 'signupVerificationUsedCodes' : 'loginVerificationUsedCodes';
+    }
+
     function getVerificationCodeLabel(step) {
       return step === 4 ? '注册' : '登录';
+    }
+
+    const VERIFICATION_CODE_HISTORY_LIMIT = 24;
+
+    function normalizeVerificationCodeValue(value) {
+      return String(value || '').trim();
+    }
+
+    function normalizeVerificationCodeHistory(value) {
+      const source = Array.isArray(value) ? value : [];
+      const normalized = [];
+      const seen = new Set();
+      for (const entry of source) {
+        const code = normalizeVerificationCodeValue(entry);
+        if (!code || seen.has(code)) {
+          continue;
+        }
+        seen.add(code);
+        normalized.push(code);
+      }
+      return normalized.length > VERIFICATION_CODE_HISTORY_LIMIT
+        ? normalized.slice(normalized.length - VERIFICATION_CODE_HISTORY_LIMIT)
+        : normalized;
+    }
+
+    function mergeVerificationCodeHistory(history = [], code) {
+      const normalizedCode = normalizeVerificationCodeValue(code);
+      if (!normalizedCode) {
+        return normalizeVerificationCodeHistory(history);
+      }
+      const normalizedHistory = normalizeVerificationCodeHistory(history);
+      if (normalizedHistory.includes(normalizedCode)) {
+        return normalizedHistory;
+      }
+      const next = [...normalizedHistory, normalizedCode];
+      return next.length > VERIFICATION_CODE_HISTORY_LIMIT
+        ? next.slice(next.length - VERIFICATION_CODE_HISTORY_LIMIT)
+        : next;
     }
 
     function isIcloudMail(mail) {
@@ -659,9 +701,13 @@
 
     async function pollFreshVerificationCodeWithResendInterval(step, state, mail, pollOverrides = {}) {
       const stateKey = getVerificationCodeStateKey(step);
+      const historyKey = getVerificationCodeHistoryStateKey(step);
       const rejectedCodes = new Set();
       if (state[stateKey]) {
         rejectedCodes.add(state[stateKey]);
+      }
+      for (const code of normalizeVerificationCodeHistory(state[historyKey])) {
+        rejectedCodes.add(code);
       }
       for (const code of (pollOverrides.excludeCodes || [])) {
         if (code) rejectedCodes.add(code);
@@ -969,9 +1015,13 @@
       }
 
       const stateKey = getVerificationCodeStateKey(step);
+      const historyKey = getVerificationCodeHistoryStateKey(step);
       const rejectedCodes = new Set();
       if (state[stateKey]) {
         rejectedCodes.add(state[stateKey]);
+      }
+      for (const code of normalizeVerificationCodeHistory(state[historyKey])) {
+        rejectedCodes.add(code);
       }
       for (const code of (pollOverrides.excludeCodes || [])) {
         if (code) rejectedCodes.add(code);
@@ -1220,6 +1270,7 @@
       const completionStep = getCompletionStep(step, options);
       activeVerificationLogStep = completionStep;
       const stateKey = getVerificationCodeStateKey(step);
+      const historyKey = getVerificationCodeHistoryStateKey(step);
       const rejectedCodes = new Set();
       const hotmailPollConfig = mail.provider === HOTMAIL_PROVIDER
         ? getHotmailVerificationPollConfig(step)
@@ -1230,6 +1281,16 @@
       const ignorePersistedLastCode = Boolean(hotmailPollConfig?.ignorePersistedLastCode);
       if (state[stateKey] && !ignorePersistedLastCode) {
         rejectedCodes.add(state[stateKey]);
+      }
+      let persistedHistory = normalizeVerificationCodeHistory(state?.[historyKey]);
+      let pollingState = state;
+      for (const code of persistedHistory) {
+        rejectedCodes.add(code);
+      }
+      for (const code of (options.excludeCodes || [])) {
+        if (code) {
+          rejectedCodes.add(String(code));
+        }
       }
 
       let nextFilterAfterTimestamp = options.filterAfterTimestamp ?? null;
@@ -1313,7 +1374,7 @@
           if (nextFilterAfterTimestamp !== null && nextFilterAfterTimestamp !== undefined) {
             pollOptions.filterAfterTimestamp = nextFilterAfterTimestamp;
           }
-          const result = await pollFreshVerificationCode(step, state, mail, pollOptions);
+          const result = await pollFreshVerificationCode(step, pollingState, mail, pollOptions);
           lastResendAt = Number(result?.lastResendAt) || lastResendAt;
           remainingAutomaticResendCount = normalizeVerificationResendCount(
             result?.remainingResendRequests,
@@ -1362,6 +1423,7 @@
           await setState({
             lastEmailTimestamp: result.emailTimestamp,
             [stateKey]: result.code,
+            [historyKey]: mergeVerificationCodeHistory(persistedHistory, result.code),
           });
 
           await completeStepFromBackground(completionStep, {

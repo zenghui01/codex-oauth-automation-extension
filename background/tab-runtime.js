@@ -249,6 +249,14 @@
       console.log(LOG_PREFIX, `Tab registered: ${source} -> ${tabId}`);
     }
 
+    async function markTabPending(source, tabId) {
+      if (!source || !Number.isInteger(tabId)) return;
+      const registry = await getTabRegistry();
+      registry[source] = { tabId, ready: false };
+      await setState({ tabRegistry: registry });
+      console.log(LOG_PREFIX, `Tab pending: ${source} -> ${tabId}`);
+    }
+
     async function isTabAlive(source) {
       let registry = await getTabRegistry();
       const entry = getSourceMapValue(registry, source);
@@ -719,6 +727,7 @@
       if (options.forceNew) {
         await closeConflictingTabsForSource(source, url);
         const tab = await createAutomationTab({ url, active: true }, options);
+        await markTabPending(source, tab.id);
 
         if (options.inject) {
           await waitForTabUpdateComplete(tab.id);
@@ -827,6 +836,7 @@
 
       await closeConflictingTabsForSource(source, url);
       const tab = await createAutomationTab({ url, active: true }, options);
+      await markTabPending(source, tab.id);
 
       if (options.inject) {
         await waitForTabUpdateComplete(tab.id);
