@@ -4714,6 +4714,49 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
   let recoveryRound = 0;
   const maxRecoveryRounds = 3;
   let passwordPageDiagnosticsLogged = false;
+  const isPasswordSubmitButtonReadyForRetry = (button) => {
+    if (!button || !isActionEnabled(button)) {
+      return false;
+    }
+
+    const ariaBusy = String(button.getAttribute?.('aria-busy') || '').trim().toLowerCase();
+    if (ariaBusy === 'true') {
+      return false;
+    }
+
+    const pendingAttr = [
+      button.getAttribute?.('data-loading'),
+      button.getAttribute?.('data-pending'),
+      button.getAttribute?.('data-submitting'),
+      button.getAttribute?.('data-state'),
+    ]
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean)
+      .join(' ');
+    if (/\b(?:true|loading|pending|submitting|busy)\b/.test(pendingAttr)) {
+      return false;
+    }
+
+    let style = null;
+    try {
+      style = typeof window !== 'undefined' && window.getComputedStyle
+        ? window.getComputedStyle(button)
+        : null;
+    } catch {
+      style = null;
+    }
+
+    if (style?.pointerEvents === 'none') {
+      return false;
+    }
+
+    const opacity = Number.parseFloat(style?.opacity || '');
+    if (Number.isFinite(opacity) && opacity < 0.8) {
+      return false;
+    }
+
+    return true;
+  };
 
   while (Date.now() - start < timeout && recoveryRound < maxRecoveryRounds) {
     throwIfStopped();
@@ -4749,12 +4792,11 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
       throw new Error('当前邮箱已存在，需要重新开始新一轮。');
     }
 
-    recoveryRound += 1;
-
     if (snapshot.state === 'error') {
       if (snapshot.userAlreadyExistsBlocked) {
         throw createSignupUserAlreadyExistsError();
       }
+      recoveryRound += 1;
       await recoverCurrentAuthRetryPage({
         flow: 'signup',
         logLabel: `${prepareLogLabel}：检测到注册认证重试页，正在点击“重试”恢复（第 ${recoveryRound}/${maxRecoveryRounds} 次）`,
@@ -4785,7 +4827,8 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
         });
       }
 
-      if (snapshot.submitButton && isActionEnabled(snapshot.submitButton)) {
+      if (snapshot.submitButton && isPasswordSubmitButtonReadyForRetry(snapshot.submitButton)) {
+        recoveryRound += 1;
         log(`${prepareLogLabel}：页面仍停留在密码页，正在重新点击“继续”（第 ${recoveryRound}/${maxRecoveryRounds} 次）...`, 'warn');
         await humanPause(350, 900);
         await performOperationWithDelay({ stepKey: 'fill-password', kind: 'submit', label: 'retry-submit-signup-password' }, async () => {

@@ -1124,6 +1124,116 @@ return {
   assert.equal(result.logs.some(({ message }) => /检测到密码页报错/.test(message)), true);
 });
 
+test('prepareSignupVerificationFlow waits instead of retrying while matched password submit is pending', async () => {
+  const api = new Function(`
+const logs = [];
+const clicks = [];
+let now = 0;
+
+Date.now = () => now;
+
+const passwordInput = { value: 'Secret123!' };
+const submitButton = {
+  textContent: 'Continue',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+
+const window = {
+  getComputedStyle() {
+    return {
+      opacity: '0.5',
+      pointerEvents: 'auto',
+    };
+  },
+};
+
+const location = {
+  href: 'https://auth.openai.com/create-account/password',
+  pathname: '/create-account/password',
+};
+const document = {
+  readyState: 'interactive',
+  title: '',
+  body: {
+    textContent: 'Create password Continue',
+    innerText: 'Create password Continue',
+  },
+  querySelector() {
+    return null;
+  },
+  querySelectorAll() {
+    return [];
+  },
+};
+
+function throwIfStopped() {}
+function log(message, level = 'info') { logs.push({ message, level }); }
+async function sleep(ms = 0) { now += ms || 200; }
+function isVisibleElement() { return true; }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled && el.getAttribute?.('aria-disabled') !== 'true'; }
+function getActionText(el) { return el?.textContent || ''; }
+function getCurrentAuthRetryPageState() { return null; }
+function isPhoneVerificationPageReady() { return false; }
+function findResendVerificationCodeTrigger() { return null; }
+function isEmailVerificationPage() { return false; }
+function getPageTextSnapshot() { return document.body.textContent; }
+function getVerificationCodeTarget() { return null; }
+function is405MethodNotAllowedPage() { return false; }
+async function recoverCurrentAuthRetryPage() {}
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function getSignupPasswordInput() { return passwordInput; }
+function getSignupPasswordSubmitButton() { return submitButton; }
+function isSignupEmailAlreadyExistsPage() { return false; }
+function isSignupPasswordErrorPage() { return false; }
+function getSignupPasswordTimeoutErrorPageState() { return null; }
+function isStep5Ready() { return false; }
+function getSignupPasswordFieldErrorText() { return ''; }
+function simulateClick(target) { clicks.push(target?.textContent || 'clicked'); }
+async function humanPause() {}
+function fillInput(input, value) { input.value = value; }
+function logSignupPasswordDiagnostics(message) { logs.push({ message, level: 'warn' }); }
+function createSignupPhonePasswordMismatchError(detailText = '') {
+  return new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::' + detailText);
+}
+
+const VERIFICATION_PAGE_PATTERN = /verification code/i;
+
+${extractFunction('isSignupVerificationPageInteractiveReady')}
+${extractFunction('isVerificationPageStillVisible')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
+${extractFunction('inspectSignupVerificationState')}
+${extractFunction('waitForSignupVerificationTransition')}
+${extractFunction('prepareSignupVerificationFlow')}
+
+return {
+  async run() {
+    try {
+      await prepareSignupVerificationFlow({
+        password: 'Secret123!',
+        prepareLogLabel: 'step 3 finalize',
+      }, 11000);
+      return { threw: false, logs, clicks, now };
+    } catch (error) {
+      return { threw: true, error: error.message, logs, clicks, now };
+    }
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.threw, true);
+  assert.equal(result.clicks.length, 0);
+  assert.equal(result.error.includes('0/3'), true);
+  assert.equal(result.now >= 11000, true);
+});
+
 test('fillSignupEmailAndContinue reports before deferred submit while submit still waits for operation delay', async () => {
   const api = new Function(`
 const events = [];
