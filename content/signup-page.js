@@ -6753,7 +6753,7 @@ function installStep5NavigationCompletionReporter(completeOnce) {
 
 async function waitForStep5SubmitOutcome(options = {}) {
   const {
-    timeoutMs = 45000,
+    timeoutMs = 120000,
     maxAuthRetryRecoveries = 2,
     maxSubmitClicks = 3,
     retryClickIntervalMs = 3500,

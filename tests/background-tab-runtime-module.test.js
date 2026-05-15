@@ -121,6 +121,37 @@ test('tab runtime caps per-attempt response timeout to the remaining resilient t
   );
 });
 
+test('tab runtime gives step 5 profile submit enough response time for slow page transitions', () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        get: async () => ({ id: 1, url: 'https://example.com', status: 'complete' }),
+        query: async () => [],
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => ({ tabRegistry: {}, sourceLastUrls: {} }),
+    matchesSourceUrlFamily: () => false,
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  assert.equal(
+    runtime.getContentScriptResponseTimeoutMs({ type: 'EXECUTE_NODE', nodeId: 'fill-profile' }),
+    150000
+  );
+  assert.equal(
+    runtime.getContentScriptResponseTimeoutMs({ type: 'EXECUTE_NODE', payload: { nodeId: 'fill-profile' } }),
+    150000
+  );
+});
+
 test('tab runtime waitForTabComplete waits until tab status becomes complete', async () => {
   const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
   const globalScope = {};

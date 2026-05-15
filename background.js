@@ -68,29 +68,56 @@ const NORMAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: false,
 }) || [];
+const NORMAL_PHONE_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: false,
+  signupMethod: 'phone',
+}) || NORMAL_STEP_DEFINITIONS;
 const PLUS_PAYPAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
   plusPaymentMethod: 'paypal',
 }) || NORMAL_STEP_DEFINITIONS;
+const PLUS_PAYPAL_PHONE_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'paypal',
+  signupMethod: 'phone',
+}) || PLUS_PAYPAL_STEP_DEFINITIONS;
 const PLUS_GOPAY_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
   plusPaymentMethod: 'gopay',
 }) || PLUS_PAYPAL_STEP_DEFINITIONS;
+const PLUS_GOPAY_PHONE_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'gopay',
+  signupMethod: 'phone',
+}) || PLUS_GOPAY_STEP_DEFINITIONS;
 const PLUS_GPC_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
   plusPaymentMethod: 'gpc-helper',
 }) || PLUS_GOPAY_STEP_DEFINITIONS;
+const PLUS_GPC_PHONE_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'gpc-helper',
+  signupMethod: 'phone',
+}) || PLUS_GPC_STEP_DEFINITIONS;
 const PLUS_STEP_DEFINITIONS = PLUS_PAYPAL_STEP_DEFINITIONS;
 const ALL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getAllSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
 }) || [
   ...NORMAL_STEP_DEFINITIONS,
+  ...NORMAL_PHONE_STEP_DEFINITIONS,
   ...PLUS_PAYPAL_STEP_DEFINITIONS,
+  ...PLUS_PAYPAL_PHONE_STEP_DEFINITIONS,
   ...PLUS_GOPAY_STEP_DEFINITIONS,
+  ...PLUS_GOPAY_PHONE_STEP_DEFINITIONS,
   ...PLUS_GPC_STEP_DEFINITIONS,
+  ...PLUS_GPC_PHONE_STEP_DEFINITIONS,
 ];
 const STEP_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
@@ -9608,6 +9635,7 @@ const STEP_COMPLETION_SIGNAL_STEP_KEYS = new Set([
   'platform-verify',
 ]);
 const STEP_COMPLETION_SIGNAL_TIMEOUTS_BY_STEP_KEY = new Map([
+  ['fill-profile', 150000],
   ['gopay-subscription-confirm', 1800000],
 ]);
 const AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY = new Map([
@@ -10379,8 +10407,9 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
     const latestState = await getState();
     await addLog(`自动运行：节点 ${normalizedNodeId} 已执行返回，当前状态为 ${latestState.nodeStatuses?.[normalizedNodeId] || 'pending'}，准备继续后续节点。`, 'info');
   } else if (doesNodeUseCompletionSignal(normalizedNodeId, executionState)) {
-    await addLog(`自动运行：节点 ${normalizedNodeId} 已发起，正在等待完成信号（超时 ${AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS / 1000} 秒）。`, 'info');
-    completionPayload = await executeNodeViaCompletionSignal(normalizedNodeId, AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS);
+    const completionSignalTimeoutMs = getNodeCompletionSignalTimeoutMs(normalizedNodeId, executionState);
+    await addLog(`自动运行：节点 ${normalizedNodeId} 已发起，正在等待完成信号（超时 ${Math.round(completionSignalTimeoutMs / 1000)} 秒）。`, 'info');
+    completionPayload = await executeNodeViaCompletionSignal(normalizedNodeId, completionSignalTimeoutMs);
     await addLog(`自动运行：节点 ${normalizedNodeId} 已收到完成信号，准备继续后续节点。`, 'info');
   } else {
     await executeNode(normalizedNodeId);
@@ -10391,7 +10420,7 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
     if (signupTabId) {
       await addLog('自动运行：填写资料节点已收到完成信号，正在等待当前页面完成加载并稳定...', 'info');
       await waitForTabStableComplete(signupTabId, {
-        timeoutMs: 30000,
+        timeoutMs: 120000,
         retryDelayMs: 300,
         stableMs: 1000,
         initialDelayMs: 800,
@@ -12560,23 +12589,31 @@ async function acquireTopLevelAuthChainExecution(step, state = {}) {
 }
 
 const normalStepRegistry = buildStepRegistry(NORMAL_STEP_DEFINITIONS);
+const normalPhoneStepRegistry = buildStepRegistry(NORMAL_PHONE_STEP_DEFINITIONS);
 const plusPayPalStepRegistry = buildStepRegistry(PLUS_PAYPAL_STEP_DEFINITIONS);
+const plusPayPalPhoneStepRegistry = buildStepRegistry(PLUS_PAYPAL_PHONE_STEP_DEFINITIONS);
 const plusGoPayStepRegistry = buildStepRegistry(PLUS_GOPAY_STEP_DEFINITIONS);
+const plusGoPayPhoneStepRegistry = buildStepRegistry(PLUS_GOPAY_PHONE_STEP_DEFINITIONS);
 const plusGpcStepRegistry = buildStepRegistry(PLUS_GPC_STEP_DEFINITIONS);
+const plusGpcPhoneStepRegistry = buildStepRegistry(PLUS_GPC_PHONE_STEP_DEFINITIONS);
 
 function getStepRegistryForState(state = {}) {
   const activeFlowId = String(state?.activeFlowId || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase() || DEFAULT_ACTIVE_FLOW_ID;
   if (activeFlowId !== DEFAULT_ACTIVE_FLOW_ID) {
     throw new Error(`当前尚未注册 flow=${activeFlowId} 的步骤执行器。`);
   }
+  const signupMethod = getSignupMethodForStepDefinitions(state);
   if (!isPlusModeState(state)) {
-    return normalStepRegistry;
+    return signupMethod === SIGNUP_METHOD_PHONE ? normalPhoneStepRegistry : normalStepRegistry;
   }
   const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
   if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
-    return plusGpcStepRegistry;
+    return signupMethod === SIGNUP_METHOD_PHONE ? plusGpcPhoneStepRegistry : plusGpcStepRegistry;
   }
-  return paymentMethod === PLUS_PAYMENT_METHOD_GOPAY ? plusGoPayStepRegistry : plusPayPalStepRegistry;
+  if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
+    return signupMethod === SIGNUP_METHOD_PHONE ? plusGoPayPhoneStepRegistry : plusGoPayStepRegistry;
+  }
+  return signupMethod === SIGNUP_METHOD_PHONE ? plusPayPalPhoneStepRegistry : plusPayPalStepRegistry;
 }
 
 async function requestOAuthUrlFromPanel(state, options = {}) {
