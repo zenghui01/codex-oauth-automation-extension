@@ -54,6 +54,7 @@ const bundle = [
   extractFunction('getPageTextSnapshot'),
   extractFunction('getLoginVerificationDisplayedEmail'),
   extractFunction('getPhoneVerificationDisplayedPhone'),
+  extractFunction('getContactVerificationServerErrorText'),
   extractFunction('isPhoneVerificationPageReady'),
   extractFunction('inspectLoginAuthState'),
   extractFunction('normalizeStep6Snapshot'),
@@ -61,12 +62,14 @@ const bundle = [
 
 function createApi(overrides = {}) {
   return new Function(`
+const CONTACT_VERIFICATION_SERVER_ERROR_PATTERN = /this\\s+page\\s+isn['\\u2019]?t\\s+working|currently\\s+unable\\s+to\\s+handle\\s+this\\s+request|http\\s+error\\s+500|500\\s+internal\\s+server\\s+error/i;
 const location = {
   href: ${JSON.stringify(overrides.href || 'https://auth.openai.com/log-in')},
   pathname: ${JSON.stringify(overrides.pathname || '/log-in')},
 };
 
 const document = {
+  title: ${JSON.stringify(overrides.title || '')},
   body: {
     innerText: ${JSON.stringify(overrides.pageText || '')},
     textContent: ${JSON.stringify(overrides.pageText || '')},
@@ -206,6 +209,35 @@ return {
 
   const snapshot = api.inspectLoginAuthState();
   assert.strictEqual(snapshot.state, 'phone_verification_page');
+}
+
+{
+  const api = createApi({
+    pathname: '/contact-verification',
+    href: 'https://auth.openai.com/contact-verification',
+    verificationTarget: { id: 'otp' },
+    pageText: 'Check your phone. We just sent a code to +66 81 234 5678.',
+  });
+
+  assert.strictEqual(api.isPhoneVerificationPageReady(), true);
+
+  const snapshot = api.inspectLoginAuthState();
+  assert.strictEqual(snapshot.state, 'phone_verification_page');
+}
+
+{
+  const api = createApi({
+    pathname: '/contact-verification',
+    href: 'https://auth.openai.com/contact-verification',
+    title: "This page isn't working",
+    verificationTarget: { id: 'otp' },
+    pageText: 'auth.openai.com is currently unable to handle this request. HTTP ERROR 500',
+  });
+
+  assert.strictEqual(api.isPhoneVerificationPageReady(), false);
+
+  const snapshot = api.inspectLoginAuthState();
+  assert.notStrictEqual(snapshot.state, 'phone_verification_page');
 }
 
 {

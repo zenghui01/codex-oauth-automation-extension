@@ -3083,7 +3083,12 @@ function isAddEmailPageReady() {
 
 function isPhoneVerificationPageReady() {
   const path = `${location.pathname || ''} ${location.href || ''}`;
-  if (/\/phone-verification(?:[/?#]|$)/i.test(path)) {
+  const isPhoneVerificationRoute = /\/phone-verification(?:[/?#]|$)/i.test(path);
+  const isContactVerificationRoute = /\/contact-verification(?:[/?#]|$)/i.test(path);
+  if (isContactVerificationRoute && getContactVerificationServerErrorText()) {
+    return false;
+  }
+  if (isPhoneVerificationRoute || isContactVerificationRoute) {
     return true;
   }
 
