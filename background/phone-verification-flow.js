@@ -565,6 +565,17 @@
       return Math.max(PHONE_CODE_POLL_ROUNDS_MIN, Math.min(PHONE_CODE_POLL_ROUNDS_MAX, parsed));
     }
 
+    function resolvePhoneCodePollMaxRoundsForWindow(waitSeconds, pollIntervalSeconds, configuredMaxRounds) {
+      const normalizedWaitSeconds = normalizePhoneCodeWaitSeconds(waitSeconds);
+      const normalizedPollIntervalSeconds = normalizePhoneCodePollIntervalSeconds(pollIntervalSeconds);
+      const normalizedConfiguredRounds = normalizePhoneCodePollMaxRounds(configuredMaxRounds);
+      const roundsNeededForWaitWindow = Math.max(
+        PHONE_CODE_POLL_ROUNDS_MIN,
+        Math.ceil(normalizedWaitSeconds / normalizedPollIntervalSeconds)
+      );
+      return Math.max(normalizedConfiguredRounds, roundsNeededForWaitWindow);
+    }
+
     function normalizeHeroSmsReuseEnabled(value) {
       if (value === undefined || value === null) {
         return Boolean(DEFAULT_HERO_SMS_REUSE_ENABLED);
@@ -5461,15 +5472,17 @@
       const waitSeconds = normalizePhoneCodeWaitSeconds(state?.phoneCodeWaitSeconds);
       const timeoutWindows = normalizePhoneCodeTimeoutWindows(state?.phoneCodeTimeoutWindows);
       const pollIntervalSeconds = normalizePhoneCodePollIntervalSeconds(state?.phoneCodePollIntervalSeconds);
-      const pollMaxRounds = normalizePhoneCodePollMaxRounds(state?.phoneCodePollMaxRounds);
-      let lastLoggedStatus = '';
-      let lastLoggedPollCount = 0;
+      const pollMaxRounds = resolvePhoneCodePollMaxRoundsForWindow(
+        waitSeconds,
+        pollIntervalSeconds,
+        state?.phoneCodePollMaxRounds
+      );
       let resendTriggeredForCurrentNumber = false;
 
       for (let windowIndex = 1; windowIndex <= timeoutWindows; windowIndex += 1) {
         await setPhoneRuntimeCountdown(normalizedActivation, waitSeconds, windowIndex, timeoutWindows);
         await addLog(
-          `步骤 9：等待号码 ${normalizedActivation.phoneNumber} 接收短信，最长 ${waitSeconds} 秒（第 ${windowIndex}/${timeoutWindows} 轮）。`,
+          `步骤 9：等待号码 ${normalizedActivation.phoneNumber} 接收短信（等待窗口 ${windowIndex}/${timeoutWindows}，最长 ${waitSeconds} 秒，每 ${pollIntervalSeconds} 秒轮询一次，最多 ${pollMaxRounds} 次轮询）。`,
           'info'
         );
         try {
@@ -5502,16 +5515,6 @@
                   );
                 }
               }
-              const shouldLog = (
-                pollCount === 1
-                || statusText !== lastLoggedStatus
-                || pollCount - lastLoggedPollCount >= 3
-              );
-              if (!shouldLog) {
-                return;
-              }
-              lastLoggedStatus = statusText;
-              lastLoggedPollCount = pollCount;
               await addLog(
                 `步骤 9：${getPhoneSmsProviderLabel(normalizedActivation.provider)} 号码 ${normalizedActivation.phoneNumber} 状态：${statusText}（已等待 ${Math.ceil(elapsedMs / 1000)} 秒，第 ${pollCount}/${pollMaxRounds} 次轮询）。`,
                 'info'
@@ -5737,9 +5740,11 @@
         const waitSeconds = normalizePhoneCodeWaitSeconds(state?.phoneCodeWaitSeconds);
         const timeoutWindows = normalizePhoneCodeTimeoutWindows(state?.phoneCodeTimeoutWindows);
         const pollIntervalSeconds = normalizePhoneCodePollIntervalSeconds(state?.phoneCodePollIntervalSeconds);
-        const pollMaxRounds = normalizePhoneCodePollMaxRounds(state?.phoneCodePollMaxRounds);
-        let lastLoggedStatus = '';
-        let lastLoggedPollCount = 0;
+        const pollMaxRounds = resolvePhoneCodePollMaxRoundsForWindow(
+          waitSeconds,
+          pollIntervalSeconds,
+          state?.phoneCodePollMaxRounds
+        );
 
         for (let windowIndex = 1; windowIndex <= timeoutWindows; windowIndex += 1) {
           await setPhoneRuntimeState({
@@ -5752,7 +5757,7 @@
             [PHONE_RUNTIME_COUNTDOWN_WINDOW_TOTAL_KEY]: timeoutWindows,
           });
           await addLog(
-            `步骤 ${visibleStep}：正在等待 ${normalizedActivation.phoneNumber} 的短信验证码（${windowIndex}/${timeoutWindows}，最长 ${waitSeconds} 秒）。`,
+            `步骤 ${visibleStep}：正在等待 ${normalizedActivation.phoneNumber} 的短信验证码（等待窗口 ${windowIndex}/${timeoutWindows}，最长 ${waitSeconds} 秒，每 ${pollIntervalSeconds} 秒轮询一次，最多 ${pollMaxRounds} 次轮询）。`,
             'info',
             { step: visibleStep, stepKey }
           );
@@ -5765,18 +5770,8 @@
               intervalMs: pollIntervalSeconds * 1000,
               maxRounds: pollMaxRounds,
               onStatus: async ({ elapsedMs, pollCount, statusText }) => {
-                const shouldLog = (
-                  pollCount === 1
-                  || statusText !== lastLoggedStatus
-                  || pollCount - lastLoggedPollCount >= 3
-                );
-                if (!shouldLog) {
-                  return;
-                }
-                lastLoggedStatus = statusText;
-                lastLoggedPollCount = pollCount;
                 await addLog(
-                  `步骤 ${visibleStep}：${providerLabel} 状态 ${normalizedActivation.phoneNumber}: ${statusText}（已等待 ${Math.ceil(elapsedMs / 1000)} 秒，第 ${pollCount}/${pollMaxRounds} 轮）。`,
+                  `步骤 ${visibleStep}：${providerLabel} 状态 ${normalizedActivation.phoneNumber}: ${statusText}（已等待 ${Math.ceil(elapsedMs / 1000)} 秒，第 ${pollCount}/${pollMaxRounds} 次轮询）。`,
                   'info',
                   { step: visibleStep, stepKey }
                 );

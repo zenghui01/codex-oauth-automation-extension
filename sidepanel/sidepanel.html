@@ -1549,7 +1549,7 @@
                 <div id="row-phone-code-poll-max-rounds" class="hero-sms-settings-cell" style="display:none;">
                   <span class="hero-sms-settings-caption">轮询次数</span>
                   <div class="setting-controls">
-                    <input type="number" id="input-phone-code-poll-max-rounds" class="data-input auto-delay-input" value="4" min="1" max="120" step="1" title="每轮验证码等待窗口最多轮询次数" />
+                    <input type="number" id="input-phone-code-poll-max-rounds" class="data-input auto-delay-input" value="4" min="1" max="120" step="1" title="每个验证码等待窗口的基础轮询次数；如果低于等待时长和轮询间隔所需次数，会自动补足，避免提前结束" />
                     <span class="data-unit">次</span>
                   </div>
                 </div>

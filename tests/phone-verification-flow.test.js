@@ -715,7 +715,7 @@ test('signup phone helper does not let a hung page-state probe stall HeroSMS pol
     heroSmsReuseEnabled: false,
     phoneCodeWaitSeconds: 15,
     phoneCodeTimeoutWindows: 1,
-    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollIntervalSeconds: 15,
     phoneCodePollMaxRounds: 1,
     signupPhoneNumber: '66959916439',
     signupPhoneVerificationPurpose: 'signup',
@@ -795,7 +795,7 @@ test('signup phone helper does not let a hung page-state probe stall HeroSMS pol
     caughtError = error;
   }
 
-  assert.equal(smsPollCount, 1, 'HeroSMS polling should continue after the first waiting status');
+  assert.equal(smsPollCount, 1, 'HeroSMS polling should time out cleanly even when the page-state probe hangs');
   assert.equal(pageReadyCalls, 2, 'should attempt the page-state probe during SMS polling');
   assert.deepStrictEqual(contentMessages.map((message) => message.type), ['STEP8_GET_STATE']);
   assert.deepStrictEqual(statusActions, ['8']);
@@ -3712,9 +3712,10 @@ test('phone verification helper replaces numbers in step 9 and stops after repla
   }
 });
 
-test('phone verification helper honors timeout-window and poll-round settings before replacing numbers', async () => {
+test('phone verification helper supplements poll rounds to cover the full wait window before replacing numbers', async () => {
   const requests = [];
   const messages = [];
+  const logs = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
     verificationResendCount: 0,
@@ -3728,7 +3729,9 @@ test('phone verification helper honors timeout-window and poll-round settings be
   };
 
   const helpers = api.createPhoneVerificationHelpers({
-    addLog: async () => {},
+    addLog: async (message) => {
+      logs.push(String(message || ''));
+    },
     ensureStep8SignupPageReady: async () => {},
     fetchImpl: async (url) => {
       const parsedUrl = new URL(url);
@@ -3787,8 +3790,16 @@ test('phone verification helper honors timeout-window and poll-round settings be
 
   assert.equal(messages.includes('RESEND_PHONE_VERIFICATION_CODE'), false);
   assert.ok(
-    requests.filter((requestUrl) => requestUrl.searchParams.get('action') === 'getStatus').length >= 2,
-    'each replacement attempt should still poll HeroSMS at least once'
+    logs.some((message) => message.includes('等待窗口 1/1') && message.includes('最多 60 次轮询')),
+    'wait log should show the effective poll count for the full window'
+  );
+  assert.ok(
+    logs.some((message) => message.includes('第 2/60 次轮询')),
+    'status logs should include consecutive poll counts instead of skipping from 1 to the last poll'
+  );
+  assert.ok(
+    requests.filter((requestUrl) => requestUrl.searchParams.get('action') === 'getStatus').length >= 60,
+    'each replacement attempt should poll long enough to cover the configured wait window'
   );
 });
 
@@ -6203,9 +6214,9 @@ test('phone verification helper replaces number immediately when phone-verificat
     heroSmsCountryLabel: 'Thailand',
     verificationResendCount: 0,
     phoneVerificationReplacementLimit: 2,
-    phoneCodeWaitSeconds: 60,
+    phoneCodeWaitSeconds: 15,
     phoneCodeTimeoutWindows: 2,
-    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollIntervalSeconds: 15,
     phoneCodePollMaxRounds: 1,
     currentPhoneActivation: null,
     reusablePhoneActivation: null,
@@ -6309,9 +6320,9 @@ test('phone verification helper directly navigates back to add-phone when replac
     heroSmsCountryLabel: 'Thailand',
     verificationResendCount: 0,
     phoneVerificationReplacementLimit: 2,
-    phoneCodeWaitSeconds: 60,
+    phoneCodeWaitSeconds: 15,
     phoneCodeTimeoutWindows: 2,
-    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollIntervalSeconds: 15,
     phoneCodePollMaxRounds: 1,
     currentPhoneActivation: null,
     reusablePhoneActivation: null,
@@ -6474,9 +6485,9 @@ test('phone verification helper stops when add-phone recovery cannot be verified
     heroSmsCountryLabel: 'Thailand',
     verificationResendCount: 0,
     phoneVerificationReplacementLimit: 2,
-    phoneCodeWaitSeconds: 60,
+    phoneCodeWaitSeconds: 15,
     phoneCodeTimeoutWindows: 2,
-    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollIntervalSeconds: 15,
     phoneCodePollMaxRounds: 1,
     currentPhoneActivation: null,
     reusablePhoneActivation: null,
@@ -6597,9 +6608,9 @@ test('signup phone verification cancels activation when resend lands on contact-
     heroSmsCountryId: 52,
     heroSmsCountryLabel: 'Thailand',
     verificationResendCount: 0,
-    phoneCodeWaitSeconds: 60,
+    phoneCodeWaitSeconds: 15,
     phoneCodeTimeoutWindows: 2,
-    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollIntervalSeconds: 15,
     phoneCodePollMaxRounds: 1,
     signupPhoneActivation: {
       activationId: '920001',
@@ -6662,9 +6673,9 @@ test('signup phone verification cancels activation when resend lands on contact-
     heroSmsCountryId: 52,
     heroSmsCountryLabel: 'Thailand',
     verificationResendCount: 0,
-    phoneCodeWaitSeconds: 60,
+    phoneCodeWaitSeconds: 15,
     phoneCodeTimeoutWindows: 2,
-    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollIntervalSeconds: 15,
     phoneCodePollMaxRounds: 1,
     signupPhoneActivation: {
       activationId: '930001',
@@ -6746,9 +6757,9 @@ test('signup phone verification does not treat contact-verification URL-only sna
     heroSmsCountryId: 52,
     heroSmsCountryLabel: 'Thailand',
     verificationResendCount: 0,
-    phoneCodeWaitSeconds: 60,
+    phoneCodeWaitSeconds: 15,
     phoneCodeTimeoutWindows: 2,
-    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollIntervalSeconds: 15,
     phoneCodePollMaxRounds: 1,
     signupPhoneActivation: {
       activationId: '930002',
@@ -6828,9 +6839,9 @@ test('signup phone verification fails when contact-verification 500 appears afte
     heroSmsCountryId: 52,
     heroSmsCountryLabel: 'Thailand',
     verificationResendCount: 0,
-    phoneCodeWaitSeconds: 60,
+    phoneCodeWaitSeconds: 15,
     phoneCodeTimeoutWindows: 2,
-    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollIntervalSeconds: 15,
     phoneCodePollMaxRounds: 1,
     signupPhoneActivation: {
       activationId: '930003',
@@ -6922,9 +6933,9 @@ test('phone verification helper skips page resend for 5sim timeouts and rotates 
     fiveSimProduct: 'openai',
     verificationResendCount: 0,
     phoneVerificationReplacementLimit: 2,
-    phoneCodeWaitSeconds: 60,
+    phoneCodeWaitSeconds: 15,
     phoneCodeTimeoutWindows: 2,
-    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollIntervalSeconds: 15,
     phoneCodePollMaxRounds: 1,
     currentPhoneActivation: null,
     reusablePhoneActivation: null,
