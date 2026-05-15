@@ -467,11 +467,16 @@
 
     async function getResponseTimeoutMsForStep(step, options = {}, fallbackMs = 30000, actionLabel = '') {
       const remainingMs = await getRemainingTimeBudgetMs(step, options, actionLabel);
+      const fallbackTimeoutMs = Math.max(1000, Number(fallbackMs) || 1000);
+      const minResponseTimeoutMs = Math.min(
+        fallbackTimeoutMs,
+        Math.max(1000, Number(options.minResponseTimeoutMs) || 1000)
+      );
       if (remainingMs === null) {
-        return Math.max(1000, Number(fallbackMs) || 1000);
+        return Math.max(minResponseTimeoutMs, fallbackTimeoutMs);
       }
 
-      return Math.max(1000, Math.min(Math.max(1000, Number(fallbackMs) || 1000), remainingMs));
+      return Math.max(minResponseTimeoutMs, Math.min(fallbackTimeoutMs, remainingMs));
     }
 
     async function applyMailPollingTimeBudget(step, payload, options = {}, actionLabel = '') {
@@ -1105,7 +1110,12 @@
       await chrome.tabs.update(signupTabId, { active: true });
       const baseResponseTimeoutMs = await getResponseTimeoutMsForStep(
         step,
-        options,
+        step === 8
+          ? {
+            ...options,
+            minResponseTimeoutMs: Math.max(15000, Number(options.minResponseTimeoutMs) || 0),
+          }
+          : options,
         step === 7 ? 45000 : 30000,
         `填写${getVerificationCodeLabel(step)}验证码`
       );

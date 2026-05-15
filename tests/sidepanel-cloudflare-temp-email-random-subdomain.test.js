@@ -63,6 +63,10 @@ test('sidepanel html places cloudflare temp email controls in a standalone secti
   assert.match(html, /id="cloudflare-temp-email-section"/);
   assert.match(html, /id="btn-cloudflare-temp-email-usage-guide"/);
   assert.match(html, /id="btn-cloudflare-temp-email-github"/);
+  assert.match(html, /btn-cloudflare-temp-email-github"[^>]*>部署</);
+  assert.match(html, /id="row-temp-email-lookup-mode"/);
+  assert.match(html, /data-temp-email-lookup-mode="receive-mailbox"/);
+  assert.match(html, /data-temp-email-lookup-mode="registration-email"/);
   assert.match(html, /id="row-temp-email-random-subdomain-toggle"/);
   assert.match(html, /id="input-temp-email-use-random-subdomain"/);
   assert.match(html, /id="btn-temp-email-domain-mode"[^>]*>更新</);
@@ -111,12 +115,12 @@ return {
   assert.deepEqual(api.openedUrls, []);
 });
 
-test('openCloudflareTempEmailRepositoryPage opens the upstream repository', () => {
+test('openCloudflareTempEmailRepositoryPage opens the extension author repository', () => {
   const bundle = extractFunction('openCloudflareTempEmailRepositoryPage');
 
   const api = new Function(`
 const calls = [];
-const CLOUDFLARE_TEMP_EMAIL_REPOSITORY_URL = 'https://github.com/dreamhunter2333/cloudflare_temp_email';
+const CLOUDFLARE_TEMP_EMAIL_REPOSITORY_URL = 'https://github.com/QLHazyCoder/cloudflare_temp_email';
 function openExternalUrl(url) { calls.push(url); }
 ${bundle}
 return {
@@ -126,7 +130,7 @@ return {
   `)();
 
   api.openCloudflareTempEmailRepositoryPage();
-  assert.deepEqual(api.calls, ['https://github.com/dreamhunter2333/cloudflare_temp_email']);
+  assert.deepEqual(api.calls, ['https://github.com/QLHazyCoder/cloudflare_temp_email']);
 });
 
 test('applyCloudflareTempEmailSettingsState restores the random subdomain toggle and temp domain list', () => {
@@ -141,9 +145,11 @@ const inputTempEmailUseRandomSubdomain = { checked: false };
 const calls = {
   domainOptions: [],
   domainEditMode: [],
+  lookupModes: [],
 };
 function renderCloudflareTempEmailDomainOptions(value) { calls.domainOptions.push(value); }
 function setCloudflareTempEmailDomainEditMode(editing, options) { calls.domainEditMode.push({ editing, options }); }
+function setCloudflareTempEmailLookupMode(value) { calls.lookupModes.push(value); }
 ${bundle}
 return {
   applyCloudflareTempEmailSettingsState,
@@ -160,6 +166,7 @@ return {
     cloudflareTempEmailBaseUrl: 'https://temp.example.com',
     cloudflareTempEmailAdminAuth: 'admin-secret',
     cloudflareTempEmailCustomAuth: 'custom-secret',
+    cloudflareTempEmailLookupMode: 'registration-email',
     cloudflareTempEmailReceiveMailbox: 'relay@example.com',
     cloudflareTempEmailUseRandomSubdomain: true,
     cloudflareTempEmailDomain: 'mail.example.com',
@@ -170,6 +177,7 @@ return {
   assert.equal(api.inputTempEmailCustomAuth.value, 'custom-secret');
   assert.equal(api.inputTempEmailReceiveMailbox.value, 'relay@example.com');
   assert.equal(api.inputTempEmailUseRandomSubdomain.checked, true);
+  assert.deepEqual(api.calls.lookupModes, ['registration-email']);
   assert.deepEqual(api.calls.domainOptions, ['mail.example.com']);
   assert.deepEqual(api.calls.domainEditMode, [{ editing: false, options: { clearInput: true } }]);
 });
@@ -394,6 +402,7 @@ let cloudflareTempEmailDomainEditMode = false;
 const ICLOUD_PROVIDER = 'icloud';
 const GMAIL_PROVIDER = 'gmail';
 const LUCKMAIL_PROVIDER = 'luckmail-api';
+const CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL = 'registration-email';
 const rowMail2925Mode = ${JSON.stringify(createRow('none'))};
 const rowMail2925PoolSettings = ${JSON.stringify(createRow('none'))};
 const rowEmailPrefix = ${JSON.stringify(createRow('none'))};
@@ -404,6 +413,7 @@ const rowCfDomain = ${JSON.stringify(createRow('none'))};
 const rowTempEmailBaseUrl = ${JSON.stringify(createRow('none'))};
 const rowTempEmailAdminAuth = ${JSON.stringify(createRow('none'))};
 const rowTempEmailCustomAuth = ${JSON.stringify(createRow('none'))};
+const rowTempEmailLookupMode = ${JSON.stringify(createRow('none'))};
 const rowTempEmailReceiveMailbox = ${JSON.stringify(createRow('none'))};
 const rowTempEmailRandomSubdomainToggle = ${JSON.stringify(createRow('none'))};
 const rowTempEmailDomain = ${JSON.stringify(createRow('none'))};
@@ -435,6 +445,8 @@ function isCustomMailProvider() { return false; }
 function isIcloudMailProvider() { return false; }
 function usesGeneratedAliasMailProvider() { return false; }
 function getSelectedMail2925Mode() { return 'provide'; }
+let selectedCloudflareTempEmailLookupMode = 'receive-mailbox';
+function getSelectedCloudflareTempEmailLookupMode() { return selectedCloudflareTempEmailLookupMode; }
 function getManagedAliasProviderUiCopy() { return null; }
 function getCurrentRegistrationEmailUiCopy() {
   return {
@@ -462,9 +474,16 @@ ${bundle}
 return {
   updateMailProviderUI,
   cloudflareTempEmailSection,
+  rowTempEmailLookupMode,
+  rowTempEmailReceiveMailbox,
   rowTempEmailRandomSubdomainToggle,
   rowTempEmailDomain,
   inputTempEmailUseRandomSubdomain,
+  selectMailProvider,
+  selectEmailGenerator,
+  setLookupMode(value) {
+    selectedCloudflareTempEmailLookupMode = value;
+  },
   autoHintText,
   calls,
 };
@@ -475,6 +494,20 @@ return {
   assert.equal(api.rowTempEmailRandomSubdomainToggle.style.display, '');
   assert.equal(api.rowTempEmailDomain.style.display, '');
 
+  api.selectMailProvider.value = 'cloudflare-temp-email';
+  api.selectEmailGenerator.value = 'duck';
+  api.setLookupMode('receive-mailbox');
+  api.updateMailProviderUI();
+  assert.equal(api.rowTempEmailLookupMode.style.display, '');
+  assert.equal(api.rowTempEmailReceiveMailbox.style.display, '');
+
+  api.setLookupMode('registration-email');
+  api.updateMailProviderUI();
+  assert.equal(api.rowTempEmailLookupMode.style.display, '');
+  assert.equal(api.rowTempEmailReceiveMailbox.style.display, 'none');
+
+  api.selectMailProvider.value = '163';
+  api.selectEmailGenerator.value = 'cloudflare-temp-email';
   api.inputTempEmailUseRandomSubdomain.checked = true;
   api.updateMailProviderUI();
   assert.equal(api.cloudflareTempEmailSection.style.display, '');

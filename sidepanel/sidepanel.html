@@ -672,7 +672,7 @@
         </div>
         <div class="section-mini-actions">
           <button id="btn-cloudflare-temp-email-usage-guide" class="btn btn-ghost btn-xs" type="button">使用教程</button>
-          <button id="btn-cloudflare-temp-email-github" class="btn btn-ghost btn-xs" type="button">GitHub</button>
+          <button id="btn-cloudflare-temp-email-github" class="btn btn-ghost btn-xs" type="button">部署</button>
         </div>
       </div>
       <div class="data-row" id="row-temp-email-base-url" style="display:none;">
@@ -697,6 +697,13 @@
           <button id="btn-toggle-temp-email-custom-auth" class="input-icon-btn" type="button"
             data-password-toggle="input-temp-email-custom-auth" data-show-label="显示 Custom Auth"
             data-hide-label="隐藏 Custom Auth" aria-label="显示 Custom Auth" title="显示 Custom Auth"></button>
+        </div>
+      </div>
+      <div class="data-row" id="row-temp-email-lookup-mode" style="display:none;">
+        <span class="data-label">查信方式</span>
+        <div id="temp-email-lookup-mode-group" class="choice-group" role="group" aria-label="Cloudflare Temp Email 查信方式">
+          <button type="button" class="choice-btn" data-temp-email-lookup-mode="receive-mailbox">邮件接收</button>
+          <button type="button" class="choice-btn" data-temp-email-lookup-mode="registration-email">注册邮箱</button>
         </div>
       </div>
       <div class="data-row" id="row-temp-email-receive-mailbox" style="display:none;">

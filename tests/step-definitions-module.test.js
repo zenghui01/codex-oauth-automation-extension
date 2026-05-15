@@ -79,6 +79,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'oauth-login',
       'fetch-login-code',
       'bind-email',
+      'fetch-bind-email-code',
       'relogin-bound-email',
       'fetch-bound-email-login-code',
       'post-bound-email-phone-verification',
@@ -87,7 +88,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
     ]
   );
   assert.equal(phoneReloginSteps.find((step) => step.key === 'relogin-bound-email')?.title, '绑定邮箱后刷新 OAuth 并登录（邮箱）');
-  assert.equal(phoneReloginSteps.some((step) => step.key === 'fetch-bind-email-code'), false);
+  assert.equal(phoneReloginSteps.find((step) => step.key === 'fetch-bind-email-code')?.title, '获取绑定邮箱验证码');
 
   assert.deepStrictEqual(
     plusSteps.map((step) => step.key),
@@ -134,11 +135,12 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
     ]
   );
   assert.deepStrictEqual(
-    plusPhoneReloginSteps.map((step) => step.key).slice(-8),
+    plusPhoneReloginSteps.map((step) => step.key).slice(-9),
     [
       'oauth-login',
       'fetch-login-code',
       'bind-email',
+      'fetch-bind-email-code',
       'relogin-bound-email',
       'fetch-bound-email-login-code',
       'post-bound-email-phone-verification',
@@ -153,8 +155,8 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(api.getLastStepId({ plusModeEnabled: true }), 14);
   assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
   assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone' }), 15);
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), 17);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), 18);
   assert.equal(api.hasFlow('openai'), true);
   assert.equal(api.hasFlow('site-a'), false);
   assert.deepStrictEqual(api.getRegisteredFlowIds(), ['openai']);

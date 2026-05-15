@@ -520,6 +520,9 @@ const DEFAULT_LOCAL_CPA_STEP9_MODE = 'submit';
 const MAIL_2925_MODE_PROVIDE = 'provide';
 const MAIL_2925_MODE_RECEIVE = 'receive';
 const DEFAULT_MAIL_2925_MODE = MAIL_2925_MODE_PROVIDE;
+const CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_RECEIVE_MAILBOX = 'receive-mailbox';
+const CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL = 'registration-email';
+const DEFAULT_CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE = CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_RECEIVE_MAILBOX;
 const HOTMAIL_SERVICE_MODE_REMOTE = 'remote';
 const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
 const DEFAULT_HOTMAIL_REMOTE_BASE_URL = '';
@@ -988,6 +991,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   cloudflareTempEmailBaseUrl: '',
   cloudflareTempEmailAdminAuth: '',
   cloudflareTempEmailCustomAuth: '',
+  cloudflareTempEmailLookupMode: DEFAULT_CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE,
   cloudflareTempEmailReceiveMailbox: '',
   cloudflareTempEmailUseRandomSubdomain: false,
   cloudflareTempEmailDomain: '',
@@ -2419,6 +2423,12 @@ function normalizeMail2925Mode(value = '') {
     : DEFAULT_MAIL_2925_MODE;
 }
 
+function normalizeCloudflareTempEmailLookupMode(value = '') {
+  return String(value || '').trim().toLowerCase() === CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL
+    ? CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL
+    : DEFAULT_CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE;
+}
+
 function normalizeLocalCpaStep9Mode(value = '') {
   return String(value || '').trim().toLowerCase() === 'bypass'
     ? 'bypass'
@@ -2523,6 +2533,7 @@ function getCloudflareTempEmailConfig(state = {}) {
     baseUrl: normalizeCloudflareTempEmailBaseUrl(state.cloudflareTempEmailBaseUrl),
     adminAuth: String(state.cloudflareTempEmailAdminAuth || ''),
     customAuth: String(state.cloudflareTempEmailCustomAuth || ''),
+    lookupMode: normalizeCloudflareTempEmailLookupMode(state.cloudflareTempEmailLookupMode),
     receiveMailbox: normalizeCloudflareTempEmailReceiveMailbox(state.cloudflareTempEmailReceiveMailbox),
     useRandomSubdomain: Boolean(state.cloudflareTempEmailUseRandomSubdomain),
     domain: normalizeCloudflareTempEmailDomain(state.cloudflareTempEmailDomain),
@@ -2542,11 +2553,18 @@ function resolveCloudflareTempEmailPollTargetEmail(state = {}, pollPayload = {},
   const emailGenerator = String(state?.emailGenerator || '').trim().toLowerCase();
   const shouldPreferConfiguredReceiveMailbox = mailProvider === 'cloudflare-temp-email'
     && emailGenerator !== 'cloudflare-temp-email';
+  const requestedTarget = normalizeCloudflareTempEmailReceiveMailbox(pollPayload.targetEmail);
+  if (
+    shouldPreferConfiguredReceiveMailbox
+    && normalizeCloudflareTempEmailLookupMode(config.lookupMode) === CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL
+  ) {
+    return requestedTarget || normalizeCloudflareTempEmailReceiveMailbox(state.email);
+  }
+
   if (shouldPreferConfiguredReceiveMailbox && configuredReceiveMailbox) {
     return configuredReceiveMailbox;
   }
 
-  const requestedTarget = normalizeCloudflareTempEmailReceiveMailbox(pollPayload.targetEmail);
   if (requestedTarget) {
     return requestedTarget;
   }
@@ -2925,6 +2943,8 @@ function normalizePersistentSettingValue(key, value) {
     case 'cloudflareTempEmailAdminAuth':
     case 'cloudflareTempEmailCustomAuth':
       return String(value || '');
+    case 'cloudflareTempEmailLookupMode':
+      return normalizeCloudflareTempEmailLookupMode(value);
     case 'cloudflareTempEmailReceiveMailbox':
       return normalizeCloudflareTempEmailReceiveMailbox(value);
     case 'cloudflareTempEmailDomain':
@@ -5849,32 +5869,59 @@ async function deleteCloudflareTempEmailMail(config, mailId) {
 async function listCloudflareTempEmailMessages(state, options = {}) {
   const config = ensureCloudflareTempEmailConfig(state, { requireAdminAuth: true });
   const address = normalizeCloudflareTempEmailAddress(options.address);
+  const lookupMode = normalizeCloudflareTempEmailLookupMode(options.lookupMode || config.lookupMode);
+  const originalRecipient = normalizeCloudflareTempEmailReceiveMailbox(options.originalRecipient);
+  const useRegistrationLookup = lookupMode === CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL
+    && Boolean(originalRecipient);
+  const queryAddress = useRegistrationLookup ? '' : address;
   const payload = await requestCloudflareTempEmailJson(config, '/admin/mails', {
     method: 'GET',
     searchParams: {
       limit: Number(options.limit) || CLOUDFLARE_TEMP_EMAIL_DEFAULT_PAGE_SIZE,
       offset: Number(options.offset) || 0,
-      address,
+      address: queryAddress,
     },
   });
 
-  const messages = normalizeCloudflareTempEmailMailApiMessages(payload).filter((message) => {
+  const normalizedMessages = normalizeCloudflareTempEmailMailApiMessages(payload);
+  const hasOriginalRecipient = normalizedMessages.some((message) => normalizeCloudflareTempEmailReceiveMailbox(message.originalRecipient));
+  const messages = normalizedMessages.filter((message) => {
+    if (useRegistrationLookup) {
+      return normalizeCloudflareTempEmailReceiveMailbox(message.originalRecipient) === originalRecipient;
+    }
     if (!address) return true;
     return !message.address || normalizeCloudflareTempEmailAddress(message.address) === address;
   });
 
-  return { config, messages };
+  return {
+    config,
+    messages,
+    lookupMode,
+    originalRecipient,
+    missingOriginalRecipient: useRegistrationLookup && normalizedMessages.length > 0 && !hasOriginalRecipient,
+  };
 }
 
 async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload = {}) {
   const config = ensureCloudflareTempEmailConfig(state, { requireAdminAuth: true });
   const targetEmail = resolveCloudflareTempEmailPollTargetEmail(state, pollPayload, config);
   const registrationEmail = normalizeCloudflareTempEmailReceiveMailbox(state.email);
+  const lookupMode = normalizeCloudflareTempEmailLookupMode(config.lookupMode);
+  const mailProvider = String(state?.mailProvider || '').trim().toLowerCase();
+  const emailGenerator = String(state?.emailGenerator || '').trim().toLowerCase();
+  const useRegistrationLookup = mailProvider === 'cloudflare-temp-email'
+    && emailGenerator !== 'cloudflare-temp-email'
+    && lookupMode === CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL;
+  const originalRecipient = normalizeCloudflareTempEmailReceiveMailbox(pollPayload.targetEmail)
+    || registrationEmail
+    || targetEmail;
   if (!targetEmail) {
     throw new Error('Cloudflare Temp Email 轮询前缺少目标邮箱地址，请先填写注册邮箱或“邮件接收”邮箱。');
   }
 
-  if (registrationEmail && registrationEmail !== targetEmail) {
+  if (useRegistrationLookup) {
+    await addLog(`步骤 ${step}：正在按注册邮箱筛选 Cloudflare Temp Email 邮件（${originalRecipient}）...`, 'info');
+  } else if (registrationEmail && registrationEmail !== targetEmail) {
     await addLog(`步骤 ${step}：正在轮询 Cloudflare Temp Email 收件邮箱（${targetEmail}），注册邮箱为 ${registrationEmail}...`, 'info');
   } else {
     await addLog(`步骤 ${step}：正在轮询 Cloudflare Temp Email 邮件（${targetEmail}）...`, 'info');
@@ -5886,11 +5933,16 @@ async function pollCloudflareTempEmailVerificationCode(step, state, pollPayload 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     throwIfStopped();
     try {
-      const { messages } = await listCloudflareTempEmailMessages(state, {
-        address: targetEmail,
+      const { messages, missingOriginalRecipient } = await listCloudflareTempEmailMessages(state, {
+        address: useRegistrationLookup ? '' : targetEmail,
+        lookupMode,
+        originalRecipient,
         limit: pollPayload.limit || CLOUDFLARE_TEMP_EMAIL_DEFAULT_PAGE_SIZE,
         offset: pollPayload.offset || 0,
       });
+      if (useRegistrationLookup && missingOriginalRecipient) {
+        throw new Error('Cloudflare Temp Email 当前接口未返回 original_recipient，注册邮箱查信需要部署本扩展作者修改后的 Cloudflare Temp Email，或切回“邮件接收”。');
+      }
       const matchResult = pickVerificationMessageWithTimeFallback(messages, {
         afterTimestamp: pollPayload.filterAfterTimestamp || 0,
         senderFilters: pollPayload.senderFilters || [],
@@ -8058,7 +8110,7 @@ function isStopError(error) {
 
 function isRetryableContentScriptTransportError(error) {
   const message = String(typeof error === 'string' ? error : error?.message || '');
-  return /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|did not respond in \d+s|failed to fetch|networkerror|network error|fetch failed|load failed/i.test(message);
+  return /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|did not respond in \d+s|failed to fetch|networkerror|network error|fetch failed|load failed/i.test(message);
 }
 
 function isStepFetchNetworkRetryableError(error) {

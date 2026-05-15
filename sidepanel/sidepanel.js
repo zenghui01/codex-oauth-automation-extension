@@ -246,6 +246,8 @@ const rowTempEmailAdminAuth = document.getElementById('row-temp-email-admin-auth
 const inputTempEmailAdminAuth = document.getElementById('input-temp-email-admin-auth');
 const rowTempEmailCustomAuth = document.getElementById('row-temp-email-custom-auth');
 const inputTempEmailCustomAuth = document.getElementById('input-temp-email-custom-auth');
+const rowTempEmailLookupMode = document.getElementById('row-temp-email-lookup-mode');
+const tempEmailLookupModeButtons = Array.from(document.querySelectorAll('[data-temp-email-lookup-mode]'));
 const rowTempEmailReceiveMailbox = document.getElementById('row-temp-email-receive-mailbox');
 const inputTempEmailReceiveMailbox = document.getElementById('input-temp-email-receive-mailbox');
 const rowTempEmailRandomSubdomainToggle = document.getElementById('row-temp-email-random-subdomain-toggle');
@@ -758,10 +760,14 @@ const DEFAULT_CPA_CALLBACK_MODE = 'step8';
 const MAIL_2925_MODE_PROVIDE = 'provide';
 const MAIL_2925_MODE_RECEIVE = 'receive';
 const DEFAULT_MAIL_2925_MODE = MAIL_2925_MODE_PROVIDE;
+const CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_RECEIVE_MAILBOX = 'receive-mailbox';
+const CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL = 'registration-email';
+const DEFAULT_CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE = CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_RECEIVE_MAILBOX;
 const NEW_USER_GUIDE_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-new-user-guide-prompt-dismissed';
 const AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-skip-failures-prompt-dismissed';
 const AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-fallback-risk-prompt-dismissed';
 const CPA_PHONE_SIGNUP_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-cpa-phone-signup-prompt-dismissed';
+const CLOUDFLARE_TEMP_EMAIL_REGISTRATION_LOOKUP_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-cloudflare-temp-email-registration-lookup-prompt-dismissed';
 const CPA_PHONE_SIGNUP_WARNING_MESSAGE = 'CPA 未适配手机号注册模式，认证成功后无法使用。请使用 SUB2API，或者认证成功后重新登录一遍进行解决。';
 const PHONE_VERIFICATION_SECTION_EXPANDED_STORAGE_KEY = 'multipage-phone-verification-section-expanded';
 let phoneVerificationSectionExpanded = false;
@@ -1544,9 +1550,9 @@ const MAIL_PROVIDER_LOGIN_CONFIGS = {
     buttonLabel: '登录',
   },
   'cloudflare-temp-email': {
-    label: 'Cloudflare Temp Email GitHub',
-    url: 'https://github.com/dreamhunter2333/cloudflare_temp_email',
-    buttonLabel: 'GitHub',
+    label: 'Cloudflare Temp Email 部署',
+    url: 'https://github.com/QLHazyCoder/cloudflare_temp_email',
+    buttonLabel: '部署',
   },
   '2925': {
     label: '2925 邮箱',
@@ -1581,7 +1587,7 @@ const LOG_LEVEL_LABELS = {
   error: '错误',
 };
 
-const CLOUDFLARE_TEMP_EMAIL_REPOSITORY_URL = 'https://github.com/dreamhunter2333/cloudflare_temp_email';
+const CLOUDFLARE_TEMP_EMAIL_REPOSITORY_URL = 'https://github.com/QLHazyCoder/cloudflare_temp_email';
 
 function usesGeneratedAliasMailProvider(
   provider,
@@ -1808,6 +1814,7 @@ async function openConfirmModal({ title, message, confirmLabel = '确认', confi
 async function openConfirmModalWithOption({
   title,
   message,
+  messageHtml = '',
   confirmLabel = '确认',
   confirmVariant = 'btn-primary',
   alert = null,
@@ -1818,6 +1825,7 @@ async function openConfirmModalWithOption({
   const result = await openActionModal({
     title,
     message,
+    messageHtml,
     alert,
     actions: [
       { id: null, label: '取消', variant: 'btn-ghost' },
@@ -2031,6 +2039,14 @@ function setCpaPhoneSignupPromptDismissed(dismissed) {
   setPromptDismissed(CPA_PHONE_SIGNUP_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
 }
 
+function isCloudflareTempEmailRegistrationLookupPromptDismissed() {
+  return isPromptDismissed(CLOUDFLARE_TEMP_EMAIL_REGISTRATION_LOOKUP_PROMPT_DISMISSED_STORAGE_KEY);
+}
+
+function setCloudflareTempEmailRegistrationLookupPromptDismissed(dismissed) {
+  setPromptDismissed(CLOUDFLARE_TEMP_EMAIL_REGISTRATION_LOOKUP_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
+}
+
 function shouldWarnAutoRunFallbackRisk(totalRuns, autoRunSkipFailures) {
   return totalRuns >= AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS;
 }
@@ -2118,6 +2134,30 @@ async function confirmCpaPhoneSignupIfNeeded(options = {}) {
   const result = await openCpaPhoneSignupWarningModal();
   if (result.dismissPrompt) {
     setCpaPhoneSignupPromptDismissed(true);
+  }
+
+  return result.confirmed;
+}
+
+function buildCloudflareTempEmailRegistrationLookupPromptHtml() {
+  const repositoryUrl = escapeHtml(CLOUDFLARE_TEMP_EMAIL_REPOSITORY_URL);
+  return `需要部署本扩展作者修改后的 <a href="${repositoryUrl}" target="_blank" rel="noopener noreferrer" data-external-url="${repositoryUrl}">Cloudflare Temp Email</a>；部署后可支持多线程收码。`;
+}
+
+async function confirmCloudflareTempEmailRegistrationLookupIfNeeded() {
+  if (isCloudflareTempEmailRegistrationLookupPromptDismissed()) {
+    return true;
+  }
+
+  const result = await openConfirmModalWithOption({
+    title: '注册邮箱查信',
+    messageHtml: buildCloudflareTempEmailRegistrationLookupPromptHtml(),
+    confirmLabel: '我已知晓',
+    optionLabel: '不再提醒',
+  });
+
+  if (result.confirmed && result.optionChecked) {
+    setCloudflareTempEmailRegistrationLookupPromptDismissed(true);
   }
 
   return result.confirmed;
@@ -3141,6 +3181,7 @@ function applyCloudflareTempEmailSettingsState(state = {}) {
   inputTempEmailAdminAuth.value = state?.cloudflareTempEmailAdminAuth || '';
   inputTempEmailCustomAuth.value = state?.cloudflareTempEmailCustomAuth || '';
   inputTempEmailReceiveMailbox.value = state?.cloudflareTempEmailReceiveMailbox || '';
+  setCloudflareTempEmailLookupMode(state?.cloudflareTempEmailLookupMode);
   if (inputTempEmailUseRandomSubdomain) {
     inputTempEmailUseRandomSubdomain.checked = Boolean(state?.cloudflareTempEmailUseRandomSubdomain);
   }
@@ -3928,6 +3969,9 @@ function collectSettingsPayload() {
     cloudflareTempEmailBaseUrl: normalizeCloudflareTempEmailBaseUrlValue(inputTempEmailBaseUrl.value),
     cloudflareTempEmailAdminAuth: inputTempEmailAdminAuth.value,
     cloudflareTempEmailCustomAuth: inputTempEmailCustomAuth.value,
+    cloudflareTempEmailLookupMode: typeof getSelectedCloudflareTempEmailLookupMode === 'function'
+      ? getSelectedCloudflareTempEmailLookupMode()
+      : 'receive-mailbox',
     cloudflareTempEmailReceiveMailbox: normalizeCloudflareTempEmailReceiveMailboxValue(inputTempEmailReceiveMailbox.value),
     cloudflareTempEmailUseRandomSubdomain: Boolean(inputTempEmailUseRandomSubdomain?.checked),
     cloudflareTempEmailDomain: selectedCloudflareTempEmailDomain,
@@ -4002,6 +4046,12 @@ function normalizeMail2925Mode(value = '') {
   return String(value || '').trim().toLowerCase() === MAIL_2925_MODE_RECEIVE
     ? MAIL_2925_MODE_RECEIVE
     : DEFAULT_MAIL_2925_MODE;
+}
+
+function normalizeCloudflareTempEmailLookupMode(value = '') {
+  return String(value || '').trim().toLowerCase() === CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL
+    ? CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL
+    : DEFAULT_CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE;
 }
 
 function normalizeHotmailServiceMode(value = '') {
@@ -7579,6 +7629,20 @@ function setMail2925Mode(mode) {
   });
 }
 
+function getSelectedCloudflareTempEmailLookupMode() {
+  const activeButton = tempEmailLookupModeButtons.find((button) => button.classList.contains('is-active'));
+  return normalizeCloudflareTempEmailLookupMode(activeButton?.dataset.tempEmailLookupMode);
+}
+
+function setCloudflareTempEmailLookupMode(mode) {
+  const resolvedMode = normalizeCloudflareTempEmailLookupMode(mode);
+  tempEmailLookupModeButtons.forEach((button) => {
+    const active = button.dataset.tempEmailLookupMode === resolvedMode;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
 function getSelectedHotmailServiceMode() {
   const activeButton = hotmailServiceModeButtons.find((button) => button.classList.contains('is-active'));
   return normalizeHotmailServiceMode(activeButton?.dataset.hotmailServiceMode);
@@ -10645,7 +10709,17 @@ function updateMailProviderUI() {
   const useCloudMailGenerator = selectedGenerator === 'cloudmail';
   const showCloudflareDomain = useEmailGenerator && useCloudflare;
   const showCloudflareTempEmailSettings = useCloudflareTempEmailProvider || (useEmailGenerator && useCloudflareTempEmailGenerator);
-  const showCloudflareTempEmailReceiveMailbox = useCloudflareTempEmailProvider && !useCloudflareTempEmailGenerator;
+  const showCloudflareTempEmailLookupMode = useCloudflareTempEmailProvider && !useCloudflareTempEmailGenerator;
+  const selectedCloudflareTempEmailLookupMode = typeof getSelectedCloudflareTempEmailLookupMode === 'function'
+    ? getSelectedCloudflareTempEmailLookupMode()
+    : 'receive-mailbox';
+  const cloudflareTempEmailRegistrationLookupMode = typeof CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL === 'string'
+    ? CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL
+    : 'registration-email';
+  const useCloudflareTempEmailRegistrationLookup = showCloudflareTempEmailLookupMode
+    && selectedCloudflareTempEmailLookupMode === cloudflareTempEmailRegistrationLookupMode;
+  const showCloudflareTempEmailReceiveMailbox = showCloudflareTempEmailLookupMode
+    && !useCloudflareTempEmailRegistrationLookup;
   const showCloudMailSettings = useCloudMailProvider || (useEmailGenerator && useCloudMailGenerator);
   const showCloudMailReceiveMailbox = useCloudMailProvider && !useCloudMailGenerator;
   const showCloudMailDomain = useEmailGenerator && useCloudMailGenerator;
@@ -10708,6 +10782,9 @@ function updateMailProviderUI() {
   rowTempEmailBaseUrl.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   rowTempEmailAdminAuth.style.display = showCloudflareTempEmailSettings ? '' : 'none';
   rowTempEmailCustomAuth.style.display = showCloudflareTempEmailSettings ? '' : 'none';
+  if (typeof rowTempEmailLookupMode !== 'undefined' && rowTempEmailLookupMode) {
+    rowTempEmailLookupMode.style.display = showCloudflareTempEmailLookupMode ? '' : 'none';
+  }
   rowTempEmailReceiveMailbox.style.display = showCloudflareTempEmailReceiveMailbox ? '' : 'none';
   if (rowTempEmailRandomSubdomainToggle) {
     rowTempEmailRandomSubdomainToggle.style.display = showCloudflareTempEmailRandomSubdomainToggle ? '' : 'none';
@@ -12521,6 +12598,12 @@ autoStartModal?.addEventListener('click', (event) => {
     resolveModalChoice(null);
   }
 });
+autoStartMessage?.addEventListener('click', (event) => {
+  const link = event.target?.closest?.('a[data-external-url]');
+  if (!link) return;
+  event.preventDefault();
+  openExternalUrl(link.dataset.externalUrl || link.href);
+});
 btnAutoStartClose?.addEventListener('click', () => resolveModalChoice(null));
 
 async function startAutoRunFromCurrentSettings() {
@@ -13089,6 +13172,30 @@ mail2925ModeButtons.forEach((button) => {
       await clearRegistrationEmail({ silent: true }).catch(() => { });
     }
 
+    markSettingsDirty(true);
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
+tempEmailLookupModeButtons.forEach((button) => {
+  button.addEventListener('click', async () => {
+    const nextMode = normalizeCloudflareTempEmailLookupMode(button.dataset.tempEmailLookupMode);
+    const previousMode = getSelectedCloudflareTempEmailLookupMode();
+    if (nextMode === previousMode) {
+      return;
+    }
+
+    if (nextMode === CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE_REGISTRATION_EMAIL) {
+      const confirmed = await confirmCloudflareTempEmailRegistrationLookupIfNeeded();
+      if (!confirmed) {
+        setCloudflareTempEmailLookupMode(previousMode);
+        updateMailProviderUI();
+        return;
+      }
+    }
+
+    setCloudflareTempEmailLookupMode(nextMode);
+    updateMailProviderUI();
     markSettingsDirty(true);
     saveSettings({ silent: true }).catch(() => { });
   });
@@ -14962,6 +15069,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.cloudflareTempEmailCustomAuth !== undefined) {
         inputTempEmailCustomAuth.value = message.payload.cloudflareTempEmailCustomAuth || '';
       }
+      if (message.payload.cloudflareTempEmailLookupMode !== undefined) {
+        setCloudflareTempEmailLookupMode(message.payload.cloudflareTempEmailLookupMode);
+      }
       if (message.payload.cloudflareTempEmailReceiveMailbox !== undefined) {
         inputTempEmailReceiveMailbox.value = message.payload.cloudflareTempEmailReceiveMailbox || '';
       }
@@ -14973,6 +15083,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (
         message.payload.cloudflareTempEmailUseRandomSubdomain !== undefined
+        || message.payload.cloudflareTempEmailLookupMode !== undefined
         || message.payload.cloudflareTempEmailDomain !== undefined
         || message.payload.cloudflareTempEmailDomains !== undefined
       ) {
@@ -15562,6 +15673,7 @@ updateSaveButtonState();
 updateConfigMenuControls();
 setLocalCpaStep9Mode(DEFAULT_LOCAL_CPA_STEP9_MODE);
 setMail2925Mode(DEFAULT_MAIL_2925_MODE);
+setCloudflareTempEmailLookupMode(DEFAULT_CLOUDFLARE_TEMP_EMAIL_LOOKUP_MODE);
 initializeReleaseInfo().catch((err) => {
   console.error('Failed to initialize release info:', err);
 });
