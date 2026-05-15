@@ -83,6 +83,7 @@ const window = {
 let currentPlusModeEnabled = false;
 let currentPlusPaymentMethod = 'paypal';
 let currentSignupMethod = 'email';
+let currentPhoneSignupReloginAfterBindEmailEnabled = false;
 const DEFAULT_SIGNUP_METHOD = 'email';
 let stepDefinitions = [];
 let STEP_IDS = [];
@@ -106,7 +107,7 @@ return {
   assert.deepEqual(api.getStepIds(), [7]);
   assert.deepEqual(api.calls[0], {
     type: 'getSteps',
-    options: { activeFlowId: 'openai', plusModeEnabled: true, plusPaymentMethod: 'gopay', signupMethod: 'email' },
+    options: { activeFlowId: 'openai', plusModeEnabled: true, plusPaymentMethod: 'gopay', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false },
   });
   assert.deepEqual(api.calls[1], { type: 'render', stepIds: [7] });
 });
@@ -252,6 +253,7 @@ const window = {
 let currentPlusModeEnabled = false;
 let currentPlusPaymentMethod = 'paypal';
 let currentSignupMethod = 'email';
+let currentPhoneSignupReloginAfterBindEmailEnabled = false;
 const DEFAULT_SIGNUP_METHOD = 'email';
 let stepDefinitions = [];
 let STEP_IDS = [];
@@ -275,7 +277,7 @@ return {
   assert.deepEqual(api.getStepIds(), [13]);
   assert.deepEqual(api.calls[0], {
     type: 'getSteps',
-    options: { activeFlowId: 'openai', plusModeEnabled: true, plusPaymentMethod: 'gpc-helper', signupMethod: 'email' },
+    options: { activeFlowId: 'openai', plusModeEnabled: true, plusPaymentMethod: 'gpc-helper', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false },
   });
 });
 

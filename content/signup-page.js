@@ -91,7 +91,8 @@ function resolveCommandNodeId(message = {}) {
   if (visibleStep === 8 || visibleStep === 11) return 'fetch-login-code';
   if (visibleStep === 9 || visibleStep === 12) return 'post-login-phone-verification';
   if (visibleStep === 10 || visibleStep === 13) return 'confirm-oauth';
-  if (visibleStep === 14 || visibleStep === 15) return 'platform-verify';
+  if (visibleStep === 16) return 'confirm-oauth';
+  if (visibleStep === 14 || visibleStep === 15 || visibleStep === 17) return 'platform-verify';
   if (visibleStep === 7) return 'oauth-login';
   if (visibleStep === 5) return 'fill-profile';
   if (visibleStep === 3) return 'fill-password';

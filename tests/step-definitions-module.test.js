@@ -9,8 +9,17 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   const api = new Function('self', `${source}; return self.MultiPageStepDefinitions;`)(globalScope);
   const steps = api.getSteps();
   const phoneSteps = api.getSteps({ signupMethod: 'phone' });
+  const phoneReloginSteps = api.getSteps({
+    signupMethod: 'phone',
+    phoneSignupReloginAfterBindEmailEnabled: true,
+  });
   const plusSteps = api.getSteps({ plusModeEnabled: true });
   const plusPhoneSteps = api.getSteps({ plusModeEnabled: true, signupMethod: 'phone' });
+  const plusPhoneReloginSteps = api.getSteps({
+    plusModeEnabled: true,
+    signupMethod: 'phone',
+    phoneSignupReloginAfterBindEmailEnabled: true,
+  });
   const goPaySteps = api.getSteps({ plusModeEnabled: true, plusPaymentMethod: 'gopay' });
   const gpcSteps = api.getSteps({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' });
 
@@ -58,6 +67,27 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'platform-verify',
     ]
   );
+  assert.deepStrictEqual(
+    phoneReloginSteps.map((step) => step.key),
+    [
+      'open-chatgpt',
+      'submit-signup-email',
+      'fill-password',
+      'fetch-signup-code',
+      'fill-profile',
+      'wait-registration-success',
+      'oauth-login',
+      'fetch-login-code',
+      'bind-email',
+      'relogin-bound-email',
+      'fetch-bound-email-login-code',
+      'post-bound-email-phone-verification',
+      'confirm-oauth',
+      'platform-verify',
+    ]
+  );
+  assert.equal(phoneReloginSteps.find((step) => step.key === 'relogin-bound-email')?.title, '绑定邮箱后刷新 OAuth 并登录（邮箱）');
+  assert.equal(phoneReloginSteps.some((step) => step.key === 'fetch-bind-email-code'), false);
 
   assert.deepStrictEqual(
     plusSteps.map((step) => step.key),
@@ -103,6 +133,19 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'platform-verify',
     ]
   );
+  assert.deepStrictEqual(
+    plusPhoneReloginSteps.map((step) => step.key).slice(-8),
+    [
+      'oauth-login',
+      'fetch-login-code',
+      'bind-email',
+      'relogin-bound-email',
+      'fetch-bound-email-login-code',
+      'post-bound-email-phone-verification',
+      'confirm-oauth',
+      'platform-verify',
+    ]
+  );
   assert.equal(goPaySteps.some((step) => step.key === 'paypal-approve'), false);
   assert.equal(api.getStepById(8, { plusModeEnabled: true, plusPaymentMethod: 'gopay' }), null);
   assert.equal(api.getPlusPaymentStepTitle({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), '');
@@ -110,6 +153,8 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(api.getLastStepId({ plusModeEnabled: true }), 14);
   assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
   assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone' }), 15);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), 17);
   assert.equal(api.hasFlow('openai'), true);
   assert.equal(api.hasFlow('site-a'), false);
   assert.deepStrictEqual(api.getRegisteredFlowIds(), ['openai']);

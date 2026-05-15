@@ -290,6 +290,8 @@ const DEFAULT_OPENAI_NODE_BY_STEP = Object.freeze({
   13: 'confirm-oauth',
   14: 'platform-verify',
   15: 'platform-verify',
+  16: 'confirm-oauth',
+  17: 'platform-verify',
 });
 
 function resolveReportNodeId(stepOrNodeId, data = {}) {

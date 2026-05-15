@@ -387,6 +387,8 @@ const btnTogglePhoneVerificationSection = document.getElementById('btn-toggle-ph
 const rowPhoneVerificationFold = document.getElementById('row-phone-verification-fold');
 const inputPhoneVerificationEnabled = document.getElementById('input-phone-verification-enabled');
 const rowSignupMethod = document.getElementById('row-signup-method');
+const rowPhoneSignupReloginAfterBindEmail = document.getElementById('row-phone-signup-relogin-after-bind-email');
+const inputPhoneSignupReloginAfterBindEmail = document.getElementById('input-phone-signup-relogin-after-bind-email');
 const rowSignupPhone = document.getElementById('row-signup-phone');
 const signupMethodButtons = Array.from(document.querySelectorAll('[data-signup-method]'));
 const selectPhoneSmsProvider = document.getElementById('select-phone-sms-provider');
@@ -519,11 +521,13 @@ const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const DEFAULT_PHONE_SIGNUP_RELOGIN_AFTER_BIND_EMAIL_ENABLED = false;
 const PHONE_SIGNUP_REUSE_LOCK_TITLE = '手机号注册流程不使用号码复用，切回邮箱注册后会恢复原设置';
 let latestState = null;
 let currentPlusModeEnabled = false;
 let currentPlusPaymentMethod = DEFAULT_PLUS_PAYMENT_METHOD;
 let currentSignupMethod = DEFAULT_SIGNUP_METHOD;
+let currentPhoneSignupReloginAfterBindEmailEnabled = DEFAULT_PHONE_SIGNUP_RELOGIN_AFTER_BIND_EMAIL_ENABLED;
 let phoneSignupReuseUiWasLocked = false;
 let lastConfirmedOperationDelayEnabled = true;
 let heroSmsCountrySelectionOrder = [];
@@ -544,10 +548,12 @@ const nexSmsCountrySearchTextById = new Map();
 let stepDefinitions = getStepDefinitionsForMode(false, {
   plusPaymentMethod: currentPlusPaymentMethod,
   signupMethod: currentSignupMethod,
+  phoneSignupReloginAfterBindEmailEnabled: currentPhoneSignupReloginAfterBindEmailEnabled,
 });
 let workflowNodes = getWorkflowNodesForMode(false, {
   plusPaymentMethod: currentPlusPaymentMethod,
   signupMethod: currentSignupMethod,
+  phoneSignupReloginAfterBindEmailEnabled: currentPhoneSignupReloginAfterBindEmailEnabled,
 });
 let STEP_IDS = stepDefinitions.map((step) => Number(step.id)).filter(Number.isFinite);
 let STEP_DEFAULT_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
@@ -808,6 +814,9 @@ function getStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
   const rawSignupMethod = typeof options === 'string'
     ? currentSignupMethod
     : (options.signupMethod || currentSignupMethod || DEFAULT_SIGNUP_METHOD);
+  const phoneSignupReloginAfterBindEmailEnabled = typeof options === 'string'
+    ? currentPhoneSignupReloginAfterBindEmailEnabled
+    : Boolean(options.phoneSignupReloginAfterBindEmailEnabled ?? currentPhoneSignupReloginAfterBindEmailEnabled);
   const activeFlowId = typeof options === 'string'
     ? ((typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId)
     : (options.activeFlowId || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId);
@@ -816,6 +825,7 @@ function getStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
     plusModeEnabled,
     plusPaymentMethod: normalizePlusPaymentMethod(rawPaymentMethod),
     signupMethod: normalizeSignupMethod(rawSignupMethod),
+    phoneSignupReloginAfterBindEmailEnabled,
   }) || [])
     .sort((left, right) => {
       const leftOrder = Number.isFinite(left.order) ? left.order : left.id;
@@ -834,6 +844,9 @@ function getWorkflowNodesForMode(plusModeEnabled = false, options = {}) {
   const rawSignupMethod = typeof options === 'string'
     ? currentSignupMethod
     : (options.signupMethod || currentSignupMethod || DEFAULT_SIGNUP_METHOD);
+  const phoneSignupReloginAfterBindEmailEnabled = typeof options === 'string'
+    ? currentPhoneSignupReloginAfterBindEmailEnabled
+    : Boolean(options.phoneSignupReloginAfterBindEmailEnabled ?? currentPhoneSignupReloginAfterBindEmailEnabled);
   const activeFlowId = typeof options === 'string'
     ? ((typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId)
     : (options.activeFlowId || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId);
@@ -842,6 +855,7 @@ function getWorkflowNodesForMode(plusModeEnabled = false, options = {}) {
     plusModeEnabled,
     plusPaymentMethod: normalizePlusPaymentMethod(rawPaymentMethod),
     signupMethod: normalizeSignupMethod(rawSignupMethod),
+    phoneSignupReloginAfterBindEmailEnabled,
   });
   if (Array.isArray(nodes) && nodes.length) {
     return nodes.slice().sort((left, right) => {
@@ -902,18 +916,24 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
   const rawSignupMethod = typeof options === 'string'
     ? currentSignupMethod
     : (options.signupMethod || currentSignupMethod || DEFAULT_SIGNUP_METHOD);
+  const phoneSignupReloginAfterBindEmailEnabled = typeof options === 'string'
+    ? currentPhoneSignupReloginAfterBindEmailEnabled
+    : Boolean(options.phoneSignupReloginAfterBindEmailEnabled ?? currentPhoneSignupReloginAfterBindEmailEnabled);
   currentPlusPaymentMethod = normalizePlusPaymentMethod(rawPaymentMethod);
   currentSignupMethod = normalizeSignupMethod(rawSignupMethod);
+  currentPhoneSignupReloginAfterBindEmailEnabled = phoneSignupReloginAfterBindEmailEnabled;
   stepDefinitions = getStepDefinitionsForMode(currentPlusModeEnabled, {
     activeFlowId: options?.activeFlowId,
     plusPaymentMethod: currentPlusPaymentMethod,
     signupMethod: currentSignupMethod,
+    phoneSignupReloginAfterBindEmailEnabled: currentPhoneSignupReloginAfterBindEmailEnabled,
   });
   const nextWorkflowNodes = typeof getWorkflowNodesForMode === 'function'
     ? getWorkflowNodesForMode(currentPlusModeEnabled, {
       activeFlowId: options?.activeFlowId,
       plusPaymentMethod: currentPlusPaymentMethod,
       signupMethod: currentSignupMethod,
+      phoneSignupReloginAfterBindEmailEnabled: currentPhoneSignupReloginAfterBindEmailEnabled,
     })
     : stepDefinitions.map((step) => ({
       legacyStepId: Number(step.id),
@@ -3930,6 +3950,9 @@ function collectSettingsPayload() {
       : true,
     phoneVerificationEnabled: effectivePhoneVerificationEnabled,
     signupMethod: effectiveSignupMethod,
+    phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
+      ? Boolean(inputPhoneSignupReloginAfterBindEmail.checked)
+      : false,
     phoneSmsProvider: phoneSmsProviderValue,
     phoneSmsProviderOrder: phoneSmsProviderOrderValue,
     verificationResendCount: normalizeVerificationResendCount(
@@ -7842,6 +7865,9 @@ function updateSignupMethodUI(options = {}) {
   syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
     plusPaymentMethod: getSelectedPlusPaymentMethod(latestState),
     signupMethod: selectedMethod,
+    phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
+      ? Boolean(inputPhoneSignupReloginAfterBindEmail.checked)
+      : currentPhoneSignupReloginAfterBindEmailEnabled,
   });
   if (typeof syncSignupPhoneInputFromState === 'function') {
     syncSignupPhoneInputFromState(latestState);
@@ -7886,6 +7912,11 @@ function updatePhoneVerificationSettingsUI() {
     : true;
   const enabled = canShowPhoneSettings && rawEnabled;
   const showSettings = enabled && phoneVerificationSectionExpanded;
+  const selectedSignupMethodForPhoneSettings = typeof getSelectedSignupMethod === 'function'
+    ? getSelectedSignupMethod()
+    : normalizeSignupMethod(latestState?.signupMethod || DEFAULT_SIGNUP_METHOD);
+  const showPhoneSignupReloginAfterBindEmail = showSettings
+    && selectedSignupMethodForPhoneSettings === SIGNUP_METHOD_PHONE;
   const normalizeProvider = typeof normalizePhoneSmsProviderValue === 'function'
     ? normalizePhoneSmsProviderValue
     : ((value = '') => {
@@ -7958,6 +7989,9 @@ function updatePhoneVerificationSettingsUI() {
       row.style.display = showSettings ? '' : 'none';
     }
   });
+  if (typeof rowPhoneSignupReloginAfterBindEmail !== 'undefined' && rowPhoneSignupReloginAfterBindEmail) {
+    rowPhoneSignupReloginAfterBindEmail.style.display = showPhoneSignupReloginAfterBindEmail ? '' : 'none';
+  }
   if (rowHeroSmsCountry) rowHeroSmsCountry.style.display = showSettings && heroProvider ? '' : 'none';
   if (rowHeroSmsCountryFallback) rowHeroSmsCountryFallback.style.display = showSettings && heroProvider ? '' : 'none';
   if (rowHeroSmsAcquirePriority) rowHeroSmsAcquirePriority.style.display = showSettings && heroProvider ? '' : 'none';
@@ -8003,6 +8037,12 @@ function updatePhoneVerificationSettingsUI() {
   }
   phoneSignupReuseUiWasLocked = phoneSignupReuseLocked;
   const settingsLocked = isAutoRunLockedPhase() || isAutoRunScheduledPhase();
+  if (typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail) {
+    inputPhoneSignupReloginAfterBindEmail.disabled = settingsLocked || !showPhoneSignupReloginAfterBindEmail;
+  }
+  if (typeof rowPhoneSignupReloginAfterBindEmail !== 'undefined' && rowPhoneSignupReloginAfterBindEmail) {
+    rowPhoneSignupReloginAfterBindEmail.classList.toggle('is-disabled', settingsLocked || !showPhoneSignupReloginAfterBindEmail);
+  }
   const freePhoneReuseEnabled = Boolean(
     !phoneSignupReuseLocked
     && typeof inputFreePhoneReuseEnabled !== 'undefined'
@@ -8958,6 +8998,12 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     ? plusPaymentMethodOrOptions
     : (options.plusPaymentMethod || getSelectedPlusPaymentMethod(latestState));
   const nextSignupMethod = normalizeSignupMethod(options.signupMethod || currentSignupMethod || DEFAULT_SIGNUP_METHOD);
+  const nextPhoneSignupReloginAfterBindEmailEnabled = Boolean(
+    options.phoneSignupReloginAfterBindEmailEnabled
+      ?? (typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
+        ? inputPhoneSignupReloginAfterBindEmail.checked
+        : currentPhoneSignupReloginAfterBindEmailEnabled)
+  );
   const nextPaymentMethod = normalizePlusPaymentMethod(rawPaymentMethod);
   const nextActiveFlowId = String(
     options.activeFlowId
@@ -8971,12 +9017,14 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     plusModeEnabled: nextPlusModeEnabled,
     plusPaymentMethod: nextPaymentMethod,
     signupMethod: nextSignupMethod,
+    phoneSignupReloginAfterBindEmailEnabled: nextPhoneSignupReloginAfterBindEmailEnabled,
   });
   const paymentTitleChanged = Boolean(nextPlusModeEnabled && currentPaymentStep && nextPaymentTitle && currentPaymentStep.title !== nextPaymentTitle);
   const shouldRender = Boolean(options.render)
     || nextPlusModeEnabled !== currentPlusModeEnabled
     || nextPaymentMethod !== currentPlusPaymentMethod
     || nextSignupMethod !== currentSignupMethod
+    || nextPhoneSignupReloginAfterBindEmailEnabled !== currentPhoneSignupReloginAfterBindEmailEnabled
     || paymentTitleChanged;
   if (!shouldRender) {
     return;
@@ -8986,6 +9034,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     activeFlowId: nextActiveFlowId,
     plusPaymentMethod: nextPaymentMethod,
     signupMethod: nextSignupMethod,
+    phoneSignupReloginAfterBindEmailEnabled: nextPhoneSignupReloginAfterBindEmailEnabled,
   });
   renderStepsList();
 }
@@ -9008,6 +9057,7 @@ function applySettingsState(state) {
       activeFlowId: state?.flowId || state?.activeFlowId,
       plusPaymentMethod: state?.plusPaymentMethod,
       signupMethod: stepDefinitionState.signupMethod,
+      phoneSignupReloginAfterBindEmailEnabled: Boolean(state?.phoneSignupReloginAfterBindEmailEnabled),
     });
   }
   const fallbackIpProxyService = '711proxy';
@@ -9358,6 +9408,11 @@ function applySettingsState(state) {
   }
   if (typeof setSignupMethod === 'function') {
     setSignupMethod(state?.signupMethod || DEFAULT_SIGNUP_METHOD);
+  }
+  if (typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail) {
+    inputPhoneSignupReloginAfterBindEmail.checked = state?.phoneSignupReloginAfterBindEmailEnabled !== undefined
+      ? Boolean(state.phoneSignupReloginAfterBindEmailEnabled)
+      : DEFAULT_PHONE_SIGNUP_RELOGIN_AFTER_BIND_EMAIL_ENABLED;
   }
   const restoredPhoneSmsProvider = normalizePhoneSmsProvider(state?.phoneSmsProvider);
   const previousPhoneSmsProvider = selectPhoneSmsProvider ? normalizePhoneSmsProvider(selectPhoneSmsProvider.value) : restoredPhoneSmsProvider;
@@ -14032,6 +14087,34 @@ signupMethodButtons.forEach((button) => {
     markSettingsDirty(true);
     saveSettings({ silent: true }).catch(() => { });
   });
+});
+
+inputPhoneSignupReloginAfterBindEmail?.addEventListener('change', () => {
+  const stepDefinitionState = typeof resolveStepDefinitionCapabilityState === 'function'
+    ? resolveStepDefinitionCapabilityState({
+      ...(latestState || {}),
+      plusModeEnabled: typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+        ? Boolean(inputPlusModeEnabled.checked)
+        : Boolean(latestState?.plusModeEnabled),
+      signupMethod: getSelectedSignupMethod(),
+      phoneSignupReloginAfterBindEmailEnabled: Boolean(inputPhoneSignupReloginAfterBindEmail.checked),
+    }, {
+      signupMethod: getSelectedSignupMethod(),
+    })
+    : {
+      plusModeEnabled: typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+        ? Boolean(inputPlusModeEnabled.checked)
+        : Boolean(latestState?.plusModeEnabled),
+      signupMethod: getSelectedSignupMethod(),
+    };
+  syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
+    plusPaymentMethod: getSelectedPlusPaymentMethod(latestState),
+    signupMethod: stepDefinitionState.signupMethod,
+    phoneSignupReloginAfterBindEmailEnabled: Boolean(inputPhoneSignupReloginAfterBindEmail.checked),
+  });
+  updatePhoneVerificationSettingsUI();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
 });
 
 selectPhoneSmsProvider?.addEventListener('change', async () => {

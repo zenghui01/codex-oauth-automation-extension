@@ -7,6 +7,7 @@ const {
 } = require('../mail-provider-utils');
 
 const sidepanelSource = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
+const sidepanelHtml = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
 
 function extractFunction(name) {
   const markers = [`async function ${name}(`, `function ${name}(`];
@@ -345,6 +346,14 @@ return {
   api.setFlow('openai');
   assert.equal(api.canSelectPhoneSignupMethod(), true);
   assert.equal(api.shouldWarnCpaPhoneSignup('phone', 'cpa'), true);
+});
+
+test('phone signup relogin-after-bind-email switch is wired into UI and step definitions', () => {
+  assert.match(sidepanelHtml, /row-phone-signup-relogin-after-bind-email/);
+  assert.match(sidepanelHtml, /input-phone-signup-relogin-after-bind-email/);
+  assert.match(sidepanelSource, /phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined'/);
+  assert.match(sidepanelSource, /phoneSignupReloginAfterBindEmailEnabled: Boolean\(state\?\.phoneSignupReloginAfterBindEmailEnabled\)/);
+  assert.match(sidepanelSource, /nextPhoneSignupReloginAfterBindEmailEnabled !== currentPhoneSignupReloginAfterBindEmailEnabled/);
 });
 
 test('manual step 3 uses phone identity without requiring registration email', () => {

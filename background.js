@@ -73,6 +73,12 @@ const NORMAL_PHONE_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.(
   plusModeEnabled: false,
   signupMethod: 'phone',
 }) || NORMAL_STEP_DEFINITIONS;
+const NORMAL_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: false,
+  signupMethod: 'phone',
+  phoneSignupReloginAfterBindEmailEnabled: true,
+}) || NORMAL_PHONE_STEP_DEFINITIONS;
 const PLUS_PAYPAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
@@ -84,6 +90,13 @@ const PLUS_PAYPAL_PHONE_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSte
   plusPaymentMethod: 'paypal',
   signupMethod: 'phone',
 }) || PLUS_PAYPAL_STEP_DEFINITIONS;
+const PLUS_PAYPAL_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'paypal',
+  signupMethod: 'phone',
+  phoneSignupReloginAfterBindEmailEnabled: true,
+}) || PLUS_PAYPAL_PHONE_STEP_DEFINITIONS;
 const PLUS_GOPAY_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
@@ -95,6 +108,13 @@ const PLUS_GOPAY_PHONE_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getStep
   plusPaymentMethod: 'gopay',
   signupMethod: 'phone',
 }) || PLUS_GOPAY_STEP_DEFINITIONS;
+const PLUS_GOPAY_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'gopay',
+  signupMethod: 'phone',
+  phoneSignupReloginAfterBindEmailEnabled: true,
+}) || PLUS_GOPAY_PHONE_STEP_DEFINITIONS;
 const PLUS_GPC_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: true,
@@ -106,18 +126,29 @@ const PLUS_GPC_PHONE_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?
   plusPaymentMethod: 'gpc-helper',
   signupMethod: 'phone',
 }) || PLUS_GPC_STEP_DEFINITIONS;
+const PLUS_GPC_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  plusModeEnabled: true,
+  plusPaymentMethod: 'gpc-helper',
+  signupMethod: 'phone',
+  phoneSignupReloginAfterBindEmailEnabled: true,
+}) || PLUS_GPC_PHONE_STEP_DEFINITIONS;
 const PLUS_STEP_DEFINITIONS = PLUS_PAYPAL_STEP_DEFINITIONS;
 const ALL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getAllSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
 }) || [
   ...NORMAL_STEP_DEFINITIONS,
   ...NORMAL_PHONE_STEP_DEFINITIONS,
+  ...NORMAL_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
   ...PLUS_PAYPAL_STEP_DEFINITIONS,
   ...PLUS_PAYPAL_PHONE_STEP_DEFINITIONS,
+  ...PLUS_PAYPAL_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
   ...PLUS_GOPAY_STEP_DEFINITIONS,
   ...PLUS_GOPAY_PHONE_STEP_DEFINITIONS,
+  ...PLUS_GOPAY_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
   ...PLUS_GPC_STEP_DEFINITIONS,
   ...PLUS_GPC_PHONE_STEP_DEFINITIONS,
+  ...PLUS_GPC_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
 ];
 const STEP_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
@@ -644,6 +675,7 @@ function getStepDefinitionsForState(state = {}) {
       plusModeEnabled: isPlusModeState(state),
       plusPaymentMethod: normalizePlusPaymentMethod(state?.plusPaymentMethod),
       signupMethod: getSignupMethodForStepDefinitions(state),
+      phoneSignupReloginAfterBindEmailEnabled: Boolean(state?.phoneSignupReloginAfterBindEmailEnabled),
     });
     if (Array.isArray(definitions)) {
       return definitions;
@@ -908,6 +940,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoStepDelaySeconds: null,
   step6CookieCleanupEnabled: false,
   phoneVerificationEnabled: false,
+  phoneSignupReloginAfterBindEmailEnabled: false,
   phoneSmsReuseEnabled: DEFAULT_HERO_SMS_REUSE_ENABLED,
   freePhoneReuseEnabled: true,
   freePhoneReuseAutoEnabled: true,
@@ -2799,6 +2832,7 @@ function normalizePersistentSettingValue(key, value) {
       return typeof value === 'boolean' ? value : true;
     case 'step6CookieCleanupEnabled':
     case 'phoneVerificationEnabled':
+    case 'phoneSignupReloginAfterBindEmailEnabled':
     case 'phoneSmsReuseEnabled':
     case 'freePhoneReuseEnabled':
     case 'freePhoneReuseAutoEnabled':
@@ -8600,7 +8634,12 @@ function getDownstreamStateResets(step, state = {}) {
       currentPhoneVerificationCountdownWindowTotal: 0,
     };
   }
-  if (stepKey === 'oauth-login' || stepKey === 'fetch-login-code') {
+  if (
+    stepKey === 'oauth-login'
+    || stepKey === 'fetch-login-code'
+    || stepKey === 'relogin-bound-email'
+    || stepKey === 'fetch-bound-email-login-code'
+  ) {
     return {
       lastLoginCode: null,
       loginVerificationRequestedAt: null,
@@ -9626,6 +9665,9 @@ const AUTO_RUN_BACKGROUND_COMPLETED_STEP_KEYS = new Set([
   'post-login-phone-verification',
   'bind-email',
   'fetch-bind-email-code',
+  'relogin-bound-email',
+  'fetch-bound-email-login-code',
+  'post-bound-email-phone-verification',
   'confirm-oauth',
 ]);
 const STEP_COMPLETION_SIGNAL_STEP_KEYS = new Set([
@@ -10081,6 +10123,9 @@ const AUTH_CHAIN_NODE_IDS = new Set([
   'post-login-phone-verification',
   'bind-email',
   'fetch-bind-email-code',
+  'relogin-bound-email',
+  'fetch-bound-email-login-code',
+  'post-bound-email-phone-verification',
   'confirm-oauth',
   'platform-verify',
 ]);
@@ -12394,6 +12439,39 @@ const step10Executor = self.MultiPageBackgroundStep10?.createStep10Executor({
   DEFAULT_SUB2API_GROUP_NAME,
   SUB2API_STEP9_RESPONSE_TIMEOUT_MS,
 });
+
+function resolveBoundEmailForReloginState(state = {}) {
+  return String(
+    state?.step8VerificationTargetEmail
+    || state?.email
+    || state?.registrationEmailState?.current
+    || ''
+  ).trim();
+}
+
+async function executeReloginBoundEmail(state = {}) {
+  const visibleStep = Math.floor(Number(state?.visibleStep) || 0) || 10;
+  const boundEmail = resolveBoundEmailForReloginState(state);
+  if (!boundEmail) {
+    throw new Error(`步骤 ${visibleStep}：缺少绑定邮箱，无法在绑定邮箱后切入邮箱模式 OAuth 登录。`);
+  }
+  await addLog(`步骤 ${visibleStep}：绑定邮箱已提交，正在刷新 OAuth 并使用绑定邮箱 ${boundEmail} 登录...`, 'info', {
+    step: visibleStep,
+    stepKey: 'relogin-bound-email',
+  });
+  return step7Executor.executeStep7({
+    ...state,
+    forceLoginIdentifierType: 'email',
+    forceEmailLogin: true,
+    signupMethod: 'email',
+    resolvedSignupMethod: 'email',
+    accountIdentifierType: 'email',
+    accountIdentifier: boundEmail,
+    email: boundEmail,
+    step8VerificationTargetEmail: boundEmail,
+  });
+}
+
 const stepExecutorsByKey = {
   'open-chatgpt': () => step1Executor.executeStep1(),
   'submit-signup-email': (state) => step2Executor.executeStep2(state),
@@ -12413,6 +12491,9 @@ const stepExecutorsByKey = {
   'post-login-phone-verification': (state) => step8Executor.executePostLoginPhoneVerification(state),
   'bind-email': (state) => step8Executor.executeBindEmail(state),
   'fetch-bind-email-code': (state) => step8Executor.executeFetchBindEmailCode(state),
+  'relogin-bound-email': (state) => executeReloginBoundEmail(state),
+  'fetch-bound-email-login-code': (state) => step8Executor.executeBoundEmailLoginCode(state),
+  'post-bound-email-phone-verification': (state) => step8Executor.executeBoundEmailPostLoginPhoneVerification(state),
   'confirm-oauth': (state) => step9Executor.executeStep9(state),
   'platform-verify': (state) => executeStep10(state),
 };
@@ -12590,12 +12671,16 @@ async function acquireTopLevelAuthChainExecution(step, state = {}) {
 
 const normalStepRegistry = buildStepRegistry(NORMAL_STEP_DEFINITIONS);
 const normalPhoneStepRegistry = buildStepRegistry(NORMAL_PHONE_STEP_DEFINITIONS);
+const normalPhoneBoundEmailReloginStepRegistry = buildStepRegistry(NORMAL_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS);
 const plusPayPalStepRegistry = buildStepRegistry(PLUS_PAYPAL_STEP_DEFINITIONS);
 const plusPayPalPhoneStepRegistry = buildStepRegistry(PLUS_PAYPAL_PHONE_STEP_DEFINITIONS);
+const plusPayPalPhoneBoundEmailReloginStepRegistry = buildStepRegistry(PLUS_PAYPAL_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS);
 const plusGoPayStepRegistry = buildStepRegistry(PLUS_GOPAY_STEP_DEFINITIONS);
 const plusGoPayPhoneStepRegistry = buildStepRegistry(PLUS_GOPAY_PHONE_STEP_DEFINITIONS);
+const plusGoPayPhoneBoundEmailReloginStepRegistry = buildStepRegistry(PLUS_GOPAY_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS);
 const plusGpcStepRegistry = buildStepRegistry(PLUS_GPC_STEP_DEFINITIONS);
 const plusGpcPhoneStepRegistry = buildStepRegistry(PLUS_GPC_PHONE_STEP_DEFINITIONS);
+const plusGpcPhoneBoundEmailReloginStepRegistry = buildStepRegistry(PLUS_GPC_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS);
 
 function getStepRegistryForState(state = {}) {
   const activeFlowId = String(state?.activeFlowId || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase() || DEFAULT_ACTIVE_FLOW_ID;
@@ -12603,17 +12688,31 @@ function getStepRegistryForState(state = {}) {
     throw new Error(`当前尚未注册 flow=${activeFlowId} 的步骤执行器。`);
   }
   const signupMethod = getSignupMethodForStepDefinitions(state);
+  const useBoundEmailRelogin = signupMethod === SIGNUP_METHOD_PHONE
+    && Boolean(state?.phoneSignupReloginAfterBindEmailEnabled);
   if (!isPlusModeState(state)) {
-    return signupMethod === SIGNUP_METHOD_PHONE ? normalPhoneStepRegistry : normalStepRegistry;
+    if (signupMethod === SIGNUP_METHOD_PHONE) {
+      return useBoundEmailRelogin ? normalPhoneBoundEmailReloginStepRegistry : normalPhoneStepRegistry;
+    }
+    return normalStepRegistry;
   }
   const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
   if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
-    return signupMethod === SIGNUP_METHOD_PHONE ? plusGpcPhoneStepRegistry : plusGpcStepRegistry;
+    if (signupMethod === SIGNUP_METHOD_PHONE) {
+      return useBoundEmailRelogin ? plusGpcPhoneBoundEmailReloginStepRegistry : plusGpcPhoneStepRegistry;
+    }
+    return plusGpcStepRegistry;
   }
   if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
-    return signupMethod === SIGNUP_METHOD_PHONE ? plusGoPayPhoneStepRegistry : plusGoPayStepRegistry;
+    if (signupMethod === SIGNUP_METHOD_PHONE) {
+      return useBoundEmailRelogin ? plusGoPayPhoneBoundEmailReloginStepRegistry : plusGoPayPhoneStepRegistry;
+    }
+    return plusGoPayStepRegistry;
   }
-  return signupMethod === SIGNUP_METHOD_PHONE ? plusPayPalPhoneStepRegistry : plusPayPalStepRegistry;
+  if (signupMethod === SIGNUP_METHOD_PHONE) {
+    return useBoundEmailRelogin ? plusPayPalPhoneBoundEmailReloginStepRegistry : plusPayPalPhoneStepRegistry;
+  }
+  return plusPayPalStepRegistry;
 }
 
 async function requestOAuthUrlFromPanel(state, options = {}) {
@@ -13043,12 +13142,22 @@ async function getPostStep6AutoRestartDecision(step, error) {
     : (typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10);
   const currentNodeKey = resolveStepKey(normalizedStep, latestState);
   const confirmOauthStep = findStepIdByKeyForState('confirm-oauth', latestState);
+  const boundEmailReloginStep = findStepIdByKeyForState('relogin-bound-email', latestState);
+  const isBoundEmailReloginTailStep = [
+    'relogin-bound-email',
+    'fetch-bound-email-login-code',
+    'post-bound-email-phone-verification',
+  ].includes(currentNodeKey);
   const shouldRetryFromConfirmStep = currentNodeKey === 'platform-verify'
     && Number.isFinite(confirmOauthStep)
     && confirmOauthStep > 0
     && confirmOauthStep < normalizedStep
     && isPlatformVerifyTransientRetryError(errorMessage);
-  const restartAnchorStep = shouldRetryFromConfirmStep ? confirmOauthStep : authChainStartStep;
+  const restartAnchorStep = shouldRetryFromConfirmStep
+    ? confirmOauthStep
+    : (isBoundEmailReloginTailStep && Number.isFinite(boundEmailReloginStep) && boundEmailReloginStep > 0
+      ? boundEmailReloginStep
+      : authChainStartStep);
   if (isPhoneSmsPlatformRateLimitFailure(errorMessage)) {
     return {
       shouldRestart: false,

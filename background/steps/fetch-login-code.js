@@ -124,6 +124,34 @@
       return String(value || '').trim().toLowerCase();
     }
 
+    function resolveBoundEmailLoginTarget(state = {}, visibleStep = 0) {
+      const email = String(
+        state?.step8VerificationTargetEmail
+        || state?.email
+        || state?.registrationEmailState?.current
+        || ''
+      ).trim();
+      if (!email) {
+        throw new Error(`步骤 ${visibleStep || 0}：缺少绑定邮箱，无法使用邮箱模式重新发起 OAuth 登录。`);
+      }
+      return email;
+    }
+
+    function buildBoundEmailLoginState(state = {}, visibleStep = 0) {
+      const email = resolveBoundEmailLoginTarget(state, visibleStep);
+      return {
+        ...state,
+        forceLoginIdentifierType: 'email',
+        forceEmailLogin: true,
+        signupMethod: 'email',
+        resolvedSignupMethod: 'email',
+        accountIdentifierType: 'email',
+        accountIdentifier: email,
+        email,
+        step8VerificationTargetEmail: normalizeStep8VerificationTargetEmail(email),
+      };
+    }
+
     async function getLoginAuthStateFromContent(visibleStep, options = {}) {
       if (typeof sendToContentScriptResilient !== 'function') {
         return {};
@@ -142,7 +170,7 @@
           retryDelayMs: 600,
           logMessage: options.logMessage || `步骤 ${visibleStep}：认证页正在切换，等待页面重新就绪...`,
           logStep: visibleStep,
-          logStepKey: 'fetch-login-code',
+          logStepKey: options.logStepKey || activeFetchLoginCodeStepKey || 'fetch-login-code',
         }
       );
       if (result?.error) {
@@ -240,9 +268,11 @@
         loginVerificationRequestedAt: null,
       });
       const fromRecovery = Boolean(options.fromRecovery);
+      const stepKey = options.stepKey || activeFetchLoginCodeStepKey || 'fetch-login-code';
       await addLog(
         `步骤 ${visibleStep}：当前认证页已进入 OAuth 授权页${fromRecovery ? '（轮询失败后复核）' : ''}，跳过登录验证码拉取并继续后续流程。`,
-        'warn'
+        'warn',
+        { step: visibleStep, stepKey }
       );
       if (typeof completeNodeFromBackground === 'function') {
         await completeNodeFromBackground(options.nodeId || 'fetch-login-code', {
@@ -258,9 +288,11 @@
         step8VerificationTargetEmail: '',
         loginVerificationRequestedAt: null,
       });
+      const stepKey = options.stepKey || activeFetchLoginCodeStepKey || 'fetch-login-code';
       await addLog(
         `步骤 ${visibleStep}：当前认证页已进入手机号验证流程，跳过登录邮箱验证码，交给后续“手机号验证”步骤处理。`,
-        'warn'
+        'warn',
+        { step: visibleStep, stepKey }
       );
       if (typeof completeNodeFromBackground === 'function') {
         await completeNodeFromBackground(options.nodeId || 'fetch-login-code', {
@@ -416,9 +448,10 @@
     }
 
     async function completePostLoginPhoneVerificationSkippedOnOauth(visibleStep, options = {}) {
+      const stepKey = options.stepKey || 'post-login-phone-verification';
       await addLog(`步骤 ${visibleStep}：当前认证页已进入 OAuth 授权页，跳过手机号验证步骤。`, 'warn', {
         step: visibleStep,
-        stepKey: 'post-login-phone-verification',
+        stepKey,
       });
       if (typeof completeNodeFromBackground === 'function') {
         await completeNodeFromBackground(options.nodeId || 'post-login-phone-verification', {
@@ -428,18 +461,22 @@
       }
     }
 
-    async function executePostLoginPhoneVerification(state) {
+    async function executePostLoginPhoneVerification(state, runtime = {}) {
       const visibleStep = getVisibleStep(state, 9);
       activeFetchLoginCodeStep = visibleStep;
-      activeFetchLoginCodeStepKey = 'post-login-phone-verification';
+      activeFetchLoginCodeStepKey = runtime.stepKey || 'post-login-phone-verification';
       const authTabId = await ensureAuthTabForPostLoginStep(state, visibleStep);
       const pageState = await getLoginAuthStateFromContent(visibleStep, {
         timeoutMs: await getStep8ReadyTimeoutMs('确认手机号验证页或 OAuth 授权页已就绪', state?.oauthUrl || '', visibleStep),
         logMessage: `步骤 ${visibleStep}：正在确认是否需要手机号验证...`,
+        logStepKey: activeFetchLoginCodeStepKey,
       });
 
       if (pageState?.state === 'oauth_consent_page') {
-        await completePostLoginPhoneVerificationSkippedOnOauth(visibleStep, { nodeId: state?.nodeId });
+        await completePostLoginPhoneVerificationSkippedOnOauth(visibleStep, {
+          nodeId: state?.nodeId || runtime.fallbackNodeId,
+          stepKey: activeFetchLoginCodeStepKey,
+        });
         return;
       }
       if (pageState?.state !== 'add_phone_page' && pageState?.state !== 'phone_verification_page') {
@@ -457,7 +494,7 @@
         visibleStep,
       });
       if (typeof completeNodeFromBackground === 'function') {
-        await completeNodeFromBackground(state?.nodeId || 'post-login-phone-verification', {
+        await completeNodeFromBackground(state?.nodeId || runtime.fallbackNodeId || 'post-login-phone-verification', {
           phoneVerification: true,
           postLoginPhoneVerification: true,
           code: result?.code || '',
@@ -663,6 +700,64 @@
       });
     }
 
+    async function executeBoundEmailLoginCode(state) {
+      const visibleStep = getVisibleStep(state, 11);
+      activeFetchLoginCodeStep = visibleStep;
+      activeFetchLoginCodeStepKey = 'fetch-bound-email-login-code';
+      const preparedState = buildBoundEmailLoginState(state, visibleStep);
+      const authTabId = await getTabId('signup-page');
+
+      if (authTabId) {
+        await chrome.tabs.update(authTabId, { active: true });
+      } else {
+        if (!preparedState.oauthUrl) {
+          throw new Error(`步骤 ${visibleStep}：缺少登录用 OAuth 链接，请先完成绑定邮箱后刷新 OAuth 并登录。`);
+        }
+        await reuseOrCreateTab('signup-page', preparedState.oauthUrl);
+      }
+
+      throwIfStopped();
+      const pageState = await ensureStep8VerificationPageReady({
+        visibleStep,
+        authLoginStep: Math.max(1, visibleStep - 1),
+        allowPhoneVerificationPage: true,
+        allowAddEmailPage: false,
+        timeoutMs: await getStep8ReadyTimeoutMs('确认绑定邮箱登录验证码页已就绪', preparedState?.oauthUrl || '', visibleStep),
+      });
+
+      if (pageState?.state === 'oauth_consent_page') {
+        await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep, {
+          nodeId: state?.nodeId || 'fetch-bound-email-login-code',
+          stepKey: 'fetch-bound-email-login-code',
+        });
+        return;
+      }
+      if (pageState?.state === 'add_phone_page' || pageState?.state === 'phone_verification_page') {
+        await completeStep8WhenDeferredToPostLoginPhone(visibleStep, pageState, {
+          nodeId: state?.nodeId || 'fetch-bound-email-login-code',
+          stepKey: 'fetch-bound-email-login-code',
+        });
+        return;
+      }
+      if (pageState?.state === 'add_email_page') {
+        throw new Error(`步骤 ${visibleStep}：绑定邮箱后邮箱模式登录不应再进入添加邮箱页。URL: ${pageState?.url || ''}`.trim());
+      }
+      if (pageState?.state !== 'verification_page') {
+        throw new Error(`步骤 ${visibleStep}：绑定邮箱后获取登录验证码只处理邮箱登录验证码页，当前状态：${pageState?.state || 'unknown'}。URL: ${pageState?.url || ''}`.trim());
+      }
+
+      return pollEmailVerificationCode(preparedState, pageState, visibleStep, {
+        stickyLastResendAt: Number(preparedState?.loginVerificationRequestedAt) || 0,
+      });
+    }
+
+    async function executeBoundEmailPostLoginPhoneVerification(state) {
+      return executePostLoginPhoneVerification(state, {
+        stepKey: 'post-bound-email-phone-verification',
+        fallbackNodeId: 'post-bound-email-phone-verification',
+      });
+    }
+
     async function runStep8Attempt(state, runtime = {}) {
       const visibleStep = getVisibleStep(state, 8);
       activeFetchLoginCodeStep = visibleStep;
@@ -855,6 +950,8 @@
       executePostLoginPhoneVerification,
       executeBindEmail,
       executeFetchBindEmailCode,
+      executeBoundEmailLoginCode,
+      executeBoundEmailPostLoginPhoneVerification,
     };
   }
 

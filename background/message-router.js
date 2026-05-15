@@ -270,6 +270,8 @@
       13: 'confirm-oauth',
       14: 'platform-verify',
       15: 'platform-verify',
+      16: 'confirm-oauth',
+      17: 'platform-verify',
     });
 
     function getStepKeyForState(step, state = {}) {
@@ -613,12 +615,18 @@
       const stateForStep = await getState();
       const stepKey = getStepKeyForState(step, stateForStep);
 
-      if (stepKey === 'oauth-login') {
-        await syncStepAccountIdentityFromPayload(payload);
+      if (stepKey === 'oauth-login' || stepKey === 'relogin-bound-email') {
+        if (stepKey === 'oauth-login') {
+          await syncStepAccountIdentityFromPayload(payload);
+        }
         if (payload.skipLoginVerificationStep) {
           await setState({ loginVerificationRequestedAt: null });
           const latestState = await getState();
-          const loginCodeStep = findStepByKeyAfter(step, 'fetch-login-code', latestState);
+          const loginCodeStep = findStepByKeyAfter(
+            step,
+            stepKey === 'relogin-bound-email' ? 'fetch-bound-email-login-code' : 'fetch-login-code',
+            latestState
+          );
           if (loginCodeStep) {
             const currentStatus = getNodeStatusByStep(loginCodeStep, latestState);
             if (!isStepProtectedFromAutoSkip(currentStatus)) {
@@ -635,7 +643,7 @@
         return;
       }
 
-      if (stepKey === 'fetch-login-code') {
+      if (stepKey === 'fetch-login-code' || stepKey === 'fetch-bound-email-login-code') {
         await setState({
           ...(payload.phoneVerification || payload.loginPhoneVerification ? {
             currentPhoneVerificationCode: '',
@@ -649,7 +657,7 @@
         return;
       }
 
-      if (stepKey === 'post-login-phone-verification') {
+      if (stepKey === 'post-login-phone-verification' || stepKey === 'post-bound-email-phone-verification') {
         await setState({
           currentPhoneVerificationCode: '',
           signupPhoneVerificationRequestedAt: null,
@@ -1333,10 +1341,14 @@
           const plusPaymentChanged = Object.prototype.hasOwnProperty.call(updates, 'plusPaymentMethod')
             && normalizePlusPaymentMethodForDisplay(currentState?.plusPaymentMethod || 'paypal')
               !== normalizePlusPaymentMethodForDisplay(updates.plusPaymentMethod || 'paypal');
+          const phoneSignupReloginAfterBindEmailChanged = Object.prototype.hasOwnProperty.call(updates, 'phoneSignupReloginAfterBindEmailEnabled')
+            && Boolean(currentState?.phoneSignupReloginAfterBindEmailEnabled) !== Boolean(updates.phoneSignupReloginAfterBindEmailEnabled);
           const nextPlusModeEnabled = Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
             ? Boolean(updates.plusModeEnabled)
             : Boolean(currentState?.plusModeEnabled);
-          const stepModeChanged = modeChanged || (nextPlusModeEnabled && plusPaymentChanged);
+          const stepModeChanged = modeChanged
+            || (nextPlusModeEnabled && plusPaymentChanged)
+            || phoneSignupReloginAfterBindEmailChanged;
           const oauthFlowTimeoutDisabled = Object.prototype.hasOwnProperty.call(updates, 'oauthFlowTimeoutEnabled')
             && updates.oauthFlowTimeoutEnabled === false;
           await setPersistentSettings(updates);

@@ -50,6 +50,11 @@
       return String(value || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email';
     }
 
+    function shouldForceStep7EmailLogin(state = {}) {
+      return normalizeStep7IdentifierType(state?.forceLoginIdentifierType) === 'email'
+        || Boolean(state?.forceEmailLogin);
+    }
+
     function canUseConfiguredPhoneSignup(state = {}) {
       return normalizeStep7SignupMethod(state?.signupMethod) === 'phone'
         && Boolean(state?.phoneVerificationEnabled)
@@ -75,6 +80,10 @@
     }
 
     function resolveStep7LoginIdentifierType(state = {}, fallbackType = '') {
+      if (shouldForceStep7EmailLogin(state)) {
+        return 'email';
+      }
+
       if (shouldPreferStep7PhoneSignupIdentity(state)) {
         return 'phone';
       }
@@ -234,7 +243,19 @@
         throwIfStopped();
         attempt += 1;
         try {
-          const currentState = attempt === 1 ? state : await getState();
+          const rawCurrentState = attempt === 1 ? state : await getState();
+          const currentState = shouldForceStep7EmailLogin(state)
+            ? {
+              ...rawCurrentState,
+              forceLoginIdentifierType: 'email',
+              forceEmailLogin: true,
+              signupMethod: 'email',
+              resolvedSignupMethod: 'email',
+              accountIdentifierType: 'email',
+              accountIdentifier: email,
+              email,
+            }
+            : rawCurrentState;
           const password = currentState.password || currentState.customPassword || '';
           const currentIdentifierType = resolveStep7LoginIdentifierType(currentState, resolvedIdentifierType);
           const currentPhoneNumber = currentIdentifierType === 'phone'
