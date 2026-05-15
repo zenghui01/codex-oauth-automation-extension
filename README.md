@@ -1,4 +1,4 @@
-# Multi-Page Automation
+# FlowPilot
 
 一个用于批量跑通 ChatGPT OAuth 注册/登录流程的 Chrome 扩展。
 
@@ -20,11 +20,11 @@
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=QLHazyCoder%2Fcodex-oauth-automation-extension&type=timeline&logscale&legend=top-left">
+<a href="https://www.star-history.com/?repos=QLHazyCoder%2FFlowPilot&type=timeline&logscale&legend=top-left">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=QLHazyCoder/codex-oauth-automation-extension&type=timeline&logscale&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=QLHazyCoder/codex-oauth-automation-extension&type=timeline&logscale&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=QLHazyCoder/codex-oauth-automation-extension&type=timeline&logscale&legend=top-left" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=QLHazyCoder/FlowPilot&type=timeline&logscale&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=QLHazyCoder/FlowPilot&type=timeline&logscale&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=QLHazyCoder/FlowPilot&type=timeline&logscale&legend=top-left" />
   </picture>
 </a>
 

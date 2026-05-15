@@ -7244,7 +7244,7 @@ async function fetchIcloudHideMyEmail(options = {}) {
           : {}),
         hme: generatedAlias,
         label: getIcloudAliasLabel(),
-        note: 'Generated through Multi-Page Automation',
+        note: 'Generated through FlowPilot',
       };
 
       let alias = '';
