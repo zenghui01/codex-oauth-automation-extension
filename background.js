@@ -1565,6 +1565,33 @@ function resolveSignupMethod(state = {}) {
   return method === SIGNUP_METHOD_PHONE && canUsePhoneSignup(state) ? SIGNUP_METHOD_PHONE : SIGNUP_METHOD_EMAIL;
 }
 
+function hasSignupPhoneActivationState(state = {}) {
+  return Boolean(
+    state?.signupPhoneActivation
+    || state?.signupPhoneCompletedActivation
+    || String(state?.signupPhoneNumber || '').trim()
+  );
+}
+
+function isPhoneSignupIdentityStateForReuse(state = {}) {
+  if (resolveSignupMethod(state) === SIGNUP_METHOD_PHONE) {
+    return true;
+  }
+
+  const runtimeActive = (
+    (typeof isAutoRunLockedState === 'function' && isAutoRunLockedState(state))
+    || (typeof isAutoRunPausedState === 'function' && isAutoRunPausedState(state))
+    || (typeof isAutoRunScheduledState === 'function' && isAutoRunScheduledState(state))
+    || Boolean(state?.autoRunning)
+  );
+  if (!runtimeActive) {
+    return false;
+  }
+
+  const identifierType = String(state?.accountIdentifierType || '').trim().toLowerCase();
+  return identifierType === 'phone' || hasSignupPhoneActivationState(state);
+}
+
 async function ensureResolvedSignupMethodForRun(options = {}) {
   const state = await getState();
   const force = Boolean(options.force);
@@ -7255,6 +7282,10 @@ async function finalizePhoneActivationAfterSuccessfulFlow(state) {
 }
 
 async function clearFreeReusablePhoneActivation() {
+  const state = await getState();
+  if (isPhoneSignupIdentityStateForReuse(state)) {
+    throw new Error('\u624b\u673a\u53f7\u6ce8\u518c\u6a21\u5f0f\u4e0b\u4e0d\u80fd\u4fee\u6539\u767d\u5ad6\u590d\u7528\u624b\u673a\u53f7\uff0c\u8bf7\u5207\u6362\u90ae\u7bb1\u6ce8\u518c\u540e\u518d\u4f7f\u7528\u3002');
+  }
   await setState({ freeReusablePhoneActivation: null });
   broadcastDataUpdate({ freeReusablePhoneActivation: null });
   await addLog('已清除白嫖复用手机号记录。', 'ok');
@@ -7345,6 +7376,9 @@ async function setFreeReusablePhoneActivation(record = {}) {
     throw new Error('请先填写白嫖复用手机号。');
   }
   const state = await getState();
+  if (isPhoneSignupIdentityStateForReuse(state)) {
+    throw new Error('\u624b\u673a\u53f7\u6ce8\u518c\u6a21\u5f0f\u4e0b\u4e0d\u80fd\u8bb0\u5f55\u767d\u5ad6\u590d\u7528\u624b\u673a\u53f7\uff0c\u8bf7\u5207\u6362\u90ae\u7bb1\u6ce8\u518c\u540e\u518d\u4f7f\u7528\u3002');
+  }
   const localActivation = findLocalHeroSmsActivationForPhone(state, phoneNumber);
   const activationId = String(
     record.activationId

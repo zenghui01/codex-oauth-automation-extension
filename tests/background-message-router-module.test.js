@@ -47,6 +47,20 @@ test('background free reusable phone setter can recover local HeroSMS activation
   assert.match(setterBlock, /manualOnly:\s*!activationId/);
 });
 
+test('background blocks free reusable phone mutations while phone signup owns the identity', () => {
+  const source = fs.readFileSync('background.js', 'utf8');
+  const clearStart = source.indexOf('async function clearFreeReusablePhoneActivation');
+  const setterStart = source.indexOf('async function setFreeReusablePhoneActivation');
+  const setterEnd = source.indexOf('// ============================================================\n// Tab Registry', setterStart);
+  const clearBlock = source.slice(clearStart, setterStart);
+  const setterBlock = source.slice(setterStart, setterEnd);
+
+  assert.match(source, /function isPhoneSignupIdentityStateForReuse\(/);
+  assert.match(source, /function hasSignupPhoneActivationState\(/);
+  assert.match(clearBlock, /isPhoneSignupIdentityStateForReuse\(state\)/);
+  assert.match(setterBlock, /isPhoneSignupIdentityStateForReuse\(state\)/);
+});
+
 test('background HeroSMS phone prefix inference covers built-in major countries', () => {
   const source = fs.readFileSync('background.js', 'utf8');
   const supportedStart = source.indexOf('const HERO_SMS_SUPPORTED_COUNTRY_IDS = [');
@@ -130,6 +144,124 @@ test('SAVE_SETTING broadcasts free phone reuse setting updates for realtime side
     )),
     'expected SAVE_SETTING to broadcast free reuse switch updates'
   );
+});
+
+test('SAVE_SETTING preserves phone reuse preferences while phone signup is selected', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const persistedPayloads = [];
+  let state = {
+    signupMethod: 'phone',
+    phoneVerificationEnabled: true,
+    plusModeEnabled: false,
+    phoneSmsReuseEnabled: true,
+    heroSmsReuseEnabled: true,
+    freePhoneReuseEnabled: true,
+    freePhoneReuseAutoEnabled: true,
+    phonePreferredActivation: {
+      provider: 'hero-sms',
+      activationId: 'stored',
+      phoneNumber: '66950001111',
+    },
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => ({
+      signupMethod: String(input.signupMethod || state.signupMethod),
+      phoneSmsReuseEnabled: Boolean(input.phoneSmsReuseEnabled),
+      heroSmsReuseEnabled: Boolean(input.heroSmsReuseEnabled),
+      freePhoneReuseEnabled: Boolean(input.freePhoneReuseEnabled),
+      freePhoneReuseAutoEnabled: Boolean(input.freePhoneReuseAutoEnabled),
+      phonePreferredActivation: input.phonePreferredActivation ?? null,
+    }),
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    setPersistentSettings: async (updates) => {
+      persistedPayloads.push({ ...updates });
+    },
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: {
+      signupMethod: 'phone',
+      phoneSmsReuseEnabled: false,
+      heroSmsReuseEnabled: false,
+      freePhoneReuseEnabled: false,
+      freePhoneReuseAutoEnabled: false,
+      phonePreferredActivation: null,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.phoneSmsReuseEnabled, true);
+  assert.equal(state.heroSmsReuseEnabled, true);
+  assert.equal(state.freePhoneReuseEnabled, true);
+  assert.equal(state.freePhoneReuseAutoEnabled, true);
+  assert.deepStrictEqual(state.phonePreferredActivation, {
+    provider: 'hero-sms',
+    activationId: 'stored',
+    phoneNumber: '66950001111',
+  });
+  assert.equal(persistedPayloads[0].phoneSmsReuseEnabled, true);
+  assert.equal(persistedPayloads[0].freePhoneReuseEnabled, true);
+});
+
+test('SAVE_SETTING allows phone reuse preferences after switching back to email signup', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  let state = {
+    signupMethod: 'phone',
+    phoneVerificationEnabled: true,
+    plusModeEnabled: false,
+    phoneSmsReuseEnabled: true,
+    heroSmsReuseEnabled: true,
+    freePhoneReuseEnabled: true,
+    freePhoneReuseAutoEnabled: true,
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => ({
+      signupMethod: String(input.signupMethod || state.signupMethod),
+      phoneSmsReuseEnabled: Boolean(input.phoneSmsReuseEnabled),
+      heroSmsReuseEnabled: Boolean(input.heroSmsReuseEnabled),
+      freePhoneReuseEnabled: Boolean(input.freePhoneReuseEnabled),
+      freePhoneReuseAutoEnabled: Boolean(input.freePhoneReuseAutoEnabled),
+    }),
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    setPersistentSettings: async () => {},
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: {
+      signupMethod: 'email',
+      phoneSmsReuseEnabled: false,
+      heroSmsReuseEnabled: false,
+      freePhoneReuseEnabled: false,
+      freePhoneReuseAutoEnabled: false,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.signupMethod, 'email');
+  assert.equal(state.phoneSmsReuseEnabled, false);
+  assert.equal(state.heroSmsReuseEnabled, false);
+  assert.equal(state.freePhoneReuseEnabled, false);
+  assert.equal(state.freePhoneReuseAutoEnabled, false);
 });
 
 test('SAVE_SETTING broadcasts operation delay setting without background success log', async () => {

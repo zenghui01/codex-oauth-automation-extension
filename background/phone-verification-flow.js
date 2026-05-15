@@ -923,6 +923,9 @@
     }
 
     function isPhoneSmsReuseEnabled(state = {}) {
+      if (isPhoneSignupIdentityState(state)) {
+        return false;
+      }
       return normalizePhoneSmsReuseEnabled(state);
     }
 
@@ -2110,6 +2113,18 @@
         priceRangeText: formatPhonePriceRangeText(minPrice, maxPrice),
         acquirePriority,
       };
+    }
+
+    function isPhoneSignupIdentityState(state = {}) {
+      const signupMethod = String(state?.resolvedSignupMethod || state?.signupMethod || '').trim().toLowerCase();
+      const identifierType = String(state?.accountIdentifierType || '').trim().toLowerCase();
+      if (signupMethod === 'phone' || identifierType === 'phone') {
+        return true;
+      }
+      return Boolean(
+        normalizeActivation(state?.signupPhoneActivation)
+        || normalizeActivation(state?.signupPhoneCompletedActivation)
+      );
     }
 
     function formatNoSupplySuggestion(context = {}) {
@@ -4677,6 +4692,9 @@
     }
 
     async function handoffFreeReusablePhone(tabId, state = {}) {
+      if (isPhoneSignupIdentityState(state)) {
+        return null;
+      }
       if (!normalizeFreePhoneReuseEnabled(state?.freePhoneReuseEnabled)) {
         return null;
       }
@@ -4837,10 +4855,12 @@
         ...state,
         phoneSmsProvider: normalizePhoneSmsProvider(providerName),
       });
+      const canUseSavedActivationForCurrentFlow = !isPhoneSignupIdentityState(state);
       const preferredActivation = normalizeActivation(state[PREFERRED_PHONE_ACTIVATION_STATE_KEY]);
       let failedPreferredActivation = null;
       const canTryPreferredActivation = (
-        !Boolean(options?.skipPreferredActivation)
+        canUseSavedActivationForCurrentFlow
+        && !Boolean(options?.skipPreferredActivation)
         && preferredActivation
         && (provider === PHONE_SMS_PROVIDER_HERO || provider === PHONE_SMS_PROVIDER_5SIM)
         && preferredActivation.provider === provider
@@ -5021,6 +5041,9 @@
 
     async function markActivationReusableAfterSuccess(state, activation) {
       const normalizedActivation = normalizeActivation(activation);
+      if (isPhoneSignupIdentityState(state)) {
+        return;
+      }
       if (!isPhoneSmsReuseEnabled(state)) {
         await clearReusableActivation();
         return;
@@ -5059,6 +5082,9 @@
     }
 
     function shouldPreserveActivationForFreeReuse(state, activation) {
+      if (isPhoneSignupIdentityState(state)) {
+        return false;
+      }
       if (!normalizeFreePhoneReuseEnabled(state?.freePhoneReuseEnabled)) {
         return false;
       }
@@ -5072,6 +5098,9 @@
     }
 
     function shouldSkipTerminalStatusForFreeReuse(state, activation) {
+      if (isPhoneSignupIdentityState(state)) {
+        return false;
+      }
       const normalizedActivation = normalizeActivation(activation);
       if (!normalizedActivation || normalizedActivation.provider !== PHONE_SMS_PROVIDER_HERO) {
         return false;
@@ -5102,6 +5131,9 @@
         ...(state || {}),
         ...(typeof getState === 'function' ? await getState() : {}),
       };
+      if (isPhoneSignupIdentityState(latestState)) {
+        return;
+      }
       if (!normalizeFreePhoneReuseEnabled(latestState?.freePhoneReuseEnabled)) {
         return;
       }
@@ -5141,6 +5173,9 @@
         ...(state || {}),
         ...(typeof getState === 'function' ? await getState() : {}),
       };
+      if (isPhoneSignupIdentityState(latestState)) {
+        return;
+      }
       const savedActivation = normalizeFreeReusablePhoneActivation(
         latestState[FREE_REUSABLE_PHONE_ACTIVATION_STATE_KEY]
       );
@@ -5185,6 +5220,9 @@
         ...(state || {}),
         ...(typeof getState === 'function' ? await getState() : {}),
       };
+      if (isPhoneSignupIdentityState(latestState)) {
+        return;
+      }
       const savedActivation = normalizeFreeReusablePhoneActivation(
         latestState[FREE_REUSABLE_PHONE_ACTIVATION_STATE_KEY]
       );

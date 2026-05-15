@@ -2475,6 +2475,19 @@ header {
   white-space: nowrap;
 }
 
+.hero-sms-price-control.is-disabled,
+.hero-sms-settings-cell.is-disabled,
+.hero-sms-runtime-cell.is-disabled {
+  opacity: 0.56;
+}
+
+.hero-sms-price-control.is-disabled .toggle-switch,
+.hero-sms-settings-cell.is-disabled .toggle-switch,
+.hero-sms-runtime-cell.is-disabled .data-input,
+.hero-sms-runtime-cell.is-disabled .btn {
+  cursor: not-allowed;
+}
+
 .data-unit {
   font-size: 12px;
   font-weight: 600;

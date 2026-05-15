@@ -188,6 +188,42 @@
       verifyHotmailAccount,
     } = deps;
 
+    function preserveKeyFromState(updates, currentState, key) {
+      if (!Object.prototype.hasOwnProperty.call(updates, key)) {
+        return;
+      }
+      if (currentState?.[key] !== undefined) {
+        updates[key] = currentState[key];
+      } else {
+        delete updates[key];
+      }
+    }
+
+    function preservePhoneReuseSettingsForPhoneSignup(updates, currentState = {}) {
+      if (!updates || typeof updates !== 'object') {
+        return;
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(updates, 'phoneSmsReuseEnabled')
+        || Object.prototype.hasOwnProperty.call(updates, 'heroSmsReuseEnabled')
+      ) {
+        const currentReuseEnabled = currentState?.phoneSmsReuseEnabled ?? currentState?.heroSmsReuseEnabled;
+        if (currentReuseEnabled !== undefined) {
+          const normalizedReuseEnabled = Boolean(currentReuseEnabled);
+          updates.phoneSmsReuseEnabled = normalizedReuseEnabled;
+          updates.heroSmsReuseEnabled = normalizedReuseEnabled;
+        } else {
+          delete updates.phoneSmsReuseEnabled;
+          delete updates.heroSmsReuseEnabled;
+        }
+      }
+
+      preserveKeyFromState(updates, currentState, 'freePhoneReuseEnabled');
+      preserveKeyFromState(updates, currentState, 'freePhoneReuseAutoEnabled');
+      preserveKeyFromState(updates, currentState, 'phonePreferredActivation');
+    }
+
     async function appendManualAccountRunRecordIfNeeded(status, stateOverride = null, reason = '') {
       if (typeof appendAccountRunRecord !== 'function') {
         return null;
@@ -1247,6 +1283,12 @@
             || Object.prototype.hasOwnProperty.call(updates, 'contributionMode')
           ) {
             updates.signupMethod = resolveSignupMethod(nextSignupState);
+          }
+          const nextPersistedSignupMethod = Object.prototype.hasOwnProperty.call(updates, 'signupMethod')
+            ? updates.signupMethod
+            : currentState?.signupMethod;
+          if (normalizeSignupMethod(nextPersistedSignupMethod) === 'phone') {
+            preservePhoneReuseSettingsForPhoneSignup(updates, currentState);
           }
           const modeChanged = Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
             && Boolean(currentState?.plusModeEnabled) !== Boolean(updates.plusModeEnabled);

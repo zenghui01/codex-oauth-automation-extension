@@ -519,10 +519,12 @@ const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const PHONE_SIGNUP_REUSE_LOCK_TITLE = '手机号注册流程不使用号码复用，切回邮箱注册后会恢复原设置';
 let latestState = null;
 let currentPlusModeEnabled = false;
 let currentPlusPaymentMethod = DEFAULT_PLUS_PAYMENT_METHOD;
 let currentSignupMethod = DEFAULT_SIGNUP_METHOD;
+let phoneSignupReuseUiWasLocked = false;
 let lastConfirmedOperationDelayEnabled = true;
 let heroSmsCountrySelectionOrder = [];
 let phoneSmsProviderOrderSelection = [];
@@ -3457,17 +3459,33 @@ function collectSettingsPayload() {
   const defaultPhoneCodePollMaxRounds = typeof DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS !== 'undefined'
     ? DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS
     : 12;
-  const phoneSmsReuseEnabledValue = typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled
+  const selectedSignupMethod = typeof getSelectedSignupMethod === 'function'
+    ? getSelectedSignupMethod()
+    : (
+      (typeof normalizeSignupMethod === 'function'
+        ? normalizeSignupMethod(latestState?.signupMethod)
+        : (String(latestState?.signupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email'))
+    );
+  const phoneSignupReuseLocked = typeof isPhoneSignupReuseLocked === 'function'
+    ? isPhoneSignupReuseLocked(latestState, { signupMethod: selectedSignupMethod })
+    : selectedSignupMethod === 'phone';
+  const phoneSmsReuseEnabledValue = phoneSignupReuseLocked
+    ? getStoredPhoneSmsReuseEnabled(latestState)
+    : typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled
     ? normalizeHeroSmsReuseEnabledValue(inputHeroSmsReuseEnabled.checked)
     : normalizeHeroSmsReuseEnabledValue(
       latestState?.phoneSmsReuseEnabled,
       latestState?.heroSmsReuseEnabled
     );
   const heroSmsReuseEnabledValue = phoneSmsReuseEnabledValue;
-  const freePhoneReuseEnabledValue = typeof inputFreePhoneReuseEnabled !== 'undefined' && inputFreePhoneReuseEnabled
+  const freePhoneReuseEnabledValue = phoneSignupReuseLocked
+    ? getStoredFreePhoneReuseEnabled(latestState)
+    : typeof inputFreePhoneReuseEnabled !== 'undefined' && inputFreePhoneReuseEnabled
     ? Boolean(inputFreePhoneReuseEnabled.checked)
     : Boolean(latestState?.freePhoneReuseEnabled);
-  const freePhoneReuseAutoEnabledValue = typeof inputFreePhoneReuseAutoEnabled !== 'undefined' && inputFreePhoneReuseAutoEnabled
+  const freePhoneReuseAutoEnabledValue = phoneSignupReuseLocked
+    ? getStoredFreePhoneReuseAutoEnabled(latestState)
+    : typeof inputFreePhoneReuseAutoEnabled !== 'undefined' && inputFreePhoneReuseAutoEnabled
     ? Boolean(inputFreePhoneReuseAutoEnabled.checked)
     : Boolean(latestState?.freePhoneReuseAutoEnabled);
   const defaultHeroSmsAcquirePriority = typeof DEFAULT_HERO_SMS_ACQUIRE_PRIORITY !== 'undefined'
@@ -3556,7 +3574,9 @@ function collectSettingsPayload() {
   const heroSmsPreferredPriceValue = typeof inputHeroSmsPreferredPrice !== 'undefined' && inputHeroSmsPreferredPrice
     ? normalizeHeroSmsMaxPriceValue(inputHeroSmsPreferredPrice.value)
     : normalizeHeroSmsMaxPriceValue(latestState?.heroSmsPreferredPrice || '');
-  const phonePreferredActivationValue = typeof getSelectedPhonePreferredActivation === 'function'
+  const phonePreferredActivationValue = phoneSignupReuseLocked
+    ? (latestState?.phonePreferredActivation ? { ...latestState.phonePreferredActivation } : null)
+    : typeof getSelectedPhonePreferredActivation === 'function'
     ? getSelectedPhonePreferredActivation()
     : null;
   const phoneVerificationReplacementLimitValue = typeof inputPhoneReplacementLimit !== 'undefined' && inputPhoneReplacementLimit
@@ -3647,13 +3667,6 @@ function collectSettingsPayload() {
   const currentPayPalAccount = typeof getCurrentPayPalAccount === 'function'
     ? getCurrentPayPalAccount(latestState)
     : payPalAccounts.find((account) => account?.id === String(latestState?.currentPayPalAccountId || '').trim()) || null;
-  const selectedSignupMethod = typeof getSelectedSignupMethod === 'function'
-    ? getSelectedSignupMethod()
-    : (
-      (typeof normalizeSignupMethod === 'function'
-        ? normalizeSignupMethod(latestState?.signupMethod)
-        : (String(latestState?.signupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email'))
-    );
   const normalizePanelModeSafe = typeof normalizePanelMode === 'function'
     ? normalizePanelMode
     : ((value = '') => {
@@ -7573,6 +7586,69 @@ function normalizeSignupMethod(value = '') {
     : 'email';
 }
 
+function isPhoneSignupReuseLocked(state = latestState, options = {}) {
+  const hasOptionMethod = Object.prototype.hasOwnProperty.call(options || {}, 'signupMethod');
+  const rawMethod = hasOptionMethod
+    ? options.signupMethod
+    : (typeof getSelectedSignupMethod === 'function'
+      ? getSelectedSignupMethod()
+      : (state?.signupMethod || DEFAULT_SIGNUP_METHOD));
+  const selectedMethod = normalizeSignupMethod(rawMethod);
+  if (selectedMethod === SIGNUP_METHOD_PHONE) {
+    return true;
+  }
+
+  if (!options?.includeRuntimeIdentity) {
+    return false;
+  }
+
+  const identifierType = String(
+    options?.accountIdentifierType
+    ?? state?.accountIdentifierType
+    ?? ''
+  ).trim().toLowerCase();
+  return identifierType === 'phone';
+}
+
+function getStoredPhoneSmsReuseEnabled(state = latestState) {
+  return normalizeHeroSmsReuseEnabledValue(
+    state?.phoneSmsReuseEnabled,
+    state?.heroSmsReuseEnabled
+  );
+}
+
+function getStoredFreePhoneReuseEnabled(state = latestState) {
+  return Boolean(state?.freePhoneReuseEnabled);
+}
+
+function getStoredFreePhoneReuseAutoEnabled(state = latestState) {
+  return Boolean(state?.freePhoneReuseAutoEnabled);
+}
+
+function restorePhoneReuseControlsFromState(state = latestState) {
+  if (typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled) {
+    inputHeroSmsReuseEnabled.checked = getStoredPhoneSmsReuseEnabled(state);
+  }
+  if (typeof inputFreePhoneReuseEnabled !== 'undefined' && inputFreePhoneReuseEnabled) {
+    inputFreePhoneReuseEnabled.checked = getStoredFreePhoneReuseEnabled(state);
+  }
+  if (typeof inputFreePhoneReuseAutoEnabled !== 'undefined' && inputFreePhoneReuseAutoEnabled) {
+    inputFreePhoneReuseAutoEnabled.checked = getStoredFreePhoneReuseAutoEnabled(state);
+  }
+}
+
+function setElementReuseLockedState(element, locked, title = PHONE_SIGNUP_REUSE_LOCK_TITLE) {
+  if (!element) {
+    return;
+  }
+  element.classList?.toggle?.('is-disabled', Boolean(locked));
+  if (locked) {
+    element.title = title;
+  } else if (element.title === title) {
+    element.title = '';
+  }
+}
+
 function normalizePanelMode(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'sub2api' || normalized === 'codex2api') {
@@ -7904,19 +7980,79 @@ function updatePhoneVerificationSettingsUI() {
   if (typeof rowFreePhoneReuseAutoEnabled !== 'undefined' && rowFreePhoneReuseAutoEnabled) {
     rowFreePhoneReuseAutoEnabled.style.display = showSettings ? '' : 'none';
   }
+  const phoneSignupReuseLocked = typeof isPhoneSignupReuseLocked === 'function'
+    ? isPhoneSignupReuseLocked(latestState, {
+      signupMethod: typeof getSelectedSignupMethod === 'function'
+        ? getSelectedSignupMethod()
+        : latestState?.signupMethod,
+    })
+    : false;
+  if (!phoneSignupReuseLocked && phoneSignupReuseUiWasLocked) {
+    restorePhoneReuseControlsFromState(latestState);
+  }
+  if (phoneSignupReuseLocked) {
+    if (typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled) {
+      inputHeroSmsReuseEnabled.checked = false;
+    }
+    if (typeof inputFreePhoneReuseEnabled !== 'undefined' && inputFreePhoneReuseEnabled) {
+      inputFreePhoneReuseEnabled.checked = false;
+    }
+    if (typeof inputFreePhoneReuseAutoEnabled !== 'undefined' && inputFreePhoneReuseAutoEnabled) {
+      inputFreePhoneReuseAutoEnabled.checked = false;
+    }
+  }
+  phoneSignupReuseUiWasLocked = phoneSignupReuseLocked;
+  const settingsLocked = isAutoRunLockedPhase() || isAutoRunScheduledPhase();
   const freePhoneReuseEnabled = Boolean(
-    typeof inputFreePhoneReuseEnabled !== 'undefined' && inputFreePhoneReuseEnabled?.checked
+    !phoneSignupReuseLocked
+    && typeof inputFreePhoneReuseEnabled !== 'undefined'
+    && inputFreePhoneReuseEnabled?.checked
   );
-  const freePhoneReuseAutoAvailable = showSettings && freePhoneReuseEnabled;
+  const freePhoneReuseAutoAvailable = showSettings && !phoneSignupReuseLocked && freePhoneReuseEnabled;
+  if (typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled) {
+    inputHeroSmsReuseEnabled.disabled = settingsLocked || phoneSignupReuseLocked;
+  }
   if (typeof inputFreePhoneReuseAutoEnabled !== 'undefined' && inputFreePhoneReuseAutoEnabled) {
-    inputFreePhoneReuseAutoEnabled.disabled = !freePhoneReuseAutoAvailable;
+    inputFreePhoneReuseAutoEnabled.disabled = settingsLocked || phoneSignupReuseLocked || !freePhoneReuseAutoAvailable;
     if (!freePhoneReuseAutoAvailable) {
       inputFreePhoneReuseAutoEnabled.checked = false;
     }
   }
-  setFreePhoneReuseControlsLocked(isAutoRunLockedPhase() || isAutoRunScheduledPhase());
+  setFreePhoneReuseControlsLocked(settingsLocked || phoneSignupReuseLocked);
+  if (typeof selectHeroSmsPreferredActivation !== 'undefined' && selectHeroSmsPreferredActivation) {
+    selectHeroSmsPreferredActivation.disabled = settingsLocked || phoneSignupReuseLocked;
+  }
+  if (typeof inputFreeReusablePhone !== 'undefined' && inputFreeReusablePhone) {
+    inputFreeReusablePhone.disabled = settingsLocked || phoneSignupReuseLocked;
+  }
+  if (typeof btnSaveFreeReusablePhone !== 'undefined' && btnSaveFreeReusablePhone) {
+    btnSaveFreeReusablePhone.disabled = settingsLocked || phoneSignupReuseLocked;
+  }
+  if (typeof btnClearFreeReusablePhone !== 'undefined' && btnClearFreeReusablePhone) {
+    btnClearFreeReusablePhone.disabled = settingsLocked || phoneSignupReuseLocked;
+  }
+  const heroSmsReuseRow = typeof inputHeroSmsReuseEnabled !== 'undefined' && inputHeroSmsReuseEnabled?.closest
+    ? inputHeroSmsReuseEnabled.closest('.hero-sms-price-control')
+    : null;
+  setElementReuseLockedState(heroSmsReuseRow, phoneSignupReuseLocked);
+  setElementReuseLockedState(
+    typeof rowFreePhoneReuseEnabled !== 'undefined' ? rowFreePhoneReuseEnabled : null,
+    phoneSignupReuseLocked
+  );
+  setElementReuseLockedState(
+    typeof rowFreePhoneReuseAutoEnabled !== 'undefined' ? rowFreePhoneReuseAutoEnabled : null,
+    phoneSignupReuseLocked
+  );
+  setElementReuseLockedState(
+    typeof rowHeroSmsPreferredActivation !== 'undefined' ? rowHeroSmsPreferredActivation : null,
+    phoneSignupReuseLocked
+  );
+  setElementReuseLockedState(
+    typeof rowFreeReusablePhone !== 'undefined' ? rowFreeReusablePhone : null,
+    phoneSignupReuseLocked
+  );
   if (typeof rowFreePhoneReuseAutoEnabled !== 'undefined' && rowFreePhoneReuseAutoEnabled) {
-    rowFreePhoneReuseAutoEnabled.classList.toggle('is-disabled', !freePhoneReuseAutoAvailable);
+    rowFreePhoneReuseAutoEnabled.classList.toggle('is-disabled', phoneSignupReuseLocked || !freePhoneReuseAutoAvailable);
   }
   const runtimeVisible = enabled;
   [
@@ -14031,11 +14167,24 @@ inputNexSmsServiceCode?.addEventListener('blur', () => {
 });
 
 inputHeroSmsReuseEnabled?.addEventListener('change', () => {
+  if (isPhoneSignupReuseLocked(latestState)) {
+    inputHeroSmsReuseEnabled.checked = false;
+    updatePhoneVerificationSettingsUI();
+    return;
+  }
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
 
 inputFreePhoneReuseEnabled?.addEventListener('change', () => {
+  if (isPhoneSignupReuseLocked(latestState)) {
+    inputFreePhoneReuseEnabled.checked = false;
+    if (inputFreePhoneReuseAutoEnabled) {
+      inputFreePhoneReuseAutoEnabled.checked = false;
+    }
+    updatePhoneVerificationSettingsUI();
+    return;
+  }
   if (!inputFreePhoneReuseEnabled.checked && inputFreePhoneReuseAutoEnabled) {
     inputFreePhoneReuseAutoEnabled.checked = false;
   }
@@ -14045,12 +14194,22 @@ inputFreePhoneReuseEnabled?.addEventListener('change', () => {
 });
 
 inputFreePhoneReuseAutoEnabled?.addEventListener('change', () => {
+  if (isPhoneSignupReuseLocked(latestState)) {
+    inputFreePhoneReuseAutoEnabled.checked = false;
+    updatePhoneVerificationSettingsUI();
+    return;
+  }
   updatePhoneVerificationSettingsUI();
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
 
 btnSaveFreeReusablePhone?.addEventListener('click', async () => {
+  if (isPhoneSignupReuseLocked(latestState)) {
+    showToast?.('手机号注册流程不能记录白嫖复用号码，请切回邮箱注册后再使用。', 'warn', 2600);
+    updatePhoneVerificationSettingsUI();
+    return;
+  }
   const phoneNumber = String(inputFreeReusablePhone?.value || '').trim();
   if (!phoneNumber) {
     showToast?.('请先填写白嫖复用手机号。', 'warn', 2200);
@@ -14094,6 +14253,11 @@ selectHeroSmsAcquirePriority?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 selectHeroSmsPreferredActivation?.addEventListener('change', () => {
+  if (isPhoneSignupReuseLocked(latestState)) {
+    renderPhonePreferredActivationOptions(latestState);
+    updatePhoneVerificationSettingsUI();
+    return;
+  }
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -14967,6 +15131,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           message.payload.phoneSmsReuseEnabled,
           message.payload.heroSmsReuseEnabled
         );
+        updatePhoneVerificationSettingsUI();
       }
       if (message.payload.freePhoneReuseEnabled !== undefined && inputFreePhoneReuseEnabled) {
         inputFreePhoneReuseEnabled.checked = Boolean(message.payload.freePhoneReuseEnabled);
