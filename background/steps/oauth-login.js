@@ -4,7 +4,7 @@
   function createStep7Executor(deps = {}) {
     const {
       addLog,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       getErrorMessage,
       getLoginAuthStateLabel,
       getOAuthFlowStepTimeoutMs,
@@ -131,7 +131,7 @@
         step: completionStep,
         visibleStep: completionStep,
       });
-      await completeStepFromBackground(completionStep, {
+      await completeNodeFromBackground(state?.nodeId || 'oauth-login', {
         loginVerificationRequestedAt: null,
         skipLoginVerificationStep: true,
         directOAuthConsentPage: true,
@@ -225,7 +225,8 @@
           const result = await sendToContentScriptResilient(
             'signup-page',
             {
-              type: 'EXECUTE_STEP',
+              type: 'EXECUTE_NODE',
+              nodeId: 'oauth-login',
               step: 7,
               source: 'background',
               payload: {
@@ -277,7 +278,7 @@
               completionPayload.directOAuthConsentPage = Boolean(result.directOAuthConsentPage);
             }
 
-            await completeStepFromBackground(completionStep, completionPayload);
+            await completeNodeFromBackground(state?.nodeId || 'oauth-login', completionPayload);
             return;
           }
 

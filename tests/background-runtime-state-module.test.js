@@ -22,29 +22,22 @@ test('runtime-state module exposes a factory', () => {
   assert.equal(typeof api?.createRuntimeStateHelpers, 'function');
 });
 
-test('runtime-state view derives canonical flow metadata from legacy step state', () => {
+test('runtime-state view preserves canonical flow metadata from node state', () => {
   const api = loadRuntimeStateApi();
   const helpers = api.createRuntimeStateHelpers({
     DEFAULT_ACTIVE_FLOW_ID: 'openai',
-    defaultStepStatuses: {
-      1: 'pending',
-      2: 'pending',
-      10: 'pending',
-    },
-    getStepDefinitionForState(step) {
-      return {
-        1: { id: 1, key: 'open-chatgpt' },
-        2: { id: 2, key: 'submit-signup-email' },
-        10: { id: 10, key: 'oauth-login' },
-      }[Number(step)] || null;
+    defaultNodeStatuses: {
+      'open-chatgpt': 'pending',
+      'submit-signup-email': 'pending',
+      'oauth-login': 'pending',
     },
   });
 
   const view = helpers.buildStateView({
-    currentStep: 2,
-    stepStatuses: {
-      1: 'completed',
-      2: 'running',
+    currentNodeId: 'submit-signup-email',
+    nodeStatuses: {
+      'open-chatgpt': 'completed',
+      'submit-signup-email': 'running',
     },
     oauthUrl: 'https://auth.example.com/start',
     plusCheckoutTabId: 88,
@@ -63,14 +56,9 @@ test('runtime-state view derives canonical flow metadata from legacy step state'
 
   assert.equal(view.activeFlowId, 'openai');
   assert.equal(view.currentNodeId, 'submit-signup-email');
-  assert.deepStrictEqual(view.legacyStepCompat, {
-    currentStep: 2,
-    stepStatuses: {
-      1: 'completed',
-      2: 'running',
-      10: 'pending',
-    },
-  });
+  assert.equal(Object.prototype.hasOwnProperty.call(view, 'legacyStepCompat'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(view, 'currentStep'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(view, 'stepStatuses'), false);
   assert.deepStrictEqual(view.nodeStatuses, {
     'open-chatgpt': 'completed',
     'submit-signup-email': 'running',
@@ -93,35 +81,33 @@ test('runtime-state view derives canonical flow metadata from legacy step state'
   });
 });
 
-test('runtime-state patch accepts nested flow updates while keeping legacy compatibility fields in sync', () => {
+test('runtime-state patch accepts nested flow and node updates without legacy step state', () => {
   const api = loadRuntimeStateApi();
   const helpers = api.createRuntimeStateHelpers({
     DEFAULT_ACTIVE_FLOW_ID: 'openai',
-    defaultStepStatuses: {
-      1: 'pending',
-      2: 'pending',
-      10: 'pending',
-    },
-    getStepDefinitionForState(step) {
-      return {
-        1: { id: 1, key: 'open-chatgpt' },
-        2: { id: 2, key: 'submit-signup-email' },
-        10: { id: 10, key: 'oauth-login' },
-      }[Number(step)] || null;
+    defaultNodeStatuses: {
+      'open-chatgpt': 'pending',
+      'submit-signup-email': 'pending',
+      'oauth-login': 'pending',
     },
   });
 
   const patch = helpers.buildSessionStatePatch({
-    currentStep: 1,
-    stepStatuses: {
-      1: 'running',
-      2: 'pending',
-      10: 'pending',
+    currentNodeId: 'open-chatgpt',
+    nodeStatuses: {
+      'open-chatgpt': 'running',
+      'submit-signup-email': 'pending',
+      'oauth-login': 'pending',
     },
     oauthUrl: 'https://old.example.com/start',
   }, {
     runtimeState: {
       activeRunId: 'run-001',
+      currentNodeId: 'oauth-login',
+      nodeStatuses: {
+        'open-chatgpt': 'completed',
+        'oauth-login': 'running',
+      },
       flowState: {
         openai: {
           auth: {
@@ -132,13 +118,6 @@ test('runtime-state patch accepts nested flow updates while keeping legacy compa
           },
         },
       },
-      legacyStepCompat: {
-        currentStep: 10,
-        stepStatuses: {
-          1: 'completed',
-          10: 'running',
-        },
-      },
     },
   });
 
@@ -147,12 +126,8 @@ test('runtime-state patch accepts nested flow updates while keeping legacy compa
   assert.equal(patch.currentNodeId, 'oauth-login');
   assert.equal(patch.oauthUrl, 'https://new.example.com/start');
   assert.equal(patch.plusCheckoutTabId, 99);
-  assert.equal(patch.currentStep, 10);
-  assert.deepStrictEqual(patch.stepStatuses, {
-    1: 'completed',
-    2: 'pending',
-    10: 'running',
-  });
+  assert.equal(Object.prototype.hasOwnProperty.call(patch, 'currentStep'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(patch, 'stepStatuses'), false);
   assert.deepStrictEqual(patch.nodeStatuses, {
     'open-chatgpt': 'completed',
     'submit-signup-email': 'pending',

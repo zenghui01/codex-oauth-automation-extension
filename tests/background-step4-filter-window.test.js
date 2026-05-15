@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -23,7 +23,7 @@ test('step 4 passes a fixed 10-minute lookback window to 2925 mailbox polling', 
         },
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     confirmCustomVerificationStepBypass: async () => {},
     ensureMail2925MailboxSession: async () => {
       ensureCalls += 1;
@@ -84,7 +84,7 @@ test('step 4 does not request a fresh code first for Cloudflare temp mail', asyn
         update: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     confirmCustomVerificationStepBypass: async () => {},
     ensureMail2925MailboxSession: async () => {},
     getMailConfig: () => ({
@@ -135,7 +135,7 @@ test('step 4 checks iCloud session before polling iCloud mailbox', async () => {
         update: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     confirmCustomVerificationStepBypass: async () => {},
     ensureIcloudMailSession: async () => {
       icloudChecks += 1;
@@ -183,7 +183,7 @@ test('step 4 forwards skipProfileStep when prepare stage already reached logged-
         update: async () => {},
       },
     },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completions.push({ step, payload });
     },
     confirmCustomVerificationStepBypass: async () => {},
@@ -224,7 +224,7 @@ test('step 4 forwards skipProfileStep when prepare stage already reached logged-
 
   assert.deepStrictEqual(completions, [
     {
-      step: 4,
+      step: 'fetch-signup-code',
       payload: { skipProfileStep: true },
     },
   ]);
@@ -244,7 +244,7 @@ test('step 4 phone signup branch uses SMS helper and does not poll mailbox', asy
         update: async () => {},
       },
     },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completions.push({ step, payload });
     },
     confirmCustomVerificationStepBypass: async () => {},
@@ -296,7 +296,7 @@ test('step 4 phone signup branch uses SMS helper and does not poll mailbox', asy
   assert.equal(Object.prototype.hasOwnProperty.call(phoneCalls[0].options, 'signupProfile'), true);
   assert.deepStrictEqual(completions, [
     {
-      step: 4,
+      step: 'fetch-signup-code',
       payload: {
         phoneVerification: true,
         code: '',
@@ -321,7 +321,7 @@ test('step 4 phone signup email-verification handoff polls mailbox instead of co
         update: async () => {},
       },
     },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completions.push({ step, payload });
     },
     confirmCustomVerificationStepBypass: async () => {},
@@ -403,7 +403,7 @@ test('step 4 prepare retries transport by recovering retry page without replayin
         update: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     confirmCustomVerificationStepBypass: async () => {},
     ensureMail2925MailboxSession: async () => {},
     getMailConfig: () => ({

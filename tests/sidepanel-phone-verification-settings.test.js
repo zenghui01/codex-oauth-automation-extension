@@ -200,7 +200,7 @@ test('sidepanel source wires runtime signup phone field to background sync messa
   assert.match(sidepanelSource, /final \? 'SAVE_SIGNUP_PHONE' : 'SET_SIGNUP_PHONE_STATE'/);
   assert.match(sidepanelSource, /message\.payload\.signupPhoneNumber !== undefined/);
   assert.match(sidepanelSource, /await persistSignupPhoneInputForAction\(\);\s*await saveSettings/);
-  assert.match(sidepanelSource, /if \(shouldExecuteStep3WithSignupPhoneIdentity\(latestState\)\)[\s\S]*payload: \{ step \}/);
+  assert.match(sidepanelSource, /if \(shouldExecuteStep3WithSignupPhoneIdentity\(latestState\)\)[\s\S]*type:\s*'EXECUTE_NODE'[\s\S]*payload: \{ nodeId \}/);
   assert.match(sidepanelSource, /async function handleSkipStep\(step\)[\s\S]*await persistCurrentSettingsForAction\(\);/);
   assert.match(sidepanelSource, /inputSignupPhone\.addEventListener\('input'[\s\S]*signupPhoneInputDirty = true/);
 });

@@ -46,7 +46,13 @@ test('account run history helper upgrades old records, keeps stopped items and s
       },
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
+    getNodeTitleForState: (nodeId) => ({
+      'fetch-login-code': '获取登录验证码',
+      'oauth-login': '刷新 OAuth 并登录',
+    })[nodeId] || nodeId,
     getState: async () => ({
+      flowId: 'openai',
+      runId: 'run-2',
       email: ' latest@example.com ',
       password: ' secret ',
       autoRunning: true,
@@ -61,6 +67,8 @@ test('account run history helper upgrades old records, keeps stopped items and s
 
   const record = helpers.buildAccountRunHistoryRecord(
     {
+      flowId: 'openai',
+      runId: 'run-2',
       email: ' latest@example.com ',
       password: ' secret ',
       autoRunning: true,
@@ -68,11 +76,13 @@ test('account run history helper upgrades old records, keeps stopped items and s
       autoRunTotalRuns: 10,
       autoRunAttemptRun: 3,
     },
-    'step8_failed',
+    'node:fetch-login-code:failed',
     '步骤 8：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。'
   );
   assert.deepStrictEqual(record, {
     recordId: 'latest@example.com',
+    flowId: 'openai',
+    runId: 'run-2',
     accountIdentifierType: 'email',
     accountIdentifier: 'latest@example.com',
     email: 'latest@example.com',
@@ -83,7 +93,8 @@ test('account run history helper upgrades old records, keeps stopped items and s
     retryCount: 2,
     failureLabel: '出现手机号验证',
     failureDetail: '步骤 8：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。',
-    failedStep: 8,
+    failedNodeId: 'fetch-login-code',
+    failedStep: null,
     source: 'auto',
     autoRunContext: {
       currentRun: 2,
@@ -94,9 +105,12 @@ test('account run history helper upgrades old records, keeps stopped items and s
     contributionMode: false,
   });
 
-  const appended = await helpers.appendAccountRunRecord('step8_failed', null, '步骤 8：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。');
+  const appended = await helpers.appendAccountRunRecord('node:fetch-login-code:failed', null, '步骤 8：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。');
   assert.equal(appended.email, 'latest@example.com');
   assert.equal(appended.finalStatus, 'failed');
+  assert.equal(appended.flowId, 'openai');
+  assert.equal(appended.runId, 'run-2');
+  assert.equal(appended.failedNodeId, 'fetch-login-code');
   assert.equal(appended.failureLabel, '出现手机号验证');
   assert.equal(storedHistory.length, 3, '旧的 stopped 记录应在新结构中保留');
   assert.equal(storedHistory.some((item) => item.email === 'stop@example.com' && item.finalStatus === 'stopped'), true);
@@ -106,18 +120,21 @@ test('account run history helper upgrades old records, keeps stopped items and s
   assert.equal(helpers.shouldAppendAccountRunTextFile({ accountRunHistoryTextEnabled: false, accountRunHistoryHelperBaseUrl: 'http://127.0.0.1:17373' }), true);
   assert.equal(helpers.shouldAppendAccountRunTextFile({ accountRunHistoryTextEnabled: true, accountRunHistoryHelperBaseUrl: 'http://127.0.0.1:17373' }), true);
   const stoppedRecord = helpers.buildAccountRunHistoryRecord(
-    { email: 'a@b.com', password: 'x' },
-    'step7_stopped',
-    '步骤 7 已被用户停止'
+    { flowId: 'openai', runId: 'manual-run', email: 'a@b.com', password: 'x' },
+    'node:oauth-login:stopped',
+    '节点 oauth-login 已被用户停止'
   );
   assert.equal(stoppedRecord.recordId, 'a@b.com');
+  assert.equal(stoppedRecord.flowId, 'openai');
+  assert.equal(stoppedRecord.runId, 'manual-run');
   assert.equal(stoppedRecord.email, 'a@b.com');
   assert.equal(stoppedRecord.password, 'x');
   assert.equal(stoppedRecord.finalStatus, 'stopped');
   assert.equal(stoppedRecord.retryCount, 0);
-  assert.equal(stoppedRecord.failureLabel, '步骤 7 停止');
-  assert.equal(stoppedRecord.failureDetail, '步骤 7 已被用户停止');
-  assert.equal(stoppedRecord.failedStep, 7);
+  assert.equal(stoppedRecord.failureLabel, '节点 刷新 OAuth 并登录 停止');
+  assert.equal(stoppedRecord.failureDetail, '节点 oauth-login 已被用户停止');
+  assert.equal(stoppedRecord.failedNodeId, 'oauth-login');
+  assert.equal(stoppedRecord.failedStep, null);
   assert.equal(stoppedRecord.source, 'manual');
   assert.equal(stoppedRecord.autoRunContext, null);
   assert.ok(stoppedRecord.finishedAt);
@@ -149,11 +166,13 @@ test('account run history helper upgrades old records, keeps stopped items and s
     retryCount: 0,
     failureLabel: '流程已停止',
     failureDetail: '步骤 7 已被用户停止。',
+    failedNodeId: 'oauth-login',
     failedStep: 7,
     source: 'manual',
     autoRunContext: null,
   });
-  assert.equal(normalizedStoppedRecord.failureLabel, '步骤 7 停止');
+  assert.equal(normalizedStoppedRecord.failureLabel, '节点 刷新 OAuth 并登录 停止');
+  assert.equal(normalizedStoppedRecord.failedNodeId, 'oauth-login');
   assert.equal(normalizedStoppedRecord.failedStep, 7);
 });
 
@@ -177,6 +196,8 @@ test('account run history helper accepts phone-only records without forcing emai
 
   assert.deepStrictEqual(record, {
     recordId: 'phone:+6612345',
+    flowId: '',
+    runId: '',
     accountIdentifierType: 'phone',
     accountIdentifier: '+6612345',
     email: '',
@@ -187,6 +208,7 @@ test('account run history helper accepts phone-only records without forcing emai
     retryCount: 0,
     failureLabel: '流程完成',
     failureDetail: '',
+    failedNodeId: '',
     failedStep: null,
     source: 'manual',
     autoRunContext: null,
@@ -242,10 +264,11 @@ test('account run history does not turn prerequisite guidance into a fake step 2
     autoRunCurrentRun: 1,
     autoRunTotalRuns: 3,
     autoRunAttemptRun: 2,
-  }, 'step10_failed', '缺少登录账号：请先完成步骤 2，或在侧栏填写账号后再执行当前步骤。');
+  }, 'node:platform-verify:failed', '缺少登录账号：请先完成步骤 2，或在侧栏填写账号后再执行当前步骤。');
 
-  assert.equal(explicitFailedRecord.failedStep, 10);
-  assert.equal(explicitFailedRecord.failureLabel, '步骤 10 失败');
+  assert.equal(explicitFailedRecord.failedNodeId, 'platform-verify');
+  assert.equal(explicitFailedRecord.failedStep, null);
+  assert.equal(explicitFailedRecord.failureLabel, '节点 platform-verify 失败');
 
   const migratedOldRecord = helpers.normalizeAccountRunHistoryRecord({
     email: 'old@example.com',
@@ -314,10 +337,12 @@ test('account run history merges email and phone identities from the same run', 
       activationId: 'a1',
       phoneNumber: '+44 7799 342687',
     },
-  }, 'step9_failed', '步骤 9：手机号验证失败。');
+  }, 'node:confirm-oauth:failed', '步骤 9：手机号验证失败。');
   assert.equal(failedRecord.accountIdentifierType, 'email');
   assert.equal(failedRecord.accountIdentifier, 'tmp@example.com');
   assert.equal(failedRecord.phoneNumber, '+44 7799 342687');
+  assert.equal(failedRecord.failedNodeId, 'confirm-oauth');
+  assert.equal(failedRecord.failedStep, null);
 
   const successRecord = await helpers.appendAccountRunRecord('success', {
     accountIdentifierType: 'email',

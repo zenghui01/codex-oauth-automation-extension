@@ -593,7 +593,7 @@
 
     function getContentScriptResponseTimeoutMs(message) {
       if (!message || typeof message !== 'object') return 30000;
-      if (message.type === 'EXECUTE_STEP' && Number(message.step) === 6) return 75000;
+      if (message.type === 'EXECUTE_NODE' && String(message.nodeId || message.payload?.nodeId || '').trim() === 'wait-registration-success') return 75000;
       if (message.type === 'POLL_EMAIL') {
         const maxAttempts = Math.max(1, Number(message.payload?.maxAttempts) || 1);
         const intervalMs = Math.max(0, Number(message.payload?.intervalMs) || 0);

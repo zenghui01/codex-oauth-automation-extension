@@ -51,8 +51,8 @@ function createSub2ApiPanelContext(fetchCalls = []) {
       removeItem(key) { storage.delete(`session:${key}`); },
     },
     log() {},
-    reportComplete(step, payload) {
-      context.completed.push({ step, payload });
+    reportComplete(nodeId, payload) {
+      context.completed.push({ nodeId, payload });
     },
     reportReady() {},
     reportError() {},
@@ -177,7 +177,8 @@ test('SUB2API step 10 uses the same proxy for code exchange and account creation
   assert.equal(exchangeCall.body.proxy_id, 7);
   assert.equal(createCall.body.proxy_id, 7);
   assert.equal(createCall.body.group_ids[0], 5);
-  assert.equal(context.completed[0].step, 10);
+  assert.equal(context.completed[0].nodeId, 'platform-verify');
+  assert.equal(context.completed[0].payload.visibleStep, 10);
 });
 
 test('SUB2API panel accepts Plus platform verify step 13', async () => {
@@ -202,7 +203,8 @@ test('SUB2API panel accepts Plus platform verify step 13', async () => {
 
   assert.equal(exchangeCall.body.code, 'callback-code');
   assert.equal(createCall.body.group_ids[0], 5);
-  assert.equal(context.completed[0].step, 13);
+  assert.equal(context.completed[0].nodeId, 'platform-verify');
+  assert.equal(context.completed[0].payload.visibleStep, 13);
 });
 
 test('SUB2API step 1 omits proxy_id when default proxy is empty', async () => {

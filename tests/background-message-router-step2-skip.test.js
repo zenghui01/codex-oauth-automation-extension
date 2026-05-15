@@ -10,6 +10,7 @@ function createRouter(overrides = {}) {
   const events = {
     logs: [],
     stepStatuses: [],
+    nodeStatuses: [],
     stateUpdates: [],
     broadcasts: [],
     balanceRefreshes: [],
@@ -26,10 +27,63 @@ function createRouter(overrides = {}) {
     executedSteps: [],
     accountRecords: [],
   };
+  const nodeByStep = {
+    1: 'open-chatgpt',
+    2: 'submit-signup-email',
+    3: 'fill-password',
+    4: 'fetch-signup-code',
+    5: 'fill-profile',
+    6: 'wait-registration-success',
+    7: 'oauth-login',
+    8: 'fetch-login-code',
+    9: 'confirm-oauth',
+    10: 'platform-verify',
+    11: 'fetch-login-code',
+    12: 'confirm-oauth',
+    13: 'platform-verify',
+  };
+  const normalStepByNode = {
+    'open-chatgpt': 1,
+    'submit-signup-email': 2,
+    'fill-password': 3,
+    'fetch-signup-code': 4,
+    'fill-profile': 5,
+    'wait-registration-success': 6,
+    'oauth-login': 7,
+    'fetch-login-code': 8,
+    'confirm-oauth': 9,
+    'platform-verify': 10,
+  };
+  const plusStepByNode = {
+    'open-chatgpt': 1,
+    'submit-signup-email': 2,
+    'fill-password': 3,
+    'fetch-signup-code': 4,
+    'fill-profile': 5,
+    'oauth-login': 10,
+    'fetch-login-code': 11,
+    'confirm-oauth': 12,
+    'platform-verify': 13,
+  };
+  const getStepForNode = (nodeId) => {
+    const state = normalizeState(overrides.state || {});
+    return (state.plusModeEnabled ? plusStepByNode : normalStepByNode)[nodeId] || 0;
+  };
+  const normalizeState = (state = {}) => {
+    const next = { ...(state || {}) };
+    if (!next.nodeStatuses && next.stepStatuses) {
+      next.nodeStatuses = Object.fromEntries(
+        Object.entries(next.stepStatuses)
+          .map(([step, status]) => [nodeByStep[Number(step)], status])
+          .filter(([nodeId]) => Boolean(nodeId))
+      );
+    }
+    return next;
+  };
 
   const router = api.createMessageRouter({
     addLog: async (message, level, options = {}) => {
-      events.logs.push({ message, level, step: options.step, stepKey: options.stepKey });
+      events.logs.push({ message, level, step: options.step, stepKey: options.stepKey, nodeId: options.nodeId });
     },
     appendAccountRunRecord: overrides.appendAccountRunRecord || (async (status, state, reason) => {
       events.accountRecords.push({ status, state, reason });
@@ -49,20 +103,20 @@ function createRouter(overrides = {}) {
     clearStopRequest: () => {},
     closeLocalhostCallbackTabs: async () => {},
     closeTabsByUrlPrefix: async () => {},
-    completeStepFromBackground: async (step, payload) => {
-      events.notifyCompletions.push({ step, payload, via: 'completeStepFromBackground' });
+    completeNodeFromBackground: async (nodeId, payload) => {
+      events.notifyCompletions.push({ step: getStepForNode(nodeId), nodeId, payload, via: 'completeNodeFromBackground' });
     },
     deleteHotmailAccount: async () => {},
     deleteHotmailAccounts: async () => {},
     deleteIcloudAlias: async () => {},
     deleteUsedIcloudAliases: async () => {},
     disableUsedLuckmailPurchases: async () => {},
-    doesStepUseCompletionSignal: () => false,
+    doesNodeUseCompletionSignal: () => false,
     ensureManualInteractionAllowed: async () => ({}),
-    executeStep: async (step) => {
-      events.executedSteps.push(step);
+    executeNode: async (nodeId) => {
+      events.executedSteps.push(getStepForNode(nodeId) || nodeId);
     },
-    executeStepViaCompletionSignal: async () => {},
+    executeNodeViaCompletionSignal: async () => {},
     exportSettingsBundle: async () => ({}),
     fetchGeneratedEmail: async () => '',
     finalizePhoneActivationAfterSuccessfulFlow: overrides.finalizePhoneActivationAfterSuccessfulFlow || (async (state) => {
@@ -77,7 +131,9 @@ function createRouter(overrides = {}) {
     getCurrentLuckmailPurchase: () => null,
     getPendingAutoRunTimerPlan: () => null,
     getSourceLabel: () => '',
-    getState: async () => overrides.state || { stepStatuses: { 3: 'pending' } },
+    getState: async () => normalizeState(overrides.state || { nodeStatuses: { 'fill-password': 'pending' } }),
+    getNodeIdsForState: () => ['open-chatgpt', 'submit-signup-email', 'fill-password', 'fetch-signup-code', 'fill-profile', 'wait-registration-success', 'oauth-login', 'fetch-login-code', 'confirm-oauth', 'platform-verify'],
+    getStepIdByNodeIdForState: (nodeId, state = {}) => (state.plusModeEnabled ? plusStepByNode : normalStepByNode)[nodeId] || 0,
     getStepDefinitionForState: overrides.getStepDefinitionForState,
     getStepIdsForState: overrides.getStepIdsForState,
     getLastStepIdForState: overrides.getLastStepIdForState,
@@ -106,11 +162,11 @@ function createRouter(overrides = {}) {
     normalizeHotmailAccounts: (items) => items,
     normalizeRunCount: (value) => value,
     AUTO_RUN_TIMER_KIND_SCHEDULED_START: 'scheduled',
-    notifyStepComplete: (step, payload) => {
-      events.notifyCompletions.push({ step, payload });
+    notifyNodeComplete: (nodeId, payload) => {
+      events.notifyCompletions.push({ step: getStepForNode(nodeId), nodeId, payload });
     },
-    notifyStepError: (step, error) => {
-      events.notifyErrors.push({ step, error });
+    notifyNodeError: (nodeId, error) => {
+      events.notifyErrors.push({ step: getStepForNode(nodeId), nodeId, error });
     },
     patchHotmailAccount: async () => {},
     registerTab: async () => {},
@@ -142,11 +198,13 @@ function createRouter(overrides = {}) {
     setState: async (updates) => {
       events.stateUpdates.push(updates);
     },
-    setStepStatus: async (step, status) => {
+    setNodeStatus: async (nodeId, status) => {
+      events.nodeStatuses.push({ nodeId, status });
+      const step = getStepForNode(nodeId);
       events.stepStatuses.push({ step, status });
     },
     skipAutoRunCountdown: async () => false,
-    skipStep: async () => {},
+    skipNode: async () => {},
     startAutoRunLoop: async () => {},
     syncHotmailAccounts: async () => {},
     testHotmailAccountMailAccess: async () => {},
@@ -366,10 +424,11 @@ test('message router finalizes step 3 before marking it completed', async () => 
   const { router, events } = createRouter();
 
   const response = await router.handleMessage({
-    type: 'STEP_COMPLETE',
-    step: 3,
+    type: 'NODE_COMPLETE',
+    nodeId: 'fill-password',
     source: 'signup-page',
     payload: {
+      nodeId: 'fill-password',
       email: 'user@example.com',
       signupVerificationRequestedAt: 123,
     },
@@ -377,8 +436,10 @@ test('message router finalizes step 3 before marking it completed', async () => 
 
   assert.deepStrictEqual(events.finalizePayloads, [
     {
+      nodeId: 'fill-password',
       email: 'user@example.com',
       signupVerificationRequestedAt: 123,
+      step: 3,
     },
   ]);
   assert.deepStrictEqual(events.stepStatuses, [{ step: 3, status: 'completed' }]);
@@ -386,9 +447,12 @@ test('message router finalizes step 3 before marking it completed', async () => 
   assert.deepStrictEqual(events.notifyCompletions, [
     {
       step: 3,
+      nodeId: 'fill-password',
       payload: {
+        nodeId: 'fill-password',
         email: 'user@example.com',
         signupVerificationRequestedAt: 123,
+        step: 3,
       },
     },
   ]);
@@ -436,7 +500,8 @@ test('message router finalizes pending phone activation on platform verify succe
     localhostUrl: 'http://localhost:1455/auth/callback?code=ok',
   });
 
-  assert.deepStrictEqual(events.phoneFinalizations, [state]);
+  assert.equal(events.phoneFinalizations.length, 1);
+  assert.deepStrictEqual(events.phoneFinalizations[0].pendingPhoneActivationConfirmation, state.pendingPhoneActivationConfirmation);
 });
 
 test('message router does not finalize pending phone activation when icloud finalization fails', async () => {
@@ -481,10 +546,11 @@ test('message router marks step 3 failed when post-submit finalize fails', async
   });
 
   const response = await router.handleMessage({
-    type: 'STEP_COMPLETE',
-    step: 3,
+    type: 'NODE_COMPLETE',
+    nodeId: 'fill-password',
     source: 'signup-page',
     payload: {
+      nodeId: 'fill-password',
       email: 'user@example.com',
     },
   }, {});
@@ -493,10 +559,11 @@ test('message router marks step 3 failed when post-submit finalize fails', async
   assert.deepStrictEqual(events.notifyErrors, [
     {
       step: 3,
+      nodeId: 'fill-password',
       error: '步骤 3 提交后仍停留在密码页。',
     },
   ]);
-  assert.equal(events.logs.some(({ message, step }) => /失败：步骤 3 提交后仍停留在密码页。/.test(message) && step === 3), true);
+  assert.equal(events.logs.some(({ message, nodeId }) => /失败：步骤 3 提交后仍停留在密码页。/.test(message) && nodeId === 'fill-password'), true);
   assert.deepStrictEqual(response, { ok: true, error: '步骤 3 提交后仍停留在密码页。' });
 });
 
@@ -512,10 +579,10 @@ test('message router does not duplicate step 3 mismatch failure log after finali
   });
 
   const response = await router.handleMessage({
-    type: 'STEP_ERROR',
-    step: 3,
+    type: 'NODE_ERROR',
+    nodeId: 'fill-password',
     source: 'signup-page',
-    payload: {},
+    payload: { nodeId: 'fill-password' },
     error: mismatchError,
   }, {});
 
@@ -524,6 +591,7 @@ test('message router does not duplicate step 3 mismatch failure log after finali
   assert.deepStrictEqual(events.notifyErrors, [
     {
       step: 3,
+      nodeId: 'fill-password',
       error: mismatchError,
     },
   ]);
@@ -534,10 +602,10 @@ test('message router stops the flow and surfaces cloudflare security block error
   const { router, events } = createRouter();
 
   const response = await router.handleMessage({
-    type: 'STEP_ERROR',
-    step: 7,
+    type: 'NODE_ERROR',
+    nodeId: 'oauth-login',
     source: 'signup-page',
-    payload: {},
+    payload: { nodeId: 'oauth-login' },
     error: 'CF_SECURITY_BLOCKED::您已触发Cloudflare 安全防护系统',
   }, {});
 
@@ -545,6 +613,7 @@ test('message router stops the flow and surfaces cloudflare security block error
   assert.deepStrictEqual(events.notifyErrors, [
     {
       step: 7,
+      nodeId: 'oauth-login',
       error: '流程已被用户停止。',
     },
   ]);
@@ -562,9 +631,10 @@ test('message router blocks manual step 4 execution when signup page tab is miss
 
   await assert.rejects(
     () => router.handleMessage({
-      type: 'EXECUTE_STEP',
+      type: 'EXECUTE_NODE',
       source: 'sidepanel',
-      payload: { step: 4 },
+      nodeId: 'fetch-signup-code',
+      payload: { nodeId: 'fetch-signup-code' },
     }, {}),
     /手动执行步骤 4 前，请先执行步骤 1 或步骤 2/
   );
@@ -630,18 +700,19 @@ test('message router ignores stale step 2 errors while auto-run is already on a 
     state: {
       autoRunning: true,
       autoRunPhase: 'running',
-      currentStep: 6,
-      stepStatuses: {
-        2: 'completed',
-        6: 'running',
+      currentNodeId: 'wait-registration-success',
+      nodeStatuses: {
+        'submit-signup-email': 'completed',
+        'wait-registration-success': 'running',
       },
     },
     isAutoRunLockedState: (state) => Boolean(state?.autoRunning) && state?.autoRunPhase === 'running',
   });
 
   const response = await router.handleMessage({
-    type: 'STEP_ERROR',
-    step: 2,
+    type: 'NODE_ERROR',
+    nodeId: 'submit-signup-email',
+    payload: { nodeId: 'submit-signup-email' },
     error: '步骤 2：旧页面异步失败，不应覆盖当前第 6 步记录。',
   }, {});
 
@@ -649,7 +720,7 @@ test('message router ignores stale step 2 errors while auto-run is already on a 
   assert.deepStrictEqual(events.stepStatuses, []);
   assert.deepStrictEqual(events.notifyErrors, []);
   assert.deepStrictEqual(events.accountRecords, []);
-  assert.equal(events.logs.some(({ message }) => /忽略过期的步骤 2 失败消息/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /忽略过期的节点 submit-signup-email 失败消息/.test(message)), true);
 });
 
 test('message router ignores stale step 2 completion while auto-run is already on a later step', async () => {
@@ -657,19 +728,20 @@ test('message router ignores stale step 2 completion while auto-run is already o
     state: {
       autoRunning: true,
       autoRunPhase: 'running',
-      currentStep: 6,
-      stepStatuses: {
-        2: 'completed',
-        6: 'running',
+      currentNodeId: 'wait-registration-success',
+      nodeStatuses: {
+        'submit-signup-email': 'completed',
+        'wait-registration-success': 'running',
       },
     },
     isAutoRunLockedState: (state) => Boolean(state?.autoRunning) && state?.autoRunPhase === 'running',
   });
 
   const response = await router.handleMessage({
-    type: 'STEP_COMPLETE',
-    step: 2,
+    type: 'NODE_COMPLETE',
+    nodeId: 'submit-signup-email',
     payload: {
+      nodeId: 'submit-signup-email',
       email: 'late@example.com',
     },
   }, {});
@@ -678,5 +750,5 @@ test('message router ignores stale step 2 completion while auto-run is already o
   assert.deepStrictEqual(events.stepStatuses, []);
   assert.deepStrictEqual(events.notifyCompletions, []);
   assert.deepStrictEqual(events.emailStates, []);
-  assert.equal(events.logs.some(({ message }) => /忽略过期的步骤 2 完成消息/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /忽略过期的节点 submit-signup-email 完成消息/.test(message)), true);
 });

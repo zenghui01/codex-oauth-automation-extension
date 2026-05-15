@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -52,6 +52,99 @@ function extractFunction(name) {
   return source.slice(start, end);
 }
 
+const NODE_COMPAT_HELPERS = `
+const FALLBACK_STEP_NODE_IDS = {
+  1: 'open-chatgpt',
+  2: 'submit-signup-email',
+  3: 'fill-password',
+  4: 'fetch-signup-code',
+  5: 'fill-profile',
+  6: 'plus-checkout-create',
+  7: 'plus-checkout-billing',
+  8: 'paypal-approve',
+  9: 'plus-checkout-return',
+  10: 'oauth-login',
+  11: 'fetch-login-code',
+  12: 'confirm-oauth',
+  13: 'platform-verify',
+};
+function getNodeIdByStepForState(step, state = {}) {
+  if (typeof getStepDefinitionForState === 'function') {
+    const key = String(getStepDefinitionForState(step, state)?.key || '').trim();
+    if (key) return key;
+  }
+  return FALLBACK_STEP_NODE_IDS[Number(step)] || '';
+}
+function getStepIdByNodeIdForState(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  const ids = typeof getStepIdsForState === 'function'
+    ? getStepIdsForState(state)
+    : Object.keys(FALLBACK_STEP_NODE_IDS).map(Number);
+  for (const step of ids) {
+    if (getNodeIdByStepForState(step, state) === normalizedNodeId) {
+      return Number(step);
+    }
+  }
+  for (const [step, fallbackNodeId] of Object.entries(FALLBACK_STEP_NODE_IDS)) {
+    if (fallbackNodeId === normalizedNodeId) {
+      return Number(step);
+    }
+  }
+  return null;
+}
+function getNodeIdsForState(state = {}) {
+  const ids = typeof getStepIdsForState === 'function'
+    ? getStepIdsForState(state)
+    : Object.keys(FALLBACK_STEP_NODE_IDS).map(Number);
+  return ids
+    .map((step) => getNodeIdByStepForState(step, state))
+    .filter(Boolean);
+}
+function getNodeDefinitionForState(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  const step = getStepIdByNodeIdForState(normalizedNodeId, state);
+  const executeKey = typeof getStepExecutionKeyForState === 'function'
+    ? getStepExecutionKeyForState(step, state)
+    : normalizedNodeId;
+  return normalizedNodeId ? { nodeId: normalizedNodeId, legacyStepId: step, executeKey } : null;
+}
+function getNodeTitleForState(nodeId) {
+  return String(nodeId || '').trim();
+}
+function projectStepStatusesToNodeStatuses(stepStatuses = {}, state = {}) {
+  const nodeStatuses = {};
+  for (const [step, status] of Object.entries(stepStatuses || {})) {
+    const nodeId = getNodeIdByStepForState(step, state);
+    if (nodeId) nodeStatuses[nodeId] = status;
+  }
+  return nodeStatuses;
+}
+const rawGetStateForNodeCompat = getState;
+getState = async function getStateWithNodeStatuses() {
+  const state = await rawGetStateForNodeCompat();
+  return {
+    ...state,
+    nodeStatuses: {
+      ...projectStepStatusesToNodeStatuses(state?.stepStatuses || {}, state),
+      ...(state?.nodeStatuses || {}),
+    },
+  };
+};
+async function executeNodeAndWait(nodeId, delayAfter) {
+  const directStep = Number(nodeId);
+  if (Number.isInteger(directStep) && directStep > 0) {
+    return executeStepAndWait(directStep, delayAfter);
+  }
+  return executeStepAndWait(getStepIdByNodeIdForState(nodeId, await getState()), delayAfter);
+}
+function getAutoRunNodeDelayMs() {
+  return 0;
+}
+async function runAutoSequenceFromStep(step, context = {}) {
+  return runAutoSequenceFromNode(getNodeIdByStepForState(step, await getState()), context);
+}
+`;
+
 const bundle = [
   extractFunction('isAddPhoneAuthFailure'),
   extractFunction('isAddPhoneAuthUrl'),
@@ -61,13 +154,16 @@ const bundle = [
   extractFunction('isPlusCheckoutRestartStep'),
   extractFunction('isPlusCheckoutRestartRequiredFailure'),
   extractFunction('getLatestLogTimestamp'),
-  extractFunction('buildAutoRunStepIdleRestartError'),
+  extractFunction('buildAutoRunNodeIdleRestartError'),
   extractFunction('isAutoRunStepIdleRestartError'),
-  extractFunction('startAutoRunStepIdleLogWatchdog'),
-  extractFunction('runAutoStepActionWithIdleLogWatchdog'),
-  extractFunction('executeStepAndWaitWithAutoRunIdleLogWatchdog'),
+  extractFunction('startAutoRunNodeIdleLogWatchdog'),
+  extractFunction('runAutoNodeActionWithIdleLogWatchdog'),
+  extractFunction('executeNodeAndWaitWithAutoRunIdleLogWatchdog'),
   extractFunction('getPostStep6AutoRestartDecision'),
-  extractFunction('runAutoSequenceFromStep'),
+  NODE_COMPAT_HELPERS,
+  extractFunction('getAutoRunWorkflowNodeIds'),
+  extractFunction('runAutoSequenceFromNode'),
+  extractFunction('runAutoSequenceFromNodeGraph'),
 ].join('\n');
 
 const defaultStepDefinitions = {
@@ -311,7 +407,7 @@ test('auto-run keeps restarting from step 7 after post-login failures without a 
       7, 8, 9, 10,
     ]
   );
-  assert.ok(events.logs.some(({ message }) => /回到步骤 7 重新开始授权流程/.test(message)));
+  assert.ok(events.logs.some(({ message }) => /回到节点 auth-login 重新开始授权流程/.test(message)));
 });
 
 test('auto-run restarts the current step after five minutes without new logs', async () => {
@@ -330,7 +426,7 @@ test('auto-run restarts the current step after five minutes without new logs', a
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [9]);
   assert.equal(events.cancellations.length, 1);
   assert.equal(events.stopBroadcasts, 1);
-  assert.ok(events.logs.some(({ message }) => /5 分钟没有新日志，准备重新开始当前步骤/.test(message)));
+  assert.ok(events.logs.some(({ message }) => /5 分钟没有新日志，准备重新开始当前节点/.test(message)));
 });
 
 test('auto-run applies the idle-log restart watchdog to early steps too', async () => {
@@ -364,7 +460,7 @@ test('auto-run stops current-step idle restarts after the retry cap', async () =
   const result = await harness.runAndCaptureError();
 
   assert.ok(result?.error);
-  assert.match(result.error.message, /AUTO_RUN_STEP_IDLE_RESTART::步骤 10/);
+  assert.match(result.error.message, /AUTO_RUN_STEP_IDLE_RESTART::节点 platform-verify/);
   assert.deepStrictEqual(result.events.steps, [10, 10, 10, 10]);
   assert.deepStrictEqual(result.events.invalidations.map((entry) => entry.step), [9, 9, 9]);
   assert.ok(result.events.logs.some(({ message }) => /已连续 3 次因 5 分钟无新日志而重开/.test(message)));
@@ -474,10 +570,10 @@ test('auto-run restarts from confirm-oauth step after transient step10 token_exc
   assert.deepStrictEqual(events.invalidations[0], {
     step: 8,
     options: {
-      logLabel: '步骤 10 报错后准备回到步骤 9 重试（第 1 次重开）',
+      logLabel: '节点 platform-verify 报错后准备回到 confirm-oauth 重试（第 1 次重开）',
     },
   });
-  assert.ok(events.logs.some(({ message }) => /回到步骤 9 重新开始授权流程/.test(message)));
+  assert.ok(events.logs.some(({ message }) => /回到节点 confirm-oauth 重新开始授权流程/.test(message)));
 });
 
 test('auto-run restarts Plus/GPC oauth-login aggregate entry-open failure from step 10', async () => {
@@ -508,9 +604,9 @@ test('auto-run restarts Plus/GPC oauth-login aggregate entry-open failure from s
   const events = await harness.run();
 
   assert.deepStrictEqual(events.steps, [10, 10, 11, 12, 13]);
-  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [9]);
-  assert.ok(events.logs.some(({ message }) => /回到步骤 10 重新开始授权流程/.test(message)));
-  assert.ok(!events.logs.some(({ message }) => /停止自动回到步骤 10 重开/.test(message)));
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [7]);
+  assert.ok(events.logs.some(({ message }) => /回到节点 oauth-login 重新开始授权流程/.test(message)));
+  assert.ok(!events.logs.some(({ message }) => /停止自动回到节点 oauth-login 重开/.test(message)));
 });
 
 test('auto-run restarts Plus/GPC fetch-code and confirm-oauth failures from oauth-login step 10', async () => {
@@ -554,8 +650,8 @@ test('auto-run restarts Plus/GPC fetch-code and confirm-oauth failures from oaut
     const events = await harness.run();
 
     assert.deepStrictEqual(events.steps, scenario.expectedSteps);
-    assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [9]);
-    assert.ok(events.logs.some(({ message }) => new RegExp(`步骤 ${scenario.failureStep}：.*回到步骤 10 重新开始授权流程`).test(message)));
+    assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [7]);
+    assert.ok(events.logs.some(({ message }) => /回到节点 oauth-login 重新开始授权流程/.test(message)));
   }
 });
 
@@ -589,7 +685,7 @@ test('auto-run restarts Plus/GPC transient platform verify exchange failures fro
 
   assert.deepStrictEqual(events.steps, [10, 11, 12, 13, 12, 13]);
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [11]);
-  assert.ok(events.logs.some(({ message }) => /步骤 13：.*回到步骤 12 重新开始授权流程/.test(message)));
+  assert.ok(events.logs.some(({ message }) => /节点 platform-verify.*回到节点 confirm-oauth 重新开始授权流程/.test(message)));
 });
 
 test('auto-run restarts Plus checkout from step 6 when checkout creation fails', async () => {
@@ -621,7 +717,7 @@ test('auto-run restarts Plus checkout from step 6 when checkout creation fails',
 
   assert.deepStrictEqual(events.steps, [6, 6, 7, 8, 9, 10, 11, 12, 13]);
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
-  assert.ok(events.logs.some(({ message }) => /回到步骤 6 重新创建 Plus Checkout/.test(message)));
+  assert.ok(events.logs.some(({ message }) => /回到节点 plus-checkout-create 重新创建 Plus Checkout/.test(message)));
 });
 
 test('auto-run restarts Plus checkout from step 6 when billing fails for non-free-trial reasons', async () => {
@@ -653,7 +749,7 @@ test('auto-run restarts Plus checkout from step 6 when billing fails for non-fre
 
   assert.deepStrictEqual(events.steps, [6, 7, 6, 7, 8, 9, 10, 11, 12, 13]);
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
-  assert.ok(events.logs.some(({ message }) => /回到步骤 6 重新创建 Plus Checkout/.test(message)));
+  assert.ok(events.logs.some(({ message }) => /回到节点 plus-checkout-create 重新创建 Plus Checkout/.test(message)));
 });
 
 test('auto-run restarts GPC checkout from step 6 when step 7 task polling stalls', async () => {
@@ -689,7 +785,7 @@ test('auto-run restarts GPC checkout from step 6 when step 7 task polling stalls
     events.invalidations.map((entry) => entry.step),
     [5, 5]
   );
-  assert.ok(events.logs.some(({ message }) => /回到步骤 6 重新创建 GPC 任务/.test(message)));
+  assert.ok(events.logs.some(({ message }) => /回到节点 plus-checkout-create 重新创建 GPC 任务/.test(message)));
 });
 
 test('auto-run treats GPC account binding as recoverable step 6 restart', async () => {
@@ -748,7 +844,7 @@ test('auto-run restarts GPC checkout from step 6 when accessToken cannot be read
 
   assert.deepStrictEqual(events.steps, [6, 6, 7, 10, 11, 12, 13]);
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
-  assert.ok(events.logs.some(({ message }) => /回到步骤 6 重新创建 GPC 任务/.test(message)));
+  assert.ok(events.logs.some(({ message }) => /回到节点 plus-checkout-create 重新创建 GPC 任务/.test(message)));
 });
 
 test('auto-run restarts GPC checkout from step 6 when task status has no progress', async () => {
@@ -778,7 +874,7 @@ test('auto-run restarts GPC checkout from step 6 when task status has no progres
 
   assert.deepStrictEqual(events.steps, [6, 7, 6, 7, 10, 11, 12, 13]);
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
-  assert.ok(events.logs.some(({ message }) => /回到步骤 6 重新创建 GPC 任务/.test(message)));
+  assert.ok(events.logs.some(({ message }) => /回到节点 plus-checkout-create 重新创建 GPC 任务/.test(message)));
 });
 
 test('auto-run keeps rebuilding GPC checkout beyond three failures', async () => {

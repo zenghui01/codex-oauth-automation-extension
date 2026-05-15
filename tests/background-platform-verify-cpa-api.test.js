@@ -1,4 +1,4 @@
-const assert = require('node:assert/strict');
+﻿const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
@@ -17,7 +17,7 @@ function createDeps(overrides = {}) {
       },
     },
     closeConflictingTabsForSource: async () => {},
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completed.push({ step, payload });
     },
     ensureContentScriptReadyOnTab: async () => {},
@@ -97,7 +97,7 @@ test('platform verify module submits CPA callback via management API first', asy
     assert.equal(uiCalled, false);
     assert.deepStrictEqual(completed, [
       {
-        step: 10,
+        step: 'platform-verify',
         payload: {
           localhostUrl: 'http://localhost:1455/auth/callback?code=callback-code&state=oauth-state',
           verifiedStatus: 'CPA API 回调提交成功',
@@ -317,7 +317,7 @@ test('platform verify module submits Plus visible step 13 to SUB2API via direct 
     assert.equal(exchangeCall.body.state, 'oauth-state');
     assert.deepStrictEqual(createCall.body.group_ids, [5]);
     assert.deepStrictEqual(completed, [{
-      step: 13,
+      step: 'platform-verify',
       payload: {
         localhostUrl: 'http://localhost:1455/auth/callback?code=callback-code&state=oauth-state',
         verifiedStatus: 'SUB2API 已创建账号 #11',

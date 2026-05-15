@@ -15,7 +15,7 @@
     const {
       addLog: rawAddLog = async () => {},
       chrome,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       createAutomationTab = null,
       ensureContentScriptReadyOnTabUntilStopped,
       fetch: fetchImpl = null,
@@ -457,7 +457,7 @@
         gopayHelperOrderCreatedAt: result.orderCreatedAt || Date.now(),
       });
       await addLog(`步骤 6：GPC ${result.phoneMode === GPC_HELPER_PHONE_MODE_AUTO ? '自动' : '手动'}模式任务已创建（task_id: ${result.taskId}），准备继续下一步。`, 'info');
-      await completeStepFromBackground(6, {
+      await completeNodeFromBackground('plus-checkout-create', {
         plusCheckoutCountry: result.country || 'ID',
         plusCheckoutCurrency: result.currency || 'IDR',
         plusCheckoutSource: result.checkoutSource,
@@ -517,7 +517,7 @@
 
       await addLog(`步骤 6：Plus Checkout 页面已就绪（${paymentMethodLabel} / ${result.country || 'DE'} ${result.currency || 'EUR'}），准备继续下一步。`, 'info');
 
-      await completeStepFromBackground(6, {
+      await completeNodeFromBackground('plus-checkout-create', {
         plusCheckoutCountry: result.country || 'DE',
         plusCheckoutCurrency: result.currency || 'EUR',
       });

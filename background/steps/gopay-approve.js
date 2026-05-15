@@ -17,7 +17,7 @@
     const {
       addLog,
       chrome,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       ensureContentScriptReadyOnTabUntilStopped,
       getTabId,
       isTabAlive,
@@ -1433,7 +1433,7 @@
       }
 
       await setState({ plusGoPayApprovedAt: Date.now() });
-      await completeStepFromBackground(8, {
+      await completeNodeFromBackground('paypal-approve', {
         plusGoPayApprovedAt: Date.now(),
       });
     }

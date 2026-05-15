@@ -14,23 +14,23 @@ if (document.documentElement.getAttribute(SUB2API_PANEL_LISTENER_SENTINEL) !== '
   document.documentElement.setAttribute(SUB2API_PANEL_LISTENER_SENTINEL, '1');
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'EXECUTE_STEP' || message.type === 'REQUEST_OAUTH_URL') {
+    if (message.type === 'EXECUTE_NODE' || message.type === 'REQUEST_OAUTH_URL') {
       resetStopState();
       const handler = message.type === 'REQUEST_OAUTH_URL'
         ? requestOAuthUrl(message.payload)
-        : handleStep(message.step, message.payload);
+        : handleNode(message.nodeId || message.payload?.nodeId, message.payload);
       handler.then((result) => {
         sendResponse({ ok: true, ...(result || {}) });
       }).catch((err) => {
         if (isStopError(err)) {
-          if (message.step) {
-            log('已被用户停止。', 'warn', { step: message.step });
+          if (message.payload?.visibleStep || message.step) {
+            log('已被用户停止。', 'warn', { step: message.payload?.visibleStep || message.step });
           }
           sendResponse({ stopped: true, error: err.message });
           return;
         }
-        if (message.step) {
-          reportError(message.step, err.message);
+        if (message.nodeId || message.payload?.nodeId) {
+          reportError(message.nodeId || message.payload?.nodeId, err.message);
         }
         sendResponse({ error: err.message });
       });
@@ -73,6 +73,16 @@ async function handleStep(step, payload = {}) {
       return step9_submitOpenAiCallback({ ...(payload || {}), visibleStep: step });
     default:
       throw new Error(`sub2api-panel.js 不处理步骤 ${step}`);
+  }
+}
+
+async function handleNode(nodeId, payload = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  switch (normalizedNodeId) {
+    case 'platform-verify':
+      return step9_submitOpenAiCallback(payload);
+    default:
+      throw new Error(`sub2api-panel.js 不处理节点 ${normalizedNodeId}`);
   }
 }
 
@@ -665,9 +675,10 @@ async function step9_submitOpenAiCallback(payload = {}) {
 
   const verifiedStatus = `SUB2API 已创建账号 #${createdAccount?.id || 'unknown'}`;
   log(verifiedStatus, 'ok', { step: visibleStep, stepKey: 'platform-verify' });
-  reportComplete(visibleStep, {
+  reportComplete('platform-verify', {
     localhostUrl: callback.url,
     verifiedStatus,
+    visibleStep,
   });
   openAccountsPageSoon(origin);
 }

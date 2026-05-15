@@ -12,8 +12,9 @@
       closeConflictingTabsForSource,
       CLOUDFLARE_TEMP_EMAIL_PROVIDER,
       CLOUD_MAIL_PROVIDER = 'cloudmail',
-      completeStepFromBackground,
+      completeNodeFromBackground,
       confirmCustomVerificationStepBypassRequest,
+      getNodeIdByStepForState,
       getHotmailVerificationPollConfig,
       getHotmailVerificationRequestTimestamp,
       handleMail2925LimitReachedError,
@@ -32,6 +33,7 @@
       sendToContentScript,
       sendToContentScriptResilient,
       sendToMailContentScriptResilient,
+      setNodeStatus,
       setState,
       sleepWithStop,
       throwIfStopped,
@@ -63,6 +65,13 @@
       }
       delete normalizedOptions.visibleStep;
       return rawAddLog(normalizeVerificationLogMessage(message), level, normalizedOptions);
+    }
+
+    async function getNodeIdForStep(step) {
+      const state = typeof getState === 'function' ? await getState() : {};
+      return typeof getNodeIdByStepForState === 'function'
+        ? String(getNodeIdByStepForState(step, state) || '').trim()
+        : '';
     }
 
     const isRetryableVerificationTransportError = typeof deps.isRetryableContentScriptTransportError === 'function'
@@ -404,7 +413,11 @@
         signupVerificationRequestedAt: null,
         loginVerificationRequestedAt: null,
       });
-      await deps.setStepStatus(completionStep, 'skipped');
+      const completionNodeId = await getNodeIdForStep(completionStep);
+      if (!completionNodeId) {
+        throw new Error(`步骤 ${completionStep} 未映射到验证码节点。`);
+      }
+      await setNodeStatus(completionNodeId, 'skipped');
       await addLog(`步骤 ${completionStep}：已确认手动完成${verificationLabel}验证码输入，当前步骤已跳过。`, 'warn');
     }
 
@@ -1387,7 +1400,11 @@
             [stateKey]: result.code,
           });
 
-          await completeStepFromBackground(completionStep, {
+          const completionNodeId = await getNodeIdForStep(completionStep);
+          if (!completionNodeId) {
+            throw new Error(`步骤 ${completionStep} 未映射到验证码节点。`);
+          }
+          await completeNodeFromBackground(completionNodeId, {
             emailTimestamp: result.emailTimestamp,
             code: result.code,
             phoneVerificationRequired: Boolean(submitResult.addPhonePage),

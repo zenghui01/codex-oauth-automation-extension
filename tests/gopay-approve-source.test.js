@@ -121,13 +121,13 @@ test('GoPay approve waits and retries slowly on Hubungkan linking page', () => {
 });
 
 
-test('background auto-run routes GoPay restart sentinel back to step 6', () => {
+test('background auto-run routes GoPay restart sentinel back to checkout-create node', () => {
   const backgroundSource = fs.readFileSync('background.js', 'utf8');
   assert.match(backgroundSource, /isGoPayCheckoutRestartRequiredFailure/);
   assert.match(backgroundSource, /GOPAY_RESTART_FROM_STEP6::/);
-  assert.match(backgroundSource, /step === 8 && isGoPayCheckoutRestartRequiredFailure\(err\)/);
-  assert.match(backgroundSource, /step = 6/);
-  assert.match(backgroundSource, /invalidateDownstreamAfterStepRestart\(5/);
+  assert.match(backgroundSource, /nodeId === 'paypal-approve' && isGoPayCheckoutRestartRequiredFailure\(err\)/);
+  assert.match(backgroundSource, /getNodeIndex\(await getState\(\), 'plus-checkout-create'\)/);
+  assert.match(backgroundSource, /invalidateDownstreamAfterAutoRunNodeRestart\(getPreviousNodeId\('plus-checkout-create'/);
 });
 
 test('GoPay approve gives PIN precedence over OTP on ambiguous second PIN pages', () => {

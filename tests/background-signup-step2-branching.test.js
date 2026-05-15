@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -20,7 +20,7 @@ test('step 2 completes with password step skipped when landing on email verifica
   const executor = step2Api.createStep2Executor({
     addLog: async () => {},
     chrome: { tabs: { update: async () => {} } },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completedPayloads.push({ step, payload });
     },
     ensureContentScriptReadyOnTab: async () => {},
@@ -40,7 +40,7 @@ test('step 2 completes with password step skipped when landing on email verifica
 
   assert.deepStrictEqual(completedPayloads, [
     {
-      step: 2,
+      step: 'submit-signup-email',
       payload: {
         email: 'user@example.com',
         accountIdentifierType: 'email',
@@ -59,7 +59,7 @@ test('step 2 keeps password flow when landing on password page', async () => {
   const executor = step2Api.createStep2Executor({
     addLog: async () => {},
     chrome: { tabs: { update: async () => {} } },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completedPayloads.push({ step, payload });
     },
     ensureContentScriptReadyOnTab: async () => {},
@@ -79,7 +79,7 @@ test('step 2 keeps password flow when landing on password page', async () => {
 
   assert.deepStrictEqual(completedPayloads, [
     {
-      step: 2,
+      step: 'submit-signup-email',
       payload: {
         email: 'user@example.com',
         accountIdentifierType: 'email',
@@ -110,7 +110,7 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
   const executor = step2Api.createStep2Executor({
     addLog: async () => {},
     chrome: { tabs: { update: async () => {} } },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completedPayloads.push({ step, payload });
     },
     ensureContentScriptReadyOnTab: async () => {},
@@ -170,7 +170,7 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
   ]);
   assert.deepStrictEqual(completedPayloads, [
     {
-      step: 2,
+      step: 'submit-signup-email',
       payload: {
         accountIdentifierType: 'phone',
         accountIdentifier: '66959916439',
@@ -200,7 +200,7 @@ test('step 2 reuses existing signup phone activation without acquiring a new num
   const executor = step2Api.createStep2Executor({
     addLog: async () => {},
     chrome: { tabs: { update: async () => {} } },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completedPayloads.push({ step, payload });
     },
     ensureContentScriptReadyOnTab: async () => {},
@@ -263,7 +263,7 @@ test('step 2 submits manual signup phone without acquiring a number', async () =
   const executor = step2Api.createStep2Executor({
     addLog: async () => {},
     chrome: { tabs: { update: async () => {} } },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completedPayloads.push({ step, payload });
     },
     ensureContentScriptReadyOnTab: async () => {},
@@ -310,7 +310,7 @@ test('step 2 submits manual signup phone without acquiring a number', async () =
   ]);
   assert.deepStrictEqual(completedPayloads, [
     {
-      step: 2,
+      step: 'submit-signup-email',
       payload: {
         accountIdentifierType: 'phone',
         accountIdentifier: '+446700000002',
@@ -338,7 +338,7 @@ test('step 2 stops with an explicit error instead of silently skipping 3/4/5 on 
         get: async () => ({ url: 'https://chatgpt.com/' }),
       },
     },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completedPayloads.push({ step, payload });
     },
     ensureContentScriptReadyOnTab: async () => {},
@@ -382,7 +382,7 @@ test('step 2 does not force auth-entry retry on logged-out chatgpt home when con
         get: async () => ({ url: 'https://chatgpt.com/' }),
       },
     },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completedPayloads.push({ step, payload });
     },
     ensureContentScriptReadyOnTab: async () => {},
@@ -414,7 +414,7 @@ test('step 2 does not force auth-entry retry on logged-out chatgpt home when con
   assert.deepStrictEqual(sentPayloads, [{ email: 'user@example.com' }]);
   assert.deepStrictEqual(completedPayloads, [
     {
-      step: 2,
+      step: 'submit-signup-email',
       payload: {
         email: 'user@example.com',
         accountIdentifierType: 'email',
@@ -450,7 +450,7 @@ test('step 2 waits for the existing signup tab to settle before probing the entr
         },
       },
     },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       completedPayloads.push({ step, payload });
     },
     ensureContentScriptReadyOnTab: async () => {
@@ -499,7 +499,7 @@ test('step 2 waits for the existing signup tab to settle before probing the entr
   assert.equal(logs.some((item) => item.meta.step === 2 && item.meta.stepKey === 'signup-entry'), true);
   assert.deepStrictEqual(completedPayloads, [
     {
-      step: 2,
+      step: 'submit-signup-email',
       payload: {
         email: 'user@example.com',
         accountIdentifierType: 'email',

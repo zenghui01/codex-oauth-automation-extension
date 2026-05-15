@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -102,8 +102,8 @@ function getWebNavCommittedListener() { return webNavCommittedListener; }
 function setStep8TabUpdatedListener(listener) { step8TabUpdatedListener = listener; }
 function getStep8TabUpdatedListener() { return step8TabUpdatedListener; }
 function setStep8PendingReject(handler) { step8PendingReject = handler; }
-async function completeStepFromBackground(step, payload) {
-  completePayload = { step, payload };
+async function completeNodeFromBackground(nodeId, payload) {
+  completePayload = { nodeId, payload };
 }
 
 const STEP8_CLICK_RETRY_DELAY_MS = 1;
@@ -120,7 +120,7 @@ const executor = self.MultiPageBackgroundStep9.createStep9Executor({
   chrome,
   cleanupStep8NavigationListeners,
   clickWithDebugger,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   ensureStep8SignupPageReady,
   getOAuthFlowRemainingMs,
   getOAuthFlowStepTimeoutMs,
@@ -176,7 +176,7 @@ return {
   assert.equal(snapshot.cleanupCalls >= 1, true);
   assert.equal(snapshot.hasPendingReject, false);
   assert.deepEqual(snapshot.completePayload, {
-    step: 9,
+    nodeId: 'confirm-oauth',
     payload: {
       localhostUrl: 'http://localhost:1455/auth/callback?code=abc&state=xyz',
     },
@@ -279,8 +279,8 @@ function getWebNavCommittedListener() { return webNavCommittedListener; }
 function setStep8TabUpdatedListener(listener) { step8TabUpdatedListener = listener; }
 function getStep8TabUpdatedListener() { return step8TabUpdatedListener; }
 function setStep8PendingReject() {}
-async function completeStepFromBackground(step, payload) {
-  completePayload = { step, payload };
+async function completeNodeFromBackground(nodeId, payload) {
+  completePayload = { nodeId, payload };
 }
 
 const STEP8_CLICK_RETRY_DELAY_MS = 1;
@@ -297,7 +297,7 @@ const executor = self.MultiPageBackgroundStep9.createStep9Executor({
   chrome,
   cleanupStep8NavigationListeners,
   clickWithDebugger,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   ensureStep8SignupPageReady,
   getOAuthFlowStepTimeoutMs,
   getStep8CallbackUrlFromNavigation,
@@ -348,7 +348,7 @@ return {
   assert.equal(snapshot.deferCalls >= 1, true);
   assert.equal(snapshot.cleanupCalls >= 1, true);
   assert.deepEqual(snapshot.completePayload, {
-    step: 12,
+    nodeId: 'confirm-oauth',
     payload: {
       localhostUrl: 'http://localhost:1455/auth/callback?code=abc&state=xyz',
     },

@@ -11,7 +11,7 @@
       chrome,
       CLOUDFLARE_TEMP_EMAIL_PROVIDER,
       CLOUD_MAIL_PROVIDER = 'cloudmail',
-      completeStepFromBackground,
+      completeNodeFromBackground,
       confirmCustomVerificationStepBypass,
       ensureMail2925MailboxSession,
       ensureIcloudMailSession,
@@ -225,8 +225,8 @@
         `步骤 ${visibleStep}：当前认证页已进入 OAuth 授权页${fromRecovery ? '（轮询失败后复核）' : ''}，跳过登录验证码拉取并继续后续流程。`,
         'warn'
       );
-      if (typeof completeStepFromBackground === 'function') {
-        await completeStepFromBackground(visibleStep, {
+      if (typeof completeNodeFromBackground === 'function') {
+        await completeNodeFromBackground(options.nodeId || 'fetch-login-code', {
           loginVerificationRequestedAt: null,
           skipLoginVerificationStep: true,
           directOAuthConsentPage: true,
@@ -316,7 +316,7 @@
           ),
         });
         if (pageState?.state === 'oauth_consent_page') {
-          await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep, { fromRecovery: true });
+          await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep, { fromRecovery: true, nodeId: currentState?.nodeId });
           return { outcome: 'completed' };
         }
         if (pageState?.state === 'verification_page' || pageState?.state === 'phone_verification_page' || pageState?.state === 'add_email_page') {
@@ -401,7 +401,7 @@
         visibleStep,
       });
 
-      await completeStepFromBackground(visibleStep, {
+      await completeNodeFromBackground(state?.nodeId || 'fetch-login-code', {
         phoneVerification: true,
         loginPhoneVerification: true,
         code: result?.code || '',
@@ -438,7 +438,7 @@
         timeoutMs: await getStep8ReadyTimeoutMs('确认登录验证码页已就绪', state?.oauthUrl || '', visibleStep),
       });
       if (pageState?.state === 'oauth_consent_page') {
-        await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep);
+        await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep, { nodeId: state?.nodeId });
         return;
       }
       if (pageState?.state === 'phone_verification_page') {
@@ -450,7 +450,7 @@
       preparedState = addEmailPreparation?.state || preparedState;
       pageState = addEmailPreparation?.pageState || pageState;
       if (pageState?.state === 'oauth_consent_page') {
-        await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep);
+        await completeStep8WhenAuthAlreadyOnOauthConsent(visibleStep, { nodeId: preparedState?.nodeId || state?.nodeId });
         return;
       }
       if (pageState?.state === 'phone_verification_page') {
@@ -576,7 +576,7 @@
       let stickyLastResendAt = Number(state?.loginVerificationRequestedAt) || 0;
       let retryWithoutStep7Streak = 0;
       const maxRetryWithoutStep7Streak = 3;
-      let currentStepRecoveryAttempt = 0;
+      let currentNodeRecoveryAttempt = 0;
 
       while (true) {
         try {
@@ -601,8 +601,8 @@
           let retryWithoutStep7 = false;
 
           if (isStep8EmailInUseError(currentError) || isStep8MaxCheckAttemptsError(currentError)) {
-            currentStepRecoveryAttempt += 1;
-            if (currentStepRecoveryAttempt > STEP8_CURRENT_STEP_RECOVERY_MAX_ATTEMPTS) {
+            currentNodeRecoveryAttempt += 1;
+            if (currentNodeRecoveryAttempt > STEP8_CURRENT_STEP_RECOVERY_MAX_ATTEMPTS) {
               throw currentError;
             }
             if (isStep8EmailInUseError(currentError)) {

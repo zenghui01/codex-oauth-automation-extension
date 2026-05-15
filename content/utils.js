@@ -274,6 +274,35 @@ function normalizeLogStep(value) {
   return step > 0 ? step : null;
 }
 
+const DEFAULT_OPENAI_NODE_BY_STEP = Object.freeze({
+  1: 'open-chatgpt',
+  2: 'submit-signup-email',
+  3: 'fill-password',
+  4: 'fetch-signup-code',
+  5: 'fill-profile',
+  6: 'wait-registration-success',
+  7: 'oauth-login',
+  8: 'fetch-login-code',
+  9: 'confirm-oauth',
+  10: 'platform-verify',
+  11: 'fetch-login-code',
+  12: 'confirm-oauth',
+  13: 'platform-verify',
+});
+
+function resolveReportNodeId(stepOrNodeId, data = {}) {
+  const explicitNodeId = String(data?.nodeId || data?.nodeKey || '').trim();
+  if (explicitNodeId) {
+    return explicitNodeId;
+  }
+  const directNodeId = String(stepOrNodeId || '').trim();
+  if (directNodeId && !/^\d+$/.test(directNodeId)) {
+    return directNodeId;
+  }
+  const step = normalizeLogStep(stepOrNodeId || data?.step || data?.visibleStep);
+  return step ? DEFAULT_OPENAI_NODE_BY_STEP[step] || '' : '';
+}
+
 /**
  * Send a log message to Side Panel via Background.
  * @param {string} message
@@ -323,30 +352,65 @@ function reportReady() {
 }
 
 /**
- * Report step completion.
- * @param {number} step
- * @param {Object} data - Step output data
+ * Report node completion.
+ * @param {string|number} stepOrNodeId
+ * @param {Object} data - Node output data
  */
-function reportComplete(step, data = {}) {
-  console.log(LOG_PREFIX, `步骤 ${step} 已完成`, data);
-  log('已成功完成', 'ok', { step });
+function reportComplete(stepOrNodeId, data = {}) {
+  const nodeId = resolveReportNodeId(stepOrNodeId, data);
+  const step = normalizeLogStep(stepOrNodeId || data?.step || data?.visibleStep);
+  console.log(LOG_PREFIX, `节点 ${nodeId || stepOrNodeId} 已完成`, data);
+  log('已成功完成', 'ok', { step, stepKey: nodeId });
   const message = {
-    type: 'STEP_COMPLETE',
+    type: 'NODE_COMPLETE',
     source: getRuntimeScriptSource(),
-    step,
-    payload: data,
+    nodeId,
+    payload: {
+      ...(data || {}),
+      ...(nodeId ? { nodeId } : {}),
+      ...(step ? { step } : {}),
+    },
     error: null,
   };
   Promise.resolve(chrome.runtime.sendMessage(message))
     .then((response) => {
-      console.log(LOG_PREFIX, `STEP_COMPLETE sent successfully for step ${step}`, {
+      console.log(LOG_PREFIX, `NODE_COMPLETE sent successfully for node ${nodeId || stepOrNodeId}`, {
         response,
         url: location.href,
         payloadKeys: Object.keys(data || {}),
       });
     })
     .catch((err) => {
-      console.error(LOG_PREFIX, `STEP_COMPLETE send failed for step ${step}`, err?.message || err, {
+      console.error(LOG_PREFIX, `NODE_COMPLETE send failed for node ${nodeId || stepOrNodeId}`, err?.message || err, {
+        url: location.href,
+        payloadKeys: Object.keys(data || {}),
+      });
+    });
+}
+
+function reportNodeComplete(nodeId, data = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  console.log(LOG_PREFIX, `节点 ${normalizedNodeId} 已完成`, data);
+  const message = {
+    type: 'NODE_COMPLETE',
+    source: getRuntimeScriptSource(),
+    nodeId: normalizedNodeId,
+    payload: {
+      ...(data || {}),
+      nodeId: normalizedNodeId,
+    },
+    error: null,
+  };
+  Promise.resolve(chrome.runtime.sendMessage(message))
+    .then((response) => {
+      console.log(LOG_PREFIX, `NODE_COMPLETE sent successfully for node ${normalizedNodeId}`, {
+        response,
+        url: location.href,
+        payloadKeys: Object.keys(data || {}),
+      });
+    })
+    .catch((err) => {
+      console.error(LOG_PREFIX, `NODE_COMPLETE send failed for node ${normalizedNodeId}`, err?.message || err, {
         url: location.href,
         payloadKeys: Object.keys(data || {}),
       });
@@ -354,29 +418,62 @@ function reportComplete(step, data = {}) {
 }
 
 /**
- * Report step error.
- * @param {number} step
+ * Report node error.
+ * @param {string|number} stepOrNodeId
  * @param {string} errorMessage
  */
-function reportError(step, errorMessage) {
-  console.error(LOG_PREFIX, `步骤 ${step} 失败: ${errorMessage}`);
+function reportError(stepOrNodeId, errorMessage) {
+  const nodeId = resolveReportNodeId(stepOrNodeId);
+  const step = normalizeLogStep(stepOrNodeId);
+  console.error(LOG_PREFIX, `节点 ${nodeId || stepOrNodeId} 失败: ${errorMessage}`);
   const message = {
-    type: 'STEP_ERROR',
+    type: 'NODE_ERROR',
     source: getRuntimeScriptSource(),
-    step,
-    payload: {},
+    nodeId,
+    payload: {
+      ...(nodeId ? { nodeId } : {}),
+      ...(step ? { step } : {}),
+    },
     error: errorMessage,
   };
   Promise.resolve(chrome.runtime.sendMessage(message))
     .then((response) => {
-      console.log(LOG_PREFIX, `STEP_ERROR sent successfully for step ${step}`, {
+      console.log(LOG_PREFIX, `NODE_ERROR sent successfully for node ${nodeId || stepOrNodeId}`, {
         response,
         url: location.href,
         errorMessage,
       });
     })
     .catch((err) => {
-      console.error(LOG_PREFIX, `STEP_ERROR send failed for step ${step}`, err?.message || err, {
+      console.error(LOG_PREFIX, `NODE_ERROR send failed for node ${nodeId || stepOrNodeId}`, err?.message || err, {
+        url: location.href,
+        errorMessage,
+      });
+    });
+}
+
+function reportNodeError(nodeId, errorMessage) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  console.error(LOG_PREFIX, `节点 ${normalizedNodeId} 失败: ${errorMessage}`);
+  const message = {
+    type: 'NODE_ERROR',
+    source: getRuntimeScriptSource(),
+    nodeId: normalizedNodeId,
+    payload: {
+      nodeId: normalizedNodeId,
+    },
+    error: errorMessage,
+  };
+  Promise.resolve(chrome.runtime.sendMessage(message))
+    .then((response) => {
+      console.log(LOG_PREFIX, `NODE_ERROR sent successfully for node ${normalizedNodeId}`, {
+        response,
+        url: location.href,
+        errorMessage,
+      });
+    })
+    .catch((err) => {
+      console.error(LOG_PREFIX, `NODE_ERROR send failed for node ${normalizedNodeId}`, err?.message || err, {
         url: location.href,
         errorMessage,
       });

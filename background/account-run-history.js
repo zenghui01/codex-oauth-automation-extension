@@ -8,6 +8,8 @@
       buildLocalHelperEndpoint,
       chrome,
       getErrorMessage,
+      getNodeIdByStepForState = null,
+      getNodeTitleForState = null,
       getState,
       normalizeAccountRunHistoryHelperBaseUrl,
     } = deps;
@@ -30,16 +32,25 @@
       if (normalized === 'success') {
         return 'success';
       }
-      if (normalized === 'running' || /_running$/.test(normalized)) {
+      if (normalized === 'running' || /_running$/.test(normalized) || /^node:[^:]+:running$/.test(normalized)) {
         return 'running';
       }
-      if (normalized === 'failed' || /_failed$/.test(normalized)) {
+      if (normalized === 'failed' || /_failed$/.test(normalized) || /^node:[^:]+:failed$/.test(normalized)) {
         return 'failed';
       }
-      if (normalized === 'stopped' || /_stopped$/.test(normalized)) {
+      if (normalized === 'stopped' || /_stopped$/.test(normalized) || /^node:[^:]+:stopped$/.test(normalized)) {
         return 'stopped';
       }
       return '';
+    }
+
+    function normalizeNodeId(value = '') {
+      return String(value || '').trim();
+    }
+
+    function extractRecordNodeFromStatus(status = '') {
+      const match = String(status || '').trim().match(/^node:([^:]+):(?:running|failed|stopped)$/i);
+      return match ? normalizeNodeId(match[1]) : '';
     }
 
     function extractRecordStepFromStatus(status = '') {
@@ -88,6 +99,11 @@
       return Number.isInteger(step) && step > 0 ? step : null;
     }
 
+    function parseFailureLabelNode(label = '') {
+      const match = String(label || '').trim().match(/^节点\s*([A-Za-z0-9_.:-]+)\s*(?:失败|停止)$/);
+      return match ? normalizeNodeId(match[1]) : '';
+    }
+
     function shouldIgnorePersistedFailedStepCandidate(candidate, failureDetail = '') {
       if (!Number.isInteger(candidate) || candidate <= 0) {
         return true;
@@ -128,13 +144,33 @@
       return null;
     }
 
-    function resolveFailureLabel(finalStatus, rawFailureLabel = '', computedFailureLabel = '', failedStep = null) {
+    function resolveNormalizedFailedNodeId(record = {}, status = '', failedStep = null) {
+      const explicitNodeId = normalizeNodeId(record.failedNodeId || record.failedNode || record.nodeId);
+      if (explicitNodeId) {
+        return explicitNodeId;
+      }
+      const statusNodeId = extractRecordNodeFromStatus(status || record.finalStatus || record.status || '');
+      if (statusNodeId) {
+        return statusNodeId;
+      }
+      if (Number.isInteger(failedStep) && failedStep > 0 && typeof getNodeIdByStepForState === 'function') {
+        return normalizeNodeId(getNodeIdByStepForState(failedStep, record));
+      }
+      return '';
+    }
+
+    function resolveFailureLabel(finalStatus, rawFailureLabel = '', computedFailureLabel = '', failedNodeId = '', failedStep = null) {
       const rawLabel = String(rawFailureLabel || '').trim();
       if (finalStatus === 'stopped') {
         return computedFailureLabel;
       }
       if (finalStatus !== 'failed') {
         return rawLabel || computedFailureLabel;
+      }
+
+      const rawNodeId = parseFailureLabelNode(rawLabel);
+      if (rawNodeId) {
+        return rawNodeId === failedNodeId ? rawLabel : computedFailureLabel;
       }
 
       const rawStep = parseFailureLabelStep(rawLabel);
@@ -156,7 +192,21 @@
         || /进入了手机号页面/.test(text);
     }
 
-    function buildFailureLabel(finalStatus, failedStep, failureDetail = '') {
+    function getNodeDisplayName(nodeId, state = {}) {
+      const normalizedNodeId = normalizeNodeId(nodeId);
+      if (!normalizedNodeId) {
+        return '';
+      }
+      if (typeof getNodeTitleForState === 'function') {
+        const title = String(getNodeTitleForState(normalizedNodeId, state) || '').trim();
+        if (title) {
+          return title;
+        }
+      }
+      return normalizedNodeId;
+    }
+
+    function buildFailureLabel(finalStatus, failedNodeId = '', failedStep = null, failureDetail = '', state = {}) {
       if (finalStatus === 'success') {
         return '流程完成';
       }
@@ -164,6 +214,9 @@
         return '正在运行';
       }
       if (finalStatus === 'stopped') {
+        if (failedNodeId) {
+          return `节点 ${getNodeDisplayName(failedNodeId, state)} 停止`;
+        }
         if (Number.isInteger(failedStep) && failedStep > 0) {
           return `步骤 ${failedStep} 停止`;
         }
@@ -174,6 +227,9 @@
       }
       if (isPhoneVerificationFailure(failureDetail)) {
         return '出现手机号验证';
+      }
+      if (failedNodeId) {
+        return `节点 ${getNodeDisplayName(failedNodeId, state)} 失败`;
       }
       if (Number.isInteger(failedStep) && failedStep > 0) {
         return `步骤 ${failedStep} 失败`;
@@ -341,6 +397,9 @@
       const failedStep = finalStatus === 'failed' || finalStatus === 'stopped'
         ? resolveNormalizedFailedStep(record, failureDetail)
         : null;
+      const failedNodeId = finalStatus === 'failed' || finalStatus === 'stopped'
+        ? resolveNormalizedFailedNodeId(record, record.finalStatus || record.status || '', failedStep)
+        : '';
       const autoRunContext = normalizeAutoRunContext(record.autoRunContext);
       const retryCount = normalizeRetryCount(
         record.retryCount !== undefined
@@ -348,11 +407,15 @@
           : ((autoRunContext?.attemptRun || 0) > 1 ? autoRunContext.attemptRun - 1 : 0)
       );
       const source = normalizeSource(record.source || (autoRunContext ? 'auto' : 'manual'));
-      const computedFailureLabel = buildFailureLabel(finalStatus, failedStep, failureDetail);
+      const computedFailureLabel = buildFailureLabel(finalStatus, failedNodeId, failedStep, failureDetail, record);
       const rawFailureLabel = String(record.failureLabel || '').trim();
+      const flowId = String(record.flowId || record.activeFlowId || '').trim();
+      const runId = String(record.runId || record.activeRunId || '').trim();
 
       return {
         recordId: String(record.recordId || '').trim() || buildRecordId(accountIdentifier, accountIdentifierType),
+        flowId,
+        runId,
         accountIdentifierType,
         accountIdentifier,
         email,
@@ -361,8 +424,9 @@
         finalStatus,
         finishedAt,
         retryCount,
-        failureLabel: resolveFailureLabel(finalStatus, rawFailureLabel, computedFailureLabel, failedStep),
+        failureLabel: resolveFailureLabel(finalStatus, rawFailureLabel, computedFailureLabel, failedNodeId, failedStep),
         failureDetail,
+        failedNodeId,
         failedStep: Number.isInteger(failedStep) && failedStep > 0 ? failedStep : null,
         source,
         autoRunContext: source === 'auto' ? autoRunContext : null,
@@ -422,13 +486,31 @@
       const failedStep = finalStatus === 'failed' || finalStatus === 'stopped'
         ? extractRecordStep(status, failureDetail)
         : null;
+      const statusNodeId = finalStatus === 'failed' || finalStatus === 'stopped'
+        ? extractRecordNodeFromStatus(status)
+        : '';
+      const stateNodeId = finalStatus === 'failed' || finalStatus === 'stopped'
+        ? normalizeNodeId(state.currentNodeId)
+        : '';
+      const failedNodeIdFromStep = !statusNodeId
+        && !stateNodeId
+        && Number.isInteger(failedStep)
+        && failedStep > 0
+        && typeof getNodeIdByStepForState === 'function'
+        ? normalizeNodeId(getNodeIdByStepForState(failedStep, state))
+        : '';
+      const failedNodeId = statusNodeId || stateNodeId || failedNodeIdFromStep;
       const source = Boolean(state.autoRunning) ? 'auto' : 'manual';
       const autoRunContext = source === 'auto' ? buildAutoRunContextFromState(state) : null;
       const retryCount = source === 'auto' ? getRetryCountFromState(state) : 0;
       const finishedAt = new Date().toISOString();
+      const flowId = String(state.flowId || state.activeFlowId || '').trim();
+      const runId = String(state.runId || state.activeRunId || '').trim();
 
       return {
         recordId: buildRecordId(accountIdentifier, accountIdentifierType),
+        flowId,
+        runId,
         accountIdentifierType,
         accountIdentifier,
         email,
@@ -437,9 +519,10 @@
         finalStatus,
         finishedAt,
         retryCount,
-        failureLabel: buildFailureLabel(finalStatus, failedStep, failureDetail),
+        failureLabel: buildFailureLabel(finalStatus, failedNodeId, failedStep, failureDetail, state),
         failureDetail,
-        failedStep: Number.isInteger(failedStep) && failedStep > 0 ? failedStep : null,
+        failedNodeId,
+        failedStep: statusNodeId ? null : (Number.isInteger(failedStep) && failedStep > 0 ? failedStep : null),
         source,
         autoRunContext,
         plusModeEnabled: Boolean(state.plusModeEnabled),

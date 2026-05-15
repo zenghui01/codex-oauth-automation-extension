@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -17,7 +17,7 @@ test('step 6 waits for registration success and completes from background', asyn
     addLog: async (message, level = 'info') => {
       events.logs.push({ message, level });
     },
-    completeStepFromBackground: async (step) => {
+    completeNodeFromBackground: async (step) => {
       events.completedSteps.push(step);
     },
     sleepWithStop: async (ms) => {
@@ -28,7 +28,7 @@ test('step 6 waits for registration success and completes from background', asyn
   await executor.executeStep6();
 
   assert.deepStrictEqual(events.waits, [20000]);
-  assert.deepStrictEqual(events.completedSteps, [6]);
+  assert.deepStrictEqual(events.completedSteps, ['wait-registration-success']);
   assert.ok(events.logs.some(({ message }) => /等待 20 秒/.test(message)));
 });
 
@@ -64,7 +64,7 @@ test('step 6 only clears cookies when cleanup switch is enabled', async () => {
   const executor = api.createStep6Executor({
     addLog: async () => {},
     chrome: chromeApi,
-    completeStepFromBackground: async (step) => {
+    completeNodeFromBackground: async (step) => {
       events.completedSteps.push(step);
     },
     sleepWithStop: async () => {},
@@ -77,7 +77,7 @@ test('step 6 only clears cookies when cleanup switch is enabled', async () => {
 
   await executor.executeStep6({ step6CookieCleanupEnabled: true });
 
-  assert.deepStrictEqual(events.completedSteps, [6, 6]);
+  assert.deepStrictEqual(events.completedSteps, ['wait-registration-success', 'wait-registration-success']);
   assert.deepStrictEqual(events.removedCookies, [
     {
       url: 'https://chatgpt.com/auth',
@@ -102,7 +102,7 @@ test('step 7 retries up to configured limit and then fails', async () => {
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async () => {
+    completeNodeFromBackground: async () => {
       events.completed += 1;
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
@@ -153,7 +153,7 @@ test('step 7 exits internal retry loop immediately when add-phone is detected', 
     addLog: async (message, level = 'info') => {
       events.logs.push({ message, level });
     },
-    completeStepFromBackground: async () => {
+    completeNodeFromBackground: async () => {
       events.completed += 1;
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
@@ -201,7 +201,7 @@ test('step 7 hands direct add-phone to shared phone verification when enabled', 
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       events.completions.push({ step, payload });
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
@@ -256,7 +256,7 @@ test('step 7 hands direct add-phone to shared phone verification when enabled', 
   ]);
   assert.deepStrictEqual(events.completions, [
     {
-      step: 7,
+      step: 'oauth-login',
       payload: {
         loginVerificationRequestedAt: null,
         skipLoginVerificationStep: true,
@@ -280,7 +280,7 @@ test('step 7 direct add-phone stays fatal when phone verification is disabled', 
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async () => {
+    completeNodeFromBackground: async () => {
       events.completions += 1;
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
@@ -324,7 +324,7 @@ test('step 7 propagates fatal errors from shared add-phone verification', async 
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async () => {
+    completeNodeFromBackground: async () => {
       events.completions += 1;
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
@@ -368,7 +368,7 @@ test('step 7 starts a new oauth timeout window for each refreshed oauth url', as
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     getErrorMessage: (error) => error?.message || String(error || ''),
     getLoginAuthStateLabel: (state) => state || 'unknown',
     getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs, options) => {
@@ -419,7 +419,7 @@ test('step 7 forwards direct OAuth consent skip metadata when completing', async
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       events.completions.push({ step, payload });
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
@@ -447,7 +447,7 @@ test('step 7 forwards direct OAuth consent skip metadata when completing', async
 
   assert.deepStrictEqual(events.completions, [
     {
-      step: 10,
+      step: 'oauth-login',
       payload: {
         loginVerificationRequestedAt: null,
         skipLoginVerificationStep: true,
@@ -469,7 +469,7 @@ test('step 7 forwards phone login identity payload when account identifier is ph
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       events.completions.push({ step, payload });
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
@@ -529,7 +529,7 @@ test('step 7 forwards phone login identity payload when account identifier is ph
   ]);
   assert.deepStrictEqual(events.completions, [
     {
-      step: 7,
+      step: 'oauth-login',
       payload: {
         loginVerificationRequestedAt: 123456,
         accountIdentifierType: 'phone',
@@ -558,7 +558,7 @@ test('step 7 keeps Plus email login even when phone sms runtime exists', async (
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     getErrorMessage: (error) => error?.message || String(error || ''),
     getLoginAuthStateLabel: (state) => state || 'unknown',
     getState: async () => ({
@@ -629,7 +629,7 @@ test('step 7 keeps phone login after step 8 stores an unbound email for phone si
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     getErrorMessage: (error) => error?.message || String(error || ''),
     getLoginAuthStateLabel: (state) => state || 'unknown',
     getState: async () => ({ ...phoneSignupState }),
@@ -668,7 +668,7 @@ test('step 7 can infer phone login from an available phone signup configuration 
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     getErrorMessage: (error) => error?.message || String(error || ''),
     getLoginAuthStateLabel: (state) => state || 'unknown',
     getState: async () => ({
@@ -715,7 +715,7 @@ test('step 7 can start from a manually filled signup phone without completed ste
 
   const executor = api.createStep7Executor({
     addLog: async () => {},
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       events.completions.push({ step, payload });
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
@@ -755,7 +755,7 @@ test('step 7 can start from a manually filled signup phone without completed ste
   assert.equal(events.payloads[0].password, '');
   assert.deepStrictEqual(events.completions, [
     {
-      step: 7,
+      step: 'oauth-login',
       payload: {
         loginVerificationRequestedAt: 987654,
         accountIdentifierType: 'phone',
@@ -783,7 +783,7 @@ test('step 7 stops immediately when management secret is missing', async () => {
     addLog: async (message, level = 'info') => {
       events.logs.push({ message, level });
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     getErrorMessage: (error) => error?.message || String(error || ''),
     getLoginAuthStateLabel: (state) => state || 'unknown',
     getState: async () => ({ email: 'user@example.com', password: 'secret' }),
@@ -827,7 +827,7 @@ test('step 7 stops immediately when management secret is invalid', async () => {
     addLog: async (message, level = 'info') => {
       events.logs.push({ message, level });
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     getErrorMessage: (error) => error?.message || String(error || ''),
     getLoginAuthStateLabel: (state) => state || 'unknown',
     getState: async () => ({ email: 'user@example.com', password: 'secret' }),

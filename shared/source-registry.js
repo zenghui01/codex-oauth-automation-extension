@@ -96,6 +96,15 @@
       driverId: 'content/vps-panel',
       cleanupScopes: [],
     },
+    'platform-panel': {
+      flowId: 'openai',
+      kind: 'virtual-page',
+      label: '平台回调面板',
+      readyPolicy: 'disabled',
+      family: 'platform-panel-family',
+      driverId: 'content/platform-panel',
+      cleanupScopes: [],
+    },
     'sub2api-panel': {
       flowId: 'openai',
       kind: 'panel-page',
@@ -156,13 +165,13 @@
     'content/signup-page': {
       sourceId: 'openai-auth',
       commands: [
-        'OPEN_SIGNUP',
-        'SUBMIT_SIGNUP_IDENTIFIER',
-        'SUBMIT_PASSWORD',
-        'SUBMIT_PROFILE',
-        'SUBMIT_LOGIN_CODE',
-        'SUBMIT_PHONE_CODE',
-        'DETECT_AUTH_STATE',
+        'submit-signup-email',
+        'fill-password',
+        'fill-profile',
+        'oauth-login',
+        'submit-verification-code',
+        'confirm-oauth',
+        'detect-auth-state',
       ],
     },
     'content/qq-mail': {
@@ -191,23 +200,27 @@
     },
     'content/sub2api-panel': {
       sourceId: 'sub2api-panel',
-      commands: ['OPEN_PANEL', 'FETCH_OAUTH_URL', 'VERIFY_PLATFORM'],
+      commands: ['open-panel', 'fetch-oauth-url', 'platform-verify'],
     },
     'content/vps-panel': {
       sourceId: 'vps-panel',
-      commands: ['OPEN_PANEL', 'FETCH_OAUTH_URL'],
+      commands: ['open-panel', 'fetch-oauth-url', 'platform-verify'],
+    },
+    'content/platform-panel': {
+      sourceId: 'platform-panel',
+      commands: ['platform-verify', 'fetch-oauth-url'],
     },
     'content/plus-checkout': {
       sourceId: 'plus-checkout',
-      commands: ['CREATE_CHECKOUT', 'FILL_CHECKOUT'],
+      commands: ['plus-checkout-create', 'plus-checkout-billing', 'plus-checkout-return'],
     },
     'content/paypal-flow': {
       sourceId: 'paypal-flow',
-      commands: ['APPROVE_PAYPAL'],
+      commands: ['paypal-approve'],
     },
     'content/gopay-flow': {
       sourceId: 'gopay-flow',
-      commands: ['APPROVE_GOPAY'],
+      commands: ['gopay-subscription-confirm'],
     },
   });
 
@@ -294,6 +307,15 @@
         id: driverId,
         ...DRIVER_DEFINITIONS[driverId],
       };
+    }
+
+    function driverAcceptsCommand(sourceOrDriverId, command) {
+      const normalizedCommand = normalizeSourceId(command);
+      if (!normalizedCommand) {
+        return false;
+      }
+      const driver = getDriverMeta(sourceOrDriverId);
+      return Array.isArray(driver?.commands) && driver.commands.includes(normalizedCommand);
     }
 
     function isSignupPageHost(hostname = '') {
@@ -414,6 +436,7 @@
       getCleanupOwnerSource,
       getDriverIdForSource,
       getDriverMeta,
+      driverAcceptsCommand,
       getSourceKeys,
       getSourceLabel,
       getSourceMeta,

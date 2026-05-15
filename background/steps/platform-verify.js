@@ -6,7 +6,7 @@
       addLog,
       chrome,
       closeConflictingTabsForSource,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       ensureContentScriptReadyOnTab,
       getPanelMode,
       getTabId,
@@ -253,7 +253,7 @@
 
       if (shouldBypassStep9ForLocalCpa(state)) {
         await addStepLog(platformVerifyStep, '检测到本地 CPA，且当前策略为“跳过平台回调验证”，本轮不再重复提交回调地址。', 'info');
-        await completeStepFromBackground(platformVerifyStep, {
+        await completeNodeFromBackground(state?.nodeId || 'platform-verify', {
           localhostUrl: state.localhostUrl,
           verifiedStatus: 'local-auto',
         });
@@ -286,7 +286,7 @@
           || normalizeString(result?.status_message)
           || 'CPA 已通过接口提交回调';
         await addStepLog(platformVerifyStep, verifiedStatus, 'ok');
-        await completeStepFromBackground(platformVerifyStep, {
+        await completeNodeFromBackground(state?.nodeId || 'platform-verify', {
           localhostUrl: callback.url,
           verifiedStatus,
         });
@@ -336,7 +336,7 @@
 
       const verifiedStatus = normalizeString(result?.message) || 'Codex2API OAuth 账号添加成功';
       await addStepLog(platformVerifyStep, verifiedStatus, 'ok');
-      await completeStepFromBackground(platformVerifyStep, {
+      await completeNodeFromBackground(state?.nodeId || 'platform-verify', {
         localhostUrl: callback.url,
         verifiedStatus,
       });
@@ -381,7 +381,7 @@
             logOptions: { step: visibleStep, stepKey: 'platform-verify' },
             timeoutMs: SUB2API_STEP9_RESPONSE_TIMEOUT_MS,
           });
-          await completeStepFromBackground(platformVerifyStep, result);
+          await completeNodeFromBackground(state?.nodeId || 'platform-verify', result);
           return;
         } catch (error) {
           lastError = error;

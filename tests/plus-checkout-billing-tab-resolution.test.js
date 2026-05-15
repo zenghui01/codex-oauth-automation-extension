@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -153,7 +153,7 @@ function createExecutorHarness({
         getAllFrames: async () => frames,
       },
     },
-    completeStepFromBackground: async (step, payload) => events.completed.push({ step, payload }),
+    completeNodeFromBackground: async (step, payload) => events.completed.push({ step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId) => events.ensuredTabs.push({ source, tabId }),
     fetch: fetchImpl,
     generateRandomName: () => ({ firstName: 'Ada', lastName: 'Lovelace' }),
@@ -237,7 +237,7 @@ test('Plus checkout billing uses the current checkout tab when step 6 did not re
   assert.equal(events.messages.some((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL' && entry.frameId === 0), true);
   assert.equal(events.messages.some((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS' && entry.frameId === 0), true);
   assert.equal(events.messages.some((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE' && entry.frameId === 0), true);
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
   assert.equal(events.states.some((updates) => updates.plusCheckoutTabId === checkoutTab.id), true);
   assert.equal(events.logs.some((entry) => /当前已在 Plus Checkout 页面/.test(entry.message)), true);
 });
@@ -297,7 +297,7 @@ test('Plus checkout billing sends the billing command to the iframe that contain
   assert.equal(fillMessage.frameId, 8);
   assert.equal(subscribeMessage.frameId, 0);
   assert.equal(events.logs.some((entry) => /checkout iframe/.test(entry.message)), true);
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
 test('Plus checkout billing uses proxy exit country for GoPay address when available', async () => {
@@ -597,7 +597,7 @@ test('Plus checkout billing selects GoPay and waits for a GoPay redirect', async
   assert.equal(fillMessage.message.payload.addressSeed.countryCode, 'ID');
   assert.equal(subscribeMessage.message.payload.paymentMethod, 'gopay');
   assert.equal(checkoutTab.url, 'https://gopay.co.id/payment/session');
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
 test('Plus checkout billing still inspects a frame when ping readiness is stale', async () => {
@@ -625,7 +625,7 @@ test('Plus checkout billing still inspects a frame when ping readiness is stale'
 
   const selectMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL');
   assert.equal(selectMessage.frameId, 0);
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
 test('Plus checkout billing uses the autocomplete iframe for address suggestions when Stripe splits it out', async () => {
@@ -655,7 +655,7 @@ test('Plus checkout billing uses the autocomplete iframe for address suggestions
   assert.equal(ensureAddressMessage.frameId, 8);
   assert.equal(combinedFillMessage, undefined);
   assert.equal(events.logs.some((entry) => /Google 地址推荐/.test(entry.message)), true);
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
 test('Plus checkout billing skips Google autocomplete when meiguodizhi returns a complete address', async () => {
@@ -713,7 +713,7 @@ test('Plus checkout billing skips Google autocomplete when meiguodizhi returns a
     path: '/de-address',
     method: 'refresh',
   });
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
 test('Plus checkout billing uses the detected checkout country before choosing an address seed', async () => {
@@ -940,7 +940,7 @@ test('GPC billing polls queue task, submits WhatsApp OTP then PIN, and waits unt
   assert.equal(events.states.some((state) => state.gopayHelperTaskId === 'task_123' && state.gopayHelperTaskStatus === 'completed'), true);
   assert.equal(events.logs.some((entry) => entry.message === '步骤 7：GPC 任务状态：等待 WhatsApp OTP'), true);
   assert.equal(events.logs.some((entry) => /whatsapp_otp_wait/.test(entry.message)), false);
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
   assert.equal(events.completed[0].payload.plusCheckoutSource, 'gpc-helper');
   assert.ok(events.sleeps.includes(3000));
 });
@@ -995,7 +995,7 @@ test('GPC billing auto mode only polls until completed without OTP or PIN submis
   assert.equal(events.logs.some((entry) => /auto_otp_wait/.test(entry.message)), false);
   assert.equal(events.states.some((state) => state.plusManualConfirmationMethod === 'gopay-otp'), false);
   assert.equal(events.states.some((state) => state.gopayHelperTaskId === 'task_auto' && state.gopayHelperTaskStatus === 'completed'), true);
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
   assert.equal(events.completed[0].payload.plusCheckoutSource, 'gpc-helper');
 });
 
@@ -1266,7 +1266,7 @@ test('GPC billing reads SMS OTP from local helper for sms_otp_wait', async () =>
   assert.deepEqual(JSON.parse(fetchCalls.find((call) => call.url.endsWith('/api/gp/tasks/task_sms/otp')).options.body), {
     otp: '654321',
   });
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
 test('GPC billing can read WhatsApp OTP from local helper when enabled', async () => {
@@ -1346,7 +1346,7 @@ test('GPC billing can read WhatsApp OTP from local helper when enabled', async (
   assert.deepEqual(JSON.parse(fetchCalls.find((call) => call.url.endsWith('/api/gp/tasks/task_wa/otp')).options.body), {
     otp: '765432',
   });
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
 
@@ -1481,7 +1481,7 @@ test('GPC billing helper mode requests newer OTP after invalid OTP error', async
   assert.equal(helperUrls[1].searchParams.get('consume'), '1');
   assert.ok(Number(helperUrls[1].searchParams.get('after_ms')) > 1710000000000);
   assert.equal(events.logs.some((entry) => /OTP 校验失败/.test(entry.message)), true);
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
 test('GPC billing manual OTP wrong input opens next dialog only after previous one closes', async () => {
@@ -1558,7 +1558,7 @@ test('GPC billing manual OTP wrong input opens next dialog only after previous o
     .filter((call) => call.url.endsWith('/api/gp/tasks/task_manual_retry/otp'))
     .map((call) => JSON.parse(call.options.body));
   assert.deepEqual(otpBodies, [{ otp: '111111' }, { otp: '222222' }]);
-  assert.equal(events.completed[0].step, 7);
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
 test('GPC billing manual OTP cancel stops task and ends current round', async () => {

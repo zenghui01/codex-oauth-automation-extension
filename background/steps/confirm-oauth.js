@@ -7,7 +7,7 @@
       chrome,
       cleanupStep8NavigationListeners,
       clickWithDebugger,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       ensureStep8SignupPageReady,
       getOAuthFlowRemainingMs,
       getOAuthFlowStepTimeoutMs,
@@ -122,7 +122,7 @@
           cleanupListener();
 
           addStepLog(visibleStep, `已捕获 localhost 地址：${callbackUrl}`, 'ok').then(() => {
-            return completeStepFromBackground(visibleStep, { localhostUrl: callbackUrl });
+            return completeNodeFromBackground(state?.nodeId || 'confirm-oauth', { localhostUrl: callbackUrl });
           }).then(() => {
             resolve();
           }).catch((err) => {

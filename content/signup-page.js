@@ -20,7 +20,7 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
   // Listen for commands from Background
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (
-      message.type === 'EXECUTE_STEP'
+      message.type === 'EXECUTE_NODE'
       || message.type === 'FILL_CODE'
       || message.type === 'STEP8_FIND_AND_CLICK'
       || message.type === 'STEP8_GET_STATE'
@@ -46,6 +46,7 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
         sendResponse({ ok: true, ...(result || {}) });
       }).catch(err => {
         const reportedStep = Number(message.payload?.visibleStep) || message.step;
+        const reportedNodeId = resolveCommandNodeId(message);
         if (isStopError(err)) {
           if (reportedStep) {
             log(`步骤 ${reportedStep || 8}：已被用户停止。`, 'warn');
@@ -61,7 +62,7 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
         }
 
         if (reportedStep) {
-          reportError(reportedStep, err.message);
+          reportError(reportedNodeId || reportedStep, err.message);
         }
         sendResponse({ error: err.message });
       });
@@ -72,17 +73,40 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
   console.log('[MultiPage:signup-page] 消息监听已存在，跳过重复注册');
 }
 
+const SIGNUP_PAGE_NODE_HANDLERS = Object.freeze({
+  'submit-signup-email': (payload) => step2_clickRegister(payload),
+  'fill-password': (payload) => step3_fillEmailPassword(payload),
+  'fill-profile': (payload) => step5_fillNameBirthday(payload),
+  'oauth-login': (payload) => step6_login(payload),
+  'confirm-oauth': (_payload) => step8_findAndClick(),
+});
+
+function resolveCommandNodeId(message = {}) {
+  const directNodeId = String(message.nodeId || message.payload?.nodeId || '').trim();
+  if (directNodeId) {
+    return directNodeId;
+  }
+  const visibleStep = Number(message.payload?.visibleStep || message.step) || 0;
+  if (visibleStep === 4) return 'fetch-signup-code';
+  if (visibleStep === 8 || visibleStep === 11) return 'fetch-login-code';
+  if (visibleStep === 9 || visibleStep === 12) return 'confirm-oauth';
+  if (visibleStep === 7 || visibleStep === 10) return 'oauth-login';
+  if (visibleStep === 5) return 'fill-profile';
+  if (visibleStep === 3) return 'fill-password';
+  if (visibleStep === 2) return 'submit-signup-email';
+  return '';
+}
+
 async function handleCommand(message) {
   switch (message.type) {
-    case 'EXECUTE_STEP':
-      switch (message.step) {
-        case 2: return await step2_clickRegister(message.payload);
-        case 3: return await step3_fillEmailPassword(message.payload);
-        case 5: return await step5_fillNameBirthday(message.payload);
-        case 7: return await step6_login(message.payload);
-        case 9: return await step8_findAndClick();
-        default: throw new Error(`signup-page.js 不处理步骤 ${message.step}`);
+    case 'EXECUTE_NODE': {
+      const nodeId = String(message.nodeId || message.payload?.nodeId || '').trim();
+      const handler = SIGNUP_PAGE_NODE_HANDLERS[nodeId];
+      if (!handler) {
+        throw new Error(`signup-page.js 不处理节点 ${nodeId}`);
       }
+      return await handler(message.payload || {});
+    }
     case 'FILL_CODE':
       // Step 4 = signup code, Step 7 = login code (same handler)
       return await fillVerificationCode(message.step, message.payload);

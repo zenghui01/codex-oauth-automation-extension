@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -112,7 +112,7 @@ test('step 8 keeps phone-registered accounts on email-code flow when page is ema
       },
     },
     CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       calls.completions.push({ step, payload });
     },
     confirmCustomVerificationStepBypass: async () => {},
@@ -190,7 +190,7 @@ test('step 8 routes only a real phone verification page through sms helper', asy
       },
     },
     CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       calls.completions.push({ step, payload });
     },
     confirmCustomVerificationStepBypass: async () => {},
@@ -250,7 +250,7 @@ test('step 8 routes only a real phone verification page through sms helper', asy
   ]);
   assert.deepStrictEqual(calls.completions, [
     {
-      step: 8,
+      step: 'fetch-login-code',
       payload: {
         phoneVerification: true,
         loginPhoneVerification: true,
@@ -770,7 +770,7 @@ test('step 8 completes directly when auth page is already on OAuth consent page'
       },
     },
     CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       events.completeCalls.push({ step, payload });
     },
     confirmCustomVerificationStepBypass: async () => {},
@@ -825,7 +825,7 @@ test('step 8 completes directly when auth page is already on OAuth consent page'
   ]);
   assert.deepStrictEqual(events.completeCalls, [
     {
-      step: 8,
+      step: 'fetch-login-code',
       payload: {
         loginVerificationRequestedAt: null,
         skipLoginVerificationStep: true,
@@ -855,7 +855,7 @@ test('step 8 retries in-place when polling fails but auth page still stays on ve
       },
     },
     CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     confirmCustomVerificationStepBypass: async () => {},
     ensureStep8VerificationPageReady: async () => {
       events.ensureCalls += 1;
@@ -922,7 +922,7 @@ test('step 8 keeps resend cooldown timestamp across in-place retries to avoid re
       },
     },
     CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     confirmCustomVerificationStepBypass: async () => {},
     ensureStep8VerificationPageReady: async () => ({ state: 'verification_page', displayedEmail: 'user@example.com' }),
     rerunStep7ForStep8Recovery: async () => {},
@@ -997,7 +997,7 @@ test('step 8 completes when polling fails but recovery probe shows oauth consent
       },
     },
     CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       events.completeCalls.push({ step, payload });
     },
     confirmCustomVerificationStepBypass: async () => {},
@@ -1046,7 +1046,7 @@ test('step 8 completes when polling fails but recovery probe shows oauth consent
   assert.equal(events.rerunStep7, 0);
   assert.deepStrictEqual(events.completeCalls, [
     {
-      step: 8,
+      step: 'fetch-login-code',
       payload: {
         loginVerificationRequestedAt: null,
         skipLoginVerificationStep: true,

@@ -1,4 +1,4 @@
-const assert = require('node:assert/strict');
+﻿const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
@@ -35,7 +35,7 @@ test('platform verify module supports codex2api protocol callback exchange', asy
       },
       chrome: {},
       closeConflictingTabsForSource: async () => {},
-      completeStepFromBackground: async (step, payload) => {
+      completeNodeFromBackground: async (step, payload) => {
         completed.push({ step, payload });
       },
       ensureContentScriptReadyOnTab: async () => {},
@@ -68,7 +68,7 @@ test('platform verify module supports codex2api protocol callback exchange', asy
     ]);
     assert.deepStrictEqual(completed, [
       {
-        step: 10,
+        step: 'platform-verify',
         payload: {
           localhostUrl: 'http://localhost:1455/auth/callback?code=callback-code&state=oauth-state',
           verifiedStatus: 'OAuth 账号 flow@example.com 添加成功',
@@ -98,7 +98,7 @@ test('platform verify retries transient SUB2API oauth/token exchange errors befo
       },
     },
     closeConflictingTabsForSource: async () => {},
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     ensureContentScriptReadyOnTab: async () => {},
     getPanelMode: () => 'sub2api',
     getTabId: async () => 12,
@@ -166,7 +166,7 @@ test('platform verify retries transient SUB2API token_exchange_user_error before
       },
     },
     closeConflictingTabsForSource: async () => {},
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     ensureContentScriptReadyOnTab: async () => {},
     getPanelMode: () => 'sub2api',
     getTabId: async () => 12,

@@ -102,7 +102,7 @@
     const {
       addLog,
       chrome: chromeApi = globalThis.chrome,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       openSignupEntryTab,
     } = deps;
 
@@ -139,7 +139,7 @@
       await clearOpenAiCookiesBeforeStep1();
       await addLog('步骤 1：正在打开 ChatGPT 官网...');
       await openSignupEntryTab(1);
-      await completeStepFromBackground(1, {});
+      await completeNodeFromBackground('open-chatgpt', {});
     }
 
     return { executeStep1 };

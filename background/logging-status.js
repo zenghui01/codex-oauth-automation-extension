@@ -5,6 +5,7 @@
     const {
       chrome,
       DEFAULT_STATE,
+      getStepIdByNodeIdForState,
       getState,
       isRecoverableStep9AuthFailure,
       LOG_PREFIX,
@@ -51,12 +52,14 @@
       const normalizedOptions = options && typeof options === 'object' ? options : {};
       const step = normalizeLogStep(normalizedOptions.step);
       const stepKey = String(normalizedOptions.stepKey || '').trim();
+      const nodeId = String(normalizedOptions.nodeId || normalizedOptions.nodeKey || stepKey || '').trim();
       return {
         message: String(message || ''),
         level,
         timestamp: Date.now(),
         step,
         stepKey,
+        nodeId,
       };
     }
 
@@ -70,14 +73,21 @@
       chrome.runtime.sendMessage({ type: 'LOG_ENTRY', payload: entry }).catch(() => { });
     }
 
-    async function setStepStatus(step, status) {
+    async function setNodeStatus(nodeId, status) {
+      const normalizedNodeId = String(nodeId || '').trim();
+      if (!normalizedNodeId) {
+        throw new Error('setNodeStatus 缺少 nodeId。');
+      }
       const state = await getState();
-      const statuses = { ...state.stepStatuses };
-      statuses[step] = status;
-      await setState({ stepStatuses: statuses, currentStep: step });
+      const nodeStatuses = { ...(state.nodeStatuses || {}) };
+      nodeStatuses[normalizedNodeId] = status;
+      await setState({
+        nodeStatuses,
+        currentNodeId: normalizedNodeId,
+      });
       chrome.runtime.sendMessage({
-        type: 'STEP_STATUS_CHANGED',
-        payload: { step, status },
+        type: 'NODE_STATUS_CHANGED',
+        payload: { nodeId: normalizedNodeId, status },
       }).catch(() => { });
     }
 
@@ -149,27 +159,48 @@
     }
 
     function getFirstUnfinishedStep(statuses = {}) {
-      const stepIds = Object.keys(DEFAULT_STATE.stepStatuses || {})
-        .map((step) => Number(step))
-        .filter(Number.isFinite)
-        .sort((left, right) => left - right);
-      for (const step of stepIds) {
-        if (!isStepDoneStatus(statuses[step] || 'pending')) {
-          return step;
+      const nodeStatuses = statuses && typeof statuses === 'object' ? statuses : {};
+      const nodeIds = Object.keys(DEFAULT_STATE.nodeStatuses || {});
+      for (const nodeId of nodeIds) {
+        if (!isStepDoneStatus(nodeStatuses[nodeId] || 'pending')) {
+          return typeof getStepIdByNodeIdForState === 'function'
+            ? getStepIdByNodeIdForState(nodeId, {})
+            : null;
         }
       }
       return null;
     }
 
     function hasSavedProgress(statuses = {}) {
-      return Object.values({ ...DEFAULT_STATE.stepStatuses, ...statuses }).some((status) => status !== 'pending');
+      return Object.values({ ...DEFAULT_STATE.nodeStatuses, ...statuses }).some((status) => status !== 'pending');
     }
 
     function getRunningSteps(statuses = {}) {
-      return Object.entries({ ...DEFAULT_STATE.stepStatuses, ...statuses })
+      return Object.entries({ ...DEFAULT_STATE.nodeStatuses, ...statuses })
         .filter(([, status]) => status === 'running')
-        .map(([step]) => Number(step))
+        .map(([nodeId]) => (typeof getStepIdByNodeIdForState === 'function' ? getStepIdByNodeIdForState(nodeId, {}) : null))
+        .filter((step) => Number.isInteger(step) && step > 0)
         .sort((a, b) => a - b);
+    }
+
+    function getFirstUnfinishedNode(statuses = {}) {
+      const nodeIds = Object.keys(DEFAULT_STATE.nodeStatuses || {});
+      for (const nodeId of nodeIds) {
+        if (!isStepDoneStatus(statuses[nodeId] || 'pending')) {
+          return nodeId;
+        }
+      }
+      return '';
+    }
+
+    function hasSavedNodeProgress(statuses = {}) {
+      return Object.values({ ...DEFAULT_STATE.nodeStatuses, ...statuses }).some((status) => status !== 'pending');
+    }
+
+    function getRunningNodes(statuses = {}) {
+      return Object.entries({ ...DEFAULT_STATE.nodeStatuses, ...statuses })
+        .filter(([, status]) => status === 'running')
+        .map(([nodeId]) => nodeId);
     }
 
     function getAutoRunStatusPayload(phase, payload = {}) {
@@ -195,12 +226,15 @@
     return {
       addLog,
       getAutoRunStatusPayload,
+      getFirstUnfinishedNode,
       isAddPhoneAuthFailure,
       getErrorMessage,
       getFirstUnfinishedStep,
       getLoginAuthStateLabel,
+      getRunningNodes,
       getRunningSteps,
       getSourceLabel,
+      hasSavedNodeProgress,
       hasSavedProgress,
       isLegacyStep9RecoverableAuthError,
       isRestartCurrentAttemptError,
@@ -208,7 +242,7 @@
       isStep9RecoverableAuthError,
       isStepDoneStatus,
       isVerificationMailPollingError,
-      setStepStatus,
+      setNodeStatus,
     };
   }
 

@@ -7,7 +7,7 @@
     const {
       addLog,
       chrome,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       confirmCustomVerificationStepBypass,
       generateRandomBirthday,
       generateRandomName,
@@ -83,7 +83,7 @@
         return result || {};
       }
 
-      await completeStepFromBackground(4, {
+      await completeNodeFromBackground('fetch-signup-code', {
         phoneVerification: true,
         code: result?.code || '',
         ...(result?.skipProfileStep ? { skipProfileStep: true } : {}),
@@ -280,7 +280,7 @@
         throw new Error(prepareResult.error);
       }
       if (prepareResult?.alreadyVerified) {
-        await completeStepFromBackground(4, prepareResult?.skipProfileStep ? { skipProfileStep: true } : {});
+        await completeNodeFromBackground('fetch-signup-code', prepareResult?.skipProfileStep ? { skipProfileStep: true } : {});
         return;
       }
 

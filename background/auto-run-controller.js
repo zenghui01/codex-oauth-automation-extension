@@ -17,11 +17,11 @@
       ensureHotmailMailboxReadyForAutoRunRound,
       getAutoRunStatusPayload,
       getErrorMessage,
-      getFirstUnfinishedStep,
+      getFirstUnfinishedNodeId,
       getPendingAutoRunTimerPlan,
-      getRunningSteps,
+      getRunningNodeIds,
       getState,
-      hasSavedProgress,
+      hasSavedNodeProgress,
       isAddPhoneAuthFailure,
       isGpcTaskEndedFailure,
       isPhoneSmsPlatformRateLimitFailure,
@@ -34,13 +34,48 @@
       normalizeAutoRunFallbackThreadIntervalMinutes,
       persistAutoRunTimerPlan,
       resetState,
-      runAutoSequenceFromStep,
+      runAutoSequenceFromNode,
       runtime,
       setState,
       sleepWithStop,
       throwIfAutoRunSessionStopped,
-      waitForRunningStepsToFinish,
+      waitForRunningNodesToFinish,
     } = deps;
+
+    function getRunningWorkflowNodes(state = {}) {
+      if (typeof getRunningNodeIds === 'function') {
+        return getRunningNodeIds(state.nodeStatuses || {}, state);
+      }
+      return [];
+    }
+
+    function getFirstUnfinishedWorkflowNode(state = {}) {
+      if (typeof getFirstUnfinishedNodeId === 'function') {
+        return getFirstUnfinishedNodeId(state.nodeStatuses || {}, state);
+      }
+      return null;
+    }
+
+    function hasSavedWorkflowProgress(state = {}) {
+      if (typeof hasSavedNodeProgress === 'function') {
+        return hasSavedNodeProgress(state.nodeStatuses || {}, state);
+      }
+      return false;
+    }
+
+    async function waitForRunningWorkflowNodesToFinish(payload = {}) {
+      if (typeof waitForRunningNodesToFinish === 'function') {
+        return waitForRunningNodesToFinish(payload);
+      }
+      return getState();
+    }
+
+    async function runAutoSequenceFromWorkflowNode(startNodeId, context = {}) {
+      if (typeof runAutoSequenceFromNode === 'function') {
+        return runAutoSequenceFromNode(startNodeId, context);
+      }
+      throw new Error('自动运行节点执行器未接入。');
+    }
 
     function createAutoRunRoundSummary(round) {
       return {
@@ -85,90 +120,83 @@
       return Math.max(0, Number(summary?.attempts || 0) - 1);
     }
 
-    function normalizeRecordStep(value) {
-      const step = Math.floor(Number(value) || 0);
-      return step > 0 ? step : null;
+    function normalizeRecordNode(value = '') {
+      return String(value || '').trim();
     }
 
-    function extractStepFromRecordStatus(status = '') {
-      const match = String(status || '').trim().toLowerCase().match(/^step(\d+)_(?:failed|stopped)$/);
-      if (!match) {
-        return null;
-      }
-      return normalizeRecordStep(match[1]);
+    function extractNodeFromRecordStatus(status = '') {
+      const match = String(status || '').trim().match(/^node:([^:]+):(failed|stopped)$/i);
+      return match ? normalizeRecordNode(match[1]) : '';
     }
 
-    function getKnownStepIdsFromState(state = {}) {
+    function getKnownNodeIdsFromState(state = {}) {
       const ids = new Set();
-      for (const key of Object.keys(state?.stepStatuses || {})) {
-        const step = normalizeRecordStep(key);
-        if (step) {
-          ids.add(step);
+      for (const key of Object.keys(state?.nodeStatuses || {})) {
+        const nodeId = normalizeRecordNode(key);
+        if (nodeId) {
+          ids.add(nodeId);
         }
       }
 
-      const currentStep = normalizeRecordStep(state?.currentStep);
-      if (currentStep) {
-        ids.add(currentStep);
+      const currentNodeId = normalizeRecordNode(state?.currentNodeId);
+      if (currentNodeId) {
+        ids.add(currentNodeId);
       }
 
-      return Array.from(ids).sort((left, right) => left - right);
+      return Array.from(ids);
     }
 
-    function inferRecordStepFromState(state = {}, preferredStatuses = []) {
-      const statuses = state?.stepStatuses || {};
+    function inferRecordNodeFromState(state = {}, preferredStatuses = []) {
+      const statuses = state?.nodeStatuses || {};
       const preferredStatusSet = new Set(preferredStatuses.map((item) => String(item || '').trim()).filter(Boolean));
-      const stepIds = getKnownStepIdsFromState(state);
-      const currentStep = normalizeRecordStep(state?.currentStep);
+      const nodeIds = getKnownNodeIdsFromState(state);
+      const currentNodeId = normalizeRecordNode(state?.currentNodeId);
 
-      if (currentStep && preferredStatusSet.has(String(statuses[currentStep] || '').trim())) {
-        return currentStep;
+      if (currentNodeId && preferredStatusSet.has(String(statuses[currentNodeId] || '').trim())) {
+        return currentNodeId;
       }
 
-      const matchingSteps = stepIds
-        .filter((step) => preferredStatusSet.has(String(statuses[step] || '').trim()))
-        .sort((left, right) => right - left);
-      if (matchingSteps.length) {
-        return matchingSteps[0];
+      const matchingNodes = nodeIds.filter((nodeId) => preferredStatusSet.has(String(statuses[nodeId] || '').trim()));
+      if (matchingNodes.length) {
+        return matchingNodes[matchingNodes.length - 1];
       }
 
-      if (currentStep) {
-        const currentStatus = String(statuses[currentStep] || '').trim();
+      if (currentNodeId) {
+        const currentStatus = String(statuses[currentNodeId] || '').trim();
         if (!['', 'pending', 'completed', 'manual_completed', 'skipped'].includes(currentStatus)) {
-          return currentStep;
+          return currentNodeId;
         }
       }
 
-      return null;
+      return '';
     }
 
-    function inferRecordStepFromError(errorLike = null) {
+    function inferRecordNodeFromError(errorLike = null, state = {}) {
       if (!errorLike || typeof errorLike !== 'object') {
-        return null;
+        return '';
       }
 
-      return normalizeRecordStep(errorLike.failedStep)
-        || normalizeRecordStep(errorLike.step)
-        || normalizeRecordStep(errorLike.currentStep);
+      return normalizeRecordNode(errorLike.failedNodeId)
+        || normalizeRecordNode(errorLike.nodeId)
+        || normalizeRecordNode(errorLike.currentNodeId);
     }
 
     function resolveAutoRunAccountRecordStatus(status, state = {}, errorLike = null) {
       const normalizedStatus = String(status || '').trim().toLowerCase();
-      const explicitStep = extractStepFromRecordStatus(normalizedStatus);
-      if (explicitStep) {
-        return normalizedStatus;
+      const explicitNode = extractNodeFromRecordStatus(status);
+      if (explicitNode) {
+        return `node:${explicitNode}:${normalizedStatus.endsWith(':stopped') ? 'stopped' : 'failed'}`;
       }
-
       if (normalizedStatus === 'failed') {
-        const failedStep = inferRecordStepFromError(errorLike)
-          || inferRecordStepFromState(state, ['failed', 'running']);
-        return failedStep ? `step${failedStep}_failed` : status;
+        const failedNode = inferRecordNodeFromError(errorLike, state)
+          || inferRecordNodeFromState(state, ['failed', 'running']);
+        return failedNode ? `node:${failedNode}:failed` : status;
       }
 
       if (normalizedStatus === 'stopped') {
-        const stoppedStep = inferRecordStepFromError(errorLike)
-          || inferRecordStepFromState(state, ['stopped', 'running']);
-        return stoppedStep ? `step${stoppedStep}_stopped` : status;
+        const stoppedNode = inferRecordNodeFromError(errorLike, state)
+          || inferRecordNodeFromState(state, ['stopped', 'running']);
+        return stoppedNode ? `node:${stoppedNode}:stopped` : status;
       }
 
       return status;
@@ -439,7 +467,7 @@
 
       let successfulRuns = roundSummaries.filter((item) => item.status === 'success').length;
       const initialState = await getState();
-      const initialPhase = continueCurrentOnFirstAttempt && getRunningSteps(initialState.stepStatuses, initialState).length
+      const initialPhase = continueCurrentOnFirstAttempt && getRunningWorkflowNodes(initialState).length
         ? 'waiting_step'
         : 'running';
       const showResumePosition = continueCurrentOnFirstAttempt || resumeCurrentRun > 1 || resumeAttemptRun > 1;
@@ -474,24 +502,25 @@
             autoRunAttemptRun: attemptRun,
           });
           roundSummary.attempts = attemptRun;
-          let startStep = 1;
+          const defaultStartNodeId = typeof runAutoSequenceFromNode === 'function' ? 'open-chatgpt' : 1;
+          let startNodeId = defaultStartNodeId;
           let useExistingProgress = false;
 
           if (reuseExistingProgress) {
             let currentState = await getState();
-            if (getRunningSteps(currentState.stepStatuses, currentState).length) {
-              currentState = await waitForRunningStepsToFinish({
+            if (getRunningWorkflowNodes(currentState).length) {
+              currentState = await waitForRunningWorkflowNodesToFinish({
                 currentRun: targetRun,
                 totalRuns,
                 attemptRun,
               });
             }
-            const resumeStep = getFirstUnfinishedStep(currentState.stepStatuses, currentState);
-            if (resumeStep && hasSavedProgress(currentState.stepStatuses, currentState)) {
-              startStep = resumeStep;
+            const resumeNodeId = getFirstUnfinishedWorkflowNode(currentState);
+            if (resumeNodeId && hasSavedWorkflowProgress(currentState)) {
+              startNodeId = resumeNodeId;
               useExistingProgress = true;
-            } else if (hasSavedProgress(currentState.stepStatuses, currentState)) {
-              await addLog('检测到当前流程已处理完成，本轮将改为从步骤 1 重新开始。', 'info');
+            } else if (hasSavedWorkflowProgress(currentState)) {
+              await addLog('检测到当前流程已处理完成，本轮将改为从首个节点重新开始。', 'info');
             }
           }
 
@@ -571,7 +600,7 @@
               sessionId,
             });
 
-            if (!useExistingProgress && startStep === 1 && typeof ensureHotmailMailboxReadyForAutoRunRound === 'function') {
+            if (!useExistingProgress && startNodeId === defaultStartNodeId && typeof ensureHotmailMailboxReadyForAutoRunRound === 'function') {
               await ensureHotmailMailboxReadyForAutoRunRound({
                 targetRun,
                 totalRuns,
@@ -580,7 +609,7 @@
               });
             }
 
-            await runAutoSequenceFromStep(startStep, {
+            await runAutoSequenceFromWorkflowNode(startNodeId, {
               targetRun,
               totalRuns,
               attemptRuns: attemptRun,

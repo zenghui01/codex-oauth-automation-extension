@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -52,6 +52,97 @@ function extractFunction(name) {
   return source.slice(start, end);
 }
 
+const NODE_COMPAT_HELPERS = `
+const STEP_NODE_IDS = {
+  1: 'open-chatgpt',
+  2: 'submit-signup-email',
+  3: 'fill-password',
+  4: 'fetch-signup-code',
+  5: 'fill-profile',
+  6: 'wait-registration-success',
+  7: 'oauth-login',
+  8: 'fetch-login-code',
+  9: 'confirm-oauth',
+  10: 'platform-verify',
+};
+const NODE_STEP_IDS = Object.fromEntries(Object.entries(STEP_NODE_IDS).map(([step, nodeId]) => [nodeId, Number(step)]));
+function getNodeIdByStepForState(step) {
+  return STEP_NODE_IDS[Number(step)] || '';
+}
+function getStepIdByNodeIdForState(nodeId) {
+  return NODE_STEP_IDS[String(nodeId || '').trim()] || null;
+}
+function getNodeIdsForState() {
+  return Object.keys(STEP_NODE_IDS)
+    .map(Number)
+    .sort((left, right) => left - right)
+    .map((step) => STEP_NODE_IDS[step])
+    .filter(Boolean);
+}
+function getNodeDefinitionForState(nodeId) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  return normalizedNodeId ? { nodeId: normalizedNodeId, executeKey: normalizedNodeId } : null;
+}
+function getNodeTitleForState(nodeId) {
+  return String(nodeId || '').trim();
+}
+function projectStepStatusesToNodeStatuses(stepStatuses = {}) {
+  const nodeStatuses = {};
+  for (const [step, status] of Object.entries(stepStatuses || {})) {
+    const nodeId = getNodeIdByStepForState(step);
+    if (nodeId) nodeStatuses[nodeId] = status;
+  }
+  return nodeStatuses;
+}
+function projectNodeStatusesToStepStatuses(nodeStatuses = {}) {
+  const stepStatuses = {};
+  for (const [nodeId, status] of Object.entries(nodeStatuses || {})) {
+    const step = getStepIdByNodeIdForState(nodeId);
+    if (step) stepStatuses[step] = status;
+  }
+  return stepStatuses;
+}
+const rawGetStateForNodeCompat = getState;
+getState = async function getStateWithNodeStatuses() {
+  const state = await rawGetStateForNodeCompat();
+  return {
+    ...state,
+    nodeStatuses: {
+      ...projectStepStatusesToNodeStatuses(state?.stepStatuses || {}),
+      ...(state?.nodeStatuses || {}),
+    },
+  };
+};
+const rawSetStateForNodeCompat = setState;
+setState = async function setStateWithNodeStatuses(updates = {}) {
+  const stepStatusUpdates = updates?.nodeStatuses
+    ? projectNodeStatusesToStepStatuses(updates.nodeStatuses)
+    : {};
+  return rawSetStateForNodeCompat({
+    ...updates,
+    ...(Object.keys(stepStatusUpdates).length ? {
+      stepStatuses: {
+        ...stepStatusUpdates,
+        ...(updates.stepStatuses || {}),
+      },
+    } : {}),
+  });
+};
+async function executeNodeAndWait(nodeId, delayAfter) {
+  const directStep = Number(nodeId);
+  if (Number.isInteger(directStep) && directStep > 0) {
+    return executeStepAndWait(directStep, delayAfter);
+  }
+  return executeStepAndWait(getStepIdByNodeIdForState(nodeId), delayAfter);
+}
+function getAutoRunNodeDelayMs() {
+  return 0;
+}
+async function runAutoSequenceFromStep(step, context = {}) {
+  return runAutoSequenceFromNode(getNodeIdByStepForState(step), context);
+}
+`;
+
 const bundle = [
   'const AUTO_RUN_STEP_IDLE_LOG_TIMEOUT_MS = 300000;',
   'const AUTO_RUN_STEP_IDLE_LOG_CHECK_INTERVAL_MS = 5000;',
@@ -62,19 +153,22 @@ const bundle = [
   extractFunction('isMail2925ThreadTerminatedError'),
   extractFunction('isSignupPhonePasswordMismatchFailure'),
   extractFunction('getSignupPhonePasswordMismatchRestartPayload'),
-  extractFunction('restartSignupPhonePasswordMismatchAttemptFromStep'),
+  extractFunction('restartSignupPhonePasswordMismatchAttemptFromNode'),
   extractFunction('isSignupUserAlreadyExistsFailure'),
   extractFunction('isPlusCheckoutNonFreeTrialFailure'),
   extractFunction('isPlusCheckoutRestartStep'),
   extractFunction('isPlusCheckoutRestartRequiredFailure'),
   extractFunction('getLatestLogTimestamp'),
-  extractFunction('buildAutoRunStepIdleRestartError'),
+  extractFunction('buildAutoRunNodeIdleRestartError'),
   extractFunction('isAutoRunStepIdleRestartError'),
-  extractFunction('startAutoRunStepIdleLogWatchdog'),
-  extractFunction('runAutoStepActionWithIdleLogWatchdog'),
-  extractFunction('executeStepAndWaitWithAutoRunIdleLogWatchdog'),
+  extractFunction('startAutoRunNodeIdleLogWatchdog'),
+  extractFunction('runAutoNodeActionWithIdleLogWatchdog'),
+  extractFunction('executeNodeAndWaitWithAutoRunIdleLogWatchdog'),
   extractFunction('getPostStep6AutoRestartDecision'),
-  extractFunction('runAutoSequenceFromStep'),
+  NODE_COMPAT_HELPERS,
+  extractFunction('getAutoRunWorkflowNodeIds'),
+  extractFunction('runAutoSequenceFromNode'),
+  extractFunction('runAutoSequenceFromNodeGraph'),
 ].join('\n');
 
 test('auto-run restarts from step 1 with the same email after step 4 failure', async () => {
@@ -217,7 +311,7 @@ return {
     {
       step: 1,
       options: {
-        logLabel: '步骤 4 报错后准备回到步骤 1 沿用当前邮箱重试（第 1 次重开）',
+        logLabel: '节点 fetch-signup-code 报错后准备回到 open-chatgpt 沿用当前邮箱重试（第 1 次重开）',
       },
     },
   ]);
@@ -225,7 +319,7 @@ return {
   assert.deepStrictEqual(events.steps, [1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.equal(currentState.email, 'keep@example.com');
   assert.equal(currentState.password, 'Secret123!');
-  assert.equal(events.logs.some(({ message }) => /沿用当前邮箱回到步骤 1 重新开始/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /沿用当前邮箱回到节点 open-chatgpt 重新开始/.test(message)), true);
 });
 
 test('auto-run does not restart step 4 current attempt when user_already_exists is detected', async () => {
@@ -348,7 +442,7 @@ return {
   assert.match(result.error, /SIGNUP_USER_ALREADY_EXISTS::/);
   assert.deepStrictEqual(result.events.invalidations, []);
   assert.deepStrictEqual(result.events.steps, [1, 2, 3, 4]);
-  assert.equal(result.events.logs.some(({ message }) => /沿用当前邮箱回到步骤 1 重新开始/.test(message)), false);
+  assert.equal(result.events.logs.some(({ message }) => /沿用当前邮箱回到节点 open-chatgpt 重新开始/.test(message)), false);
 });
 
 test('auto-run skips steps 4/5 when step 2 has already marked registration chain as skipped', async () => {
@@ -470,8 +564,8 @@ return {
   const { events } = await api.run();
 
   assert.deepStrictEqual(events.steps, [1, 2, 6, 7, 8, 9, 10]);
-  assert.equal(events.logs.some(({ message }) => /步骤 4 当前状态为 skipped/.test(message)), true);
-  assert.equal(events.logs.some(({ message }) => /步骤 5 当前状态为 skipped/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /节点 fetch-signup-code 当前状态为 skipped/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /节点 fill-profile 当前状态为 skipped/.test(message)), true);
 });
 
 test('auto-run clears fetched signup phone state before restarting when step 4 detects phone/password mismatch', async () => {
@@ -622,7 +716,7 @@ return {
     {
       step: 1,
       options: {
-        logLabel: '步骤 4 检测到手机号/密码不匹配后准备回到步骤 1 重新获取手机号重试（第 1 次重开）',
+        logLabel: '节点 fetch-signup-code 检测到手机号/密码不匹配后准备回到 open-chatgpt 重新获取手机号重试（第 1 次重开）',
       },
     },
   ]);
@@ -632,7 +726,7 @@ return {
   assert.equal(currentState.accountIdentifierType, null);
   assert.equal(currentState.accountIdentifier, '');
   assert.equal(currentState.password, 'Secret123!');
-  assert.equal(events.logs.some(({ message }) => /丢弃当前注册手机号并回到步骤 1 重新开始/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /丢弃当前注册手机号并回到节点 open-chatgpt 重新开始/.test(message)), true);
   assert.equal(events.logs.some(({ message }) => /已清空本轮注册手机号与接码订单/.test(message)), true);
 });
 
@@ -786,7 +880,7 @@ return {
     {
       step: 1,
       options: {
-        logLabel: '步骤 4 检测到当前注册手机号无法接收短信后准备回到步骤 1 重新获取手机号重试（第 1 次重开）',
+        logLabel: '节点 fetch-signup-code 检测到当前注册手机号无法接收短信后准备回到 open-chatgpt 重新获取手机号重试（第 1 次重开）',
       },
     },
   ]);
@@ -796,7 +890,7 @@ return {
   assert.equal(currentState.accountIdentifierType, null);
   assert.equal(currentState.accountIdentifier, '');
   assert.equal(currentState.password, 'Secret123!');
-  assert.equal(events.logs.some(({ message }) => /丢弃当前注册手机号并回到步骤 1 重新开始/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /丢弃当前注册手机号并回到节点 open-chatgpt 重新开始/.test(message)), true);
   assert.equal(events.logs.some(({ message }) => /已清空本轮注册手机号与接码订单/.test(message)), true);
 });
 
@@ -943,7 +1037,7 @@ return {
     {
       step: 1,
       options: {
-        logLabel: '步骤 3 检测到手机号/密码不匹配后准备回到步骤 1 重新获取手机号重试（第 1 次重开）',
+        logLabel: '节点 fill-password 检测到手机号/密码不匹配后准备回到 open-chatgpt 重新获取手机号重试（第 1 次重开）',
       },
     },
   ]);
@@ -953,6 +1047,6 @@ return {
   assert.equal(currentState.accountIdentifierType, null);
   assert.equal(currentState.accountIdentifier, '');
   assert.equal(currentState.password, 'Secret123!');
-  assert.equal(events.logs.some(({ message }) => /步骤 3：检测到手机号\/密码不匹配/.test(message)), true);
-  assert.equal(events.logs.some(({ message }) => /步骤 3：已清空本轮注册手机号与接码订单/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /节点 fill-password：检测到手机号\/密码不匹配/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /节点 fill-password：已清空本轮注册手机号与接码订单/.test(message)), true);
 });

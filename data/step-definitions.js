@@ -10,60 +10,60 @@
   const SIGNUP_METHOD_PHONE = 'phone';
 
   const NORMAL_STEP_DEFINITIONS = [
-    { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网' },
-    { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱' },
-    { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续' },
-    { id: 4, order: 40, key: 'fetch-signup-code', title: '获取注册验证码' },
-    { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日' },
-    { id: 6, order: 60, key: 'wait-registration-success', title: '等待注册成功' },
-    { id: 7, order: 70, key: 'oauth-login', title: '刷新 OAuth 并登录' },
-    { id: 8, order: 80, key: 'fetch-login-code', title: '获取登录验证码' },
-    { id: 9, order: 90, key: 'confirm-oauth', title: '自动确认 OAuth' },
-    { id: 10, order: 100, key: 'platform-verify', title: '平台回调验证' },
+    { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网', sourceId: 'chatgpt', driverId: null, command: 'open-chatgpt' },
+    { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-signup-email' },
+    { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-password' },
+    { id: 4, order: 40, key: 'fetch-signup-code', title: '获取注册验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-signup-code' },
+    { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-profile' },
+    { id: 6, order: 60, key: 'wait-registration-success', title: '等待注册成功', sourceId: 'chatgpt', driverId: null, command: 'wait-registration-success' },
+    { id: 7, order: 70, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
+    { id: 8, order: 80, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
+    { id: 9, order: 90, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
+    { id: 10, order: 100, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
   ];
 
   const PLUS_PAYPAL_STEP_DEFINITIONS = [
-    { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网' },
-    { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱' },
-    { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续' },
-    { id: 4, order: 40, key: 'fetch-signup-code', title: '获取注册验证码' },
-    { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日' },
-    { id: 6, order: 60, key: 'plus-checkout-create', title: '创建 Plus Checkout' },
-    { id: 7, order: 70, key: 'plus-checkout-billing', title: '填写账单并提交订单' },
-    { id: 8, order: 80, key: 'paypal-approve', title: 'PayPal 登录与授权' },
-    { id: 9, order: 90, key: 'plus-checkout-return', title: '订阅回跳确认' },
-    { id: 10, order: 100, key: 'oauth-login', title: '刷新 OAuth 并登录' },
-    { id: 11, order: 110, key: 'fetch-login-code', title: '获取登录验证码' },
-    { id: 12, order: 120, key: 'confirm-oauth', title: '自动确认 OAuth' },
-    { id: 13, order: 130, key: 'platform-verify', title: '平台回调验证' },
+    { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网', sourceId: 'chatgpt', driverId: null, command: 'open-chatgpt' },
+    { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-signup-email' },
+    { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-password' },
+    { id: 4, order: 40, key: 'fetch-signup-code', title: '获取注册验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-signup-code' },
+    { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-profile' },
+    { id: 6, order: 60, key: 'plus-checkout-create', title: '创建 Plus Checkout', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-create' },
+    { id: 7, order: 70, key: 'plus-checkout-billing', title: '填写账单并提交订单', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-billing' },
+    { id: 8, order: 80, key: 'paypal-approve', title: 'PayPal 登录与授权', sourceId: 'paypal-flow', driverId: 'content/paypal-flow', command: 'paypal-approve' },
+    { id: 9, order: 90, key: 'plus-checkout-return', title: '订阅回跳确认', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-return' },
+    { id: 10, order: 100, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
+    { id: 11, order: 110, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
+    { id: 12, order: 120, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
+    { id: 13, order: 130, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
   ];
 
   const PLUS_GOPAY_STEP_DEFINITIONS = [
-    { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网' },
-    { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱' },
-    { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续' },
-    { id: 4, order: 40, key: 'fetch-signup-code', title: '获取注册验证码' },
-    { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日' },
-    { id: 6, order: 60, key: 'plus-checkout-create', title: '打开 GoPay 订阅页' },
-    { id: 7, order: 70, key: 'gopay-subscription-confirm', title: '等待 GoPay 订阅确认' },
-    { id: 10, order: 100, key: 'oauth-login', title: '刷新 OAuth 并登录' },
-    { id: 11, order: 110, key: 'fetch-login-code', title: '获取登录验证码' },
-    { id: 12, order: 120, key: 'confirm-oauth', title: '自动确认 OAuth' },
-    { id: 13, order: 130, key: 'platform-verify', title: '平台回调验证' },
+    { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网', sourceId: 'chatgpt', driverId: null, command: 'open-chatgpt' },
+    { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-signup-email' },
+    { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-password' },
+    { id: 4, order: 40, key: 'fetch-signup-code', title: '获取注册验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-signup-code' },
+    { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-profile' },
+    { id: 6, order: 60, key: 'plus-checkout-create', title: '打开 GoPay 订阅页', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-create' },
+    { id: 7, order: 70, key: 'gopay-subscription-confirm', title: '等待 GoPay 订阅确认', sourceId: 'gopay-flow', driverId: 'content/gopay-flow', command: 'gopay-subscription-confirm' },
+    { id: 10, order: 100, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
+    { id: 11, order: 110, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
+    { id: 12, order: 120, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
+    { id: 13, order: 130, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
   ];
 
   const PLUS_GPC_STEP_DEFINITIONS = [
-    { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网' },
-    { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱' },
-    { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续' },
-    { id: 4, order: 40, key: 'fetch-signup-code', title: '获取注册验证码' },
-    { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日' },
-    { id: 6, order: 60, key: 'plus-checkout-create', title: '创建 GPC 订单' },
-    { id: 7, order: 70, key: 'plus-checkout-billing', title: '等待 GPC 任务完成' },
-    { id: 10, order: 100, key: 'oauth-login', title: '刷新 OAuth 并登录' },
-    { id: 11, order: 110, key: 'fetch-login-code', title: '获取登录验证码' },
-    { id: 12, order: 120, key: 'confirm-oauth', title: '自动确认 OAuth' },
-    { id: 13, order: 130, key: 'platform-verify', title: '平台回调验证' },
+    { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网', sourceId: 'chatgpt', driverId: null, command: 'open-chatgpt' },
+    { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-signup-email' },
+    { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-password' },
+    { id: 4, order: 40, key: 'fetch-signup-code', title: '获取注册验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-signup-code' },
+    { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-profile' },
+    { id: 6, order: 60, key: 'plus-checkout-create', title: '创建 GPC 订单', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-create' },
+    { id: 7, order: 70, key: 'plus-checkout-billing', title: '等待 GPC 任务完成', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-billing' },
+    { id: 10, order: 100, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
+    { id: 11, order: 110, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
+    { id: 12, order: 120, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
+    { id: 13, order: 130, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
   ];
 
   const PHONE_SIGNUP_TITLE_OVERRIDES = Object.freeze({
@@ -186,6 +186,27 @@
     }));
   }
 
+  function cloneNodes(steps = [], options = {}, flowId = DEFAULT_ACTIVE_FLOW_ID) {
+    const { builder } = getFlowDefinitionBuilder({ activeFlowId: flowId });
+    return steps.map((step) => ({
+      legacyStepId: Number(step.id),
+      nodeId: String(step.key || '').trim(),
+      flowId,
+      title: builder?.resolveStepTitle ? builder.resolveStepTitle(step, options) : step.title,
+      displayOrder: Number.isFinite(Number(step.order)) ? Number(step.order) : Number(step.id),
+      nodeType: 'task',
+      sourceId: step.sourceId || '',
+      driverId: step.driverId || '',
+      executeKey: String(step.key || '').trim(),
+      command: String(step.command || step.key || '').trim(),
+      mailRuleId: String(step.mailRuleId || '').trim(),
+      next: Array.isArray(step.next) ? [...step.next] : [],
+      retryPolicy: step.retryPolicy && typeof step.retryPolicy === 'object' ? { ...step.retryPolicy } : {},
+      recoveryPolicy: step.recoveryPolicy && typeof step.recoveryPolicy === 'object' ? { ...step.recoveryPolicy } : {},
+      ui: step.ui && typeof step.ui === 'object' ? { ...step.ui } : {},
+    })).filter((node) => Boolean(node.nodeId));
+  }
+
   function getSteps(options = {}) {
     const { flowId, builder } = getFlowDefinitionBuilder(options);
     if (!builder?.getModeStepDefinitions) {
@@ -194,12 +215,41 @@
     return cloneSteps(builder.getModeStepDefinitions(options), options, flowId);
   }
 
+  function linkLinearNodes(nodes = []) {
+    return nodes.map((node, index) => ({
+      ...node,
+      next: Array.isArray(node.next) && node.next.length
+        ? [...node.next]
+        : (nodes[index + 1]?.nodeId ? [nodes[index + 1].nodeId] : []),
+    }));
+  }
+
+  function getNodes(options = {}) {
+    const { flowId, builder } = getFlowDefinitionBuilder(options);
+    if (!builder?.getModeStepDefinitions) {
+      return [];
+    }
+    return linkLinearNodes(cloneNodes(builder.getModeStepDefinitions(options), options, flowId));
+  }
+
   function getAllSteps(options = {}) {
     const { flowId, builder } = getFlowDefinitionBuilder(options);
     if (!builder?.getAllSteps) {
       return [];
     }
     return cloneSteps(builder.getAllSteps(options), options, flowId);
+  }
+
+  function getAllNodes(options = {}) {
+    const { flowId, builder } = getFlowDefinitionBuilder(options);
+    if (!builder?.getAllSteps) {
+      return [];
+    }
+    return cloneNodes(builder.getAllSteps(options), options, flowId)
+      .sort((left, right) => {
+        if (left.displayOrder !== right.displayOrder) return left.displayOrder - right.displayOrder;
+        return left.nodeId.localeCompare(right.nodeId);
+      });
   }
 
   function getPlusPaymentStepTitle(options = {}) {
@@ -217,6 +267,10 @@
       .sort((left, right) => left - right);
   }
 
+  function getNodeIds(options = {}) {
+    return getNodes(options).map((node) => node.nodeId);
+  }
+
   function getLastStepId(options = {}) {
     const ids = getStepIds(options);
     return ids[ids.length - 1] || 0;
@@ -232,6 +286,33 @@
     return match ? cloneSteps([match], options, flowId)[0] : null;
   }
 
+  function getNodeById(nodeId, options = {}) {
+    const normalizedNodeId = String(nodeId || '').trim();
+    if (!normalizedNodeId) {
+      return null;
+    }
+    return getNodes(options).find((node) => node.nodeId === normalizedNodeId) || null;
+  }
+
+  function getNodeByDisplayOrder(displayOrder, options = {}) {
+    const normalizedOrder = Number(displayOrder);
+    if (!Number.isFinite(normalizedOrder)) {
+      return null;
+    }
+    return getNodes(options).find((node) => node.displayOrder === normalizedOrder) || null;
+  }
+
+  function getWorkflow(options = {}) {
+    const flowId = normalizeActiveFlowId(options?.activeFlowId, DEFAULT_ACTIVE_FLOW_ID);
+    const nodes = getNodes(options);
+    return {
+      flowId,
+      workflowVersion: 1,
+      nodes,
+      nodeIds: nodes.map((node) => node.nodeId),
+    };
+  }
+
   return {
     DEFAULT_ACTIVE_FLOW_ID,
     STEP_DEFINITIONS: NORMAL_STEP_DEFINITIONS,
@@ -243,12 +324,18 @@
     SIGNUP_METHOD_EMAIL,
     SIGNUP_METHOD_PHONE,
     getAllSteps,
+    getAllNodes,
     getLastStepId,
+    getNodeByDisplayOrder,
+    getNodeById,
+    getNodeIds,
+    getNodes,
     getPlusPaymentStepTitle,
     getRegisteredFlowIds,
     getStepById,
     getStepIds,
     getSteps,
+    getWorkflow,
     hasFlow,
     isPlusModeEnabled,
     normalizeActiveFlowId,

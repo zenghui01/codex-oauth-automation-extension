@@ -20,6 +20,7 @@ importScripts(
   'background/sub2api-api.js',
   'background/panel-bridge.js',
   'background/registration-email-state.js',
+  'background/workflow-engine.js',
   'background/runtime-state.js',
   'background/generated-email-helpers.js',
   'background/signup-flow-helpers.js',
@@ -96,6 +97,10 @@ const STEP_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
   .filter(Number.isFinite)))
   .sort((left, right) => left - right);
 const DEFAULT_STEP_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
+const DEFAULT_NODE_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
+  .map((definition) => String(definition?.key || '').trim())
+  .filter(Boolean)));
+const DEFAULT_NODE_STATUSES = Object.fromEntries(DEFAULT_NODE_IDS.map((nodeId) => [nodeId, 'pending']));
 const NORMAL_STEP_IDS = NORMAL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
@@ -223,8 +228,7 @@ const {
 const registrationEmailStateHelpers = self.MultiPageRegistrationEmailState?.createRegistrationEmailStateHelpers?.() || null;
 const runtimeStateHelpers = self.MultiPageBackgroundRuntimeState?.createRuntimeStateHelpers?.({
   DEFAULT_ACTIVE_FLOW_ID,
-  defaultStepStatuses: DEFAULT_STEP_STATUSES,
-  getStepDefinitionForState: (step, state) => getStepDefinitionForState(step, state),
+  defaultNodeStatuses: DEFAULT_NODE_STATUSES,
 }) || null;
 const DEFAULT_REGISTRATION_EMAIL_STATE = registrationEmailStateHelpers?.DEFAULT_REGISTRATION_EMAIL_STATE || {
   current: '',
@@ -685,6 +689,74 @@ function getStepIdByKeyForState(stepKey, state = {}) {
   return null;
 }
 
+function getNodeDefinitionsForState(state = {}) {
+  if (workflowEngine?.getNodesForState) {
+    return workflowEngine.getNodesForState(state);
+  }
+  if (self.MultiPageStepDefinitions?.getNodes) {
+    return self.MultiPageStepDefinitions.getNodes({
+      ...state,
+      activeFlowId: state?.activeFlowId || state?.flowId || DEFAULT_ACTIVE_FLOW_ID,
+      flowId: state?.flowId || state?.activeFlowId || DEFAULT_ACTIVE_FLOW_ID,
+    });
+  }
+  return getStepDefinitionsForState(state)
+    .map((definition) => ({
+      legacyStepId: Number(definition?.id),
+      nodeId: String(definition?.key || '').trim(),
+      displayOrder: Number.isFinite(Number(definition?.order)) ? Number(definition.order) : Number(definition?.id),
+      title: String(definition?.title || '').trim(),
+      executeKey: String(definition?.key || '').trim(),
+    }))
+    .filter((definition) => definition.nodeId);
+}
+
+function getNodeIdsForState(state = {}) {
+  if (workflowEngine?.getNodeIdsForState) {
+    return workflowEngine.getNodeIdsForState(state);
+  }
+  return getNodeDefinitionsForState(state).map((definition) => definition.nodeId).filter(Boolean);
+}
+
+function getNodeDefinitionForState(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) return null;
+  if (workflowEngine?.getNodeById) {
+    return workflowEngine.getNodeById(normalizedNodeId, state);
+  }
+  return getNodeDefinitionsForState(state).find((definition) => definition.nodeId === normalizedNodeId) || null;
+}
+
+function getLastNodeIdForState(state = {}) {
+  const nodeIds = getNodeIdsForState(state);
+  return nodeIds[nodeIds.length - 1] || '';
+}
+
+function getNodeIdByStepForState(step, state = {}) {
+  const definition = getStepDefinitionForState(step, state);
+  return String(definition?.key || '').trim();
+}
+
+function getStepIdByNodeIdForState(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) return null;
+  const node = getNodeDefinitionForState(normalizedNodeId, state);
+  const legacyStepId = Number(node?.legacyStepId);
+  if (Number.isInteger(legacyStepId) && legacyStepId > 0) {
+    return legacyStepId;
+  }
+  return getStepIdByKeyForState(normalizedNodeId, state);
+}
+
+function getNodeTitleForState(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) return '';
+  if (workflowEngine?.getNodeTitle) {
+    return workflowEngine.getNodeTitle(normalizedNodeId, state);
+  }
+  return getNodeDefinitionForState(normalizedNodeId, state)?.title || normalizedNodeId;
+}
+
 initializeSessionStorageAccess();
 setupDeclarativeNetRequestRules();
 
@@ -901,12 +973,12 @@ const SETTINGS_EXPORT_FILENAME_PREFIX = 'multipage-settings';
 const STEP6_REGISTRATION_SUCCESS_WAIT_MS = 20000;
 
 const DEFAULT_STATE = {
+  flowId: DEFAULT_ACTIVE_FLOW_ID,
+  runId: '',
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   activeRunId: '',
   currentNodeId: '',
-  nodeStatuses: {},
-  currentStep: 0, // 当前流程执行到的步骤编号。
-  stepStatuses: { ...DEFAULT_STEP_STATUSES },
+  nodeStatuses: { ...DEFAULT_NODE_STATUSES },
   runtimeState: runtimeStateHelpers?.buildDefaultRuntimeState?.() || null,
   ...CONTRIBUTION_RUNTIME_DEFAULTS,
   oauthUrl: null, // 运行时抓取到的 OAuth 地址，不要手动预填。
@@ -3100,7 +3172,7 @@ async function exportSettingsBundle() {
 
 async function importSettingsBundle(configBundle) {
   const state = await ensureManualInteractionAllowed('\u5bfc\u5165\u914d\u7f6e');
-  if (Object.values(state.stepStatuses || {}).some((status) => status === 'running')) {
+  if (Object.values(state.nodeStatuses || {}).some((status) => status === 'running')) {
     throw new Error('\u5f53\u524d\u6709\u6b65\u9aa4\u6b63\u5728\u6267\u884c\uff0c\u65e0\u6cd5\u5bfc\u5165\u914d\u7f6e\u3002');
   }
   if (!configBundle || typeof configBundle !== 'object' || Array.isArray(configBundle)) {
@@ -3247,8 +3319,8 @@ async function setEmailState(email, options = {}) {
   await setEmailStateSilently(email, options);
   if (email) {
     const latestState = await getState();
-    const recordStatus = shouldMarkAccountRunRecordRunning(latestState) ? 'running' : 'step2_stopped';
-    const recordReason = recordStatus === 'running' ? '正在运行' : '步骤 2 已使用邮箱，流程尚未完成。';
+    const recordStatus = shouldMarkAccountRunRecordRunning(latestState) ? 'running' : 'node:submit-signup-email:stopped';
+    const recordReason = recordStatus === 'running' ? '正在运行' : '节点 submit-signup-email 已使用邮箱，流程尚未完成。';
     await appendManualAccountRunRecordIfNeeded(recordStatus, latestState, recordReason);
     await resumeAutoRunIfWaitingForEmail();
   }
@@ -3328,8 +3400,8 @@ async function setSignupPhoneState(phoneNumber) {
   await setSignupPhoneStateSilently(phoneNumber);
   if (String(phoneNumber || '').trim()) {
     const latestState = await getState();
-    const recordStatus = shouldMarkAccountRunRecordRunning(latestState) ? 'running' : 'step2_stopped';
-    const recordReason = recordStatus === 'running' ? '正在运行' : '步骤 2 已使用手机号，流程尚未完成。';
+    const recordStatus = shouldMarkAccountRunRecordRunning(latestState) ? 'running' : 'node:submit-signup-email:stopped';
+    const recordReason = recordStatus === 'running' ? '正在运行' : '节点 submit-signup-email 已使用手机号，流程尚未完成。';
     await appendManualAccountRunRecordIfNeeded(recordStatus, latestState, recordReason);
   }
 }
@@ -7866,17 +7938,21 @@ function getSourceLabel(source) {
 // Step Status Management
 // ============================================================
 
-async function setStepStatus(step, status) {
-  if (typeof loggingStatus !== 'undefined' && loggingStatus?.setStepStatus) {
-    return loggingStatus.setStepStatus(step, status);
+async function setNodeStatus(nodeId, status) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) {
+    throw new Error('setNodeStatus 缺少 nodeId。');
   }
   const state = await getState();
-  const statuses = { ...state.stepStatuses };
-  statuses[step] = status;
-  await setState({ stepStatuses: statuses, currentStep: step });
+  const nodeStatuses = { ...(state.nodeStatuses || {}) };
+  nodeStatuses[normalizedNodeId] = status;
+  await setState({
+    nodeStatuses,
+    currentNodeId: normalizedNodeId,
+  });
   chrome.runtime.sendMessage({
-    type: 'STEP_STATUS_CHANGED',
-    payload: { step, status },
+    type: 'NODE_STATUS_CHANGED',
+    payload: { nodeId: normalizedNodeId, status },
   }).catch(() => { });
 }
 
@@ -7915,6 +7991,10 @@ const sourceRegistry = self.MultiPageSourceRegistry?.createSourceRegistry?.() ||
 const flowCapabilityRegistry = self.MultiPageFlowCapabilities?.createFlowCapabilityRegistry?.({
   defaultFlowId: DEFAULT_ACTIVE_FLOW_ID,
 }) || null;
+const workflowEngine = self.MultiPageBackgroundWorkflowEngine?.createWorkflowEngine?.({
+  defaultFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  workflowDefinitions: self.MultiPageStepDefinitions,
+}) || null;
 
 const navigationUtils = self.MultiPageBackgroundNavigationUtils?.createNavigationUtils({
   DEFAULT_CODEX2API_URL,
@@ -7926,6 +8006,8 @@ const navigationUtils = self.MultiPageBackgroundNavigationUtils?.createNavigatio
 const loggingStatus = self.MultiPageBackgroundLoggingStatus?.createLoggingStatus({
   chrome,
   DEFAULT_STATE,
+  getStepDefinitionForState,
+  getStepIdByNodeIdForState,
   getState,
   isRecoverableStep9AuthFailure,
   LOG_PREFIX,
@@ -8119,7 +8201,7 @@ function getSignupPhonePasswordMismatchRestartPayload(preservedState = {}) {
   };
 }
 
-async function restartSignupPhonePasswordMismatchAttemptFromStep(step, restartCount, error) {
+async function restartSignupPhonePasswordMismatchAttemptFromNode(nodeId, restartCount, error) {
   const preservedState = await getState();
   const {
     activeSignupPhoneNumber,
@@ -8137,15 +8219,22 @@ async function restartSignupPhonePasswordMismatchAttemptFromStep(step, restartCo
       .test(errorMessage)
       ? '注册手机号异常'
       : '手机号/密码不匹配');
+  const normalizedNodeId = String(nodeId || '').trim() || 'fetch-signup-code';
   await addLog(
-    `步骤 ${step}：检测到${reasonLabel}，准备丢弃当前注册手机号并回到步骤 1 重新开始（第 ${restartCount} 次重开）。${phoneSuffix}${emailSuffix}原因：${errorMessage}`,
+    `节点 ${normalizedNodeId}：检测到${reasonLabel}，准备丢弃当前注册手机号并回到节点 open-chatgpt 重新开始（第 ${restartCount} 次重开）。${phoneSuffix}${emailSuffix}原因：${errorMessage}`,
     'warn'
   );
-  await invalidateDownstreamAfterStepRestart(1, {
-    logLabel: `步骤 ${step} 检测到${reasonLabel}后准备回到步骤 1 重新获取手机号重试（第 ${restartCount} 次重开）`,
-  });
+  if (typeof invalidateDownstreamAfterNodeRestart === 'function') {
+    await invalidateDownstreamAfterNodeRestart('open-chatgpt', {
+      logLabel: `节点 ${normalizedNodeId} 检测到${reasonLabel}后准备回到 open-chatgpt 重新获取手机号重试（第 ${restartCount} 次重开）`,
+    });
+  } else {
+    await invalidateDownstreamAfterStepRestart(1, {
+      logLabel: `节点 ${normalizedNodeId} 检测到${reasonLabel}后准备回到 open-chatgpt 重新获取手机号重试（第 ${restartCount} 次重开）`,
+    });
+  }
   if (shouldClearSignupPhoneRuntime) {
-    await addLog(`步骤 ${step}：已清空本轮注册手机号与接码订单，下一次重开将重新获取号码。`, 'warn');
+    await addLog(`节点 ${normalizedNodeId}：已清空本轮注册手机号与接码订单，下一次重开将重新获取号码。`, 'warn');
   }
   if (Object.keys(restorePayload).length) {
     await setState(restorePayload);
@@ -8228,28 +8317,62 @@ function isStepDoneStatus(status) {
   return status === 'completed' || status === 'manual_completed' || status === 'skipped';
 }
 
+function normalizeStatusMapForNodes(statuses = {}, state = {}) {
+  const candidate = statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : {};
+  const nodeIds = new Set(getNodeIdsForState(state));
+  const hasNodeKey = Object.keys(candidate).some((key) => nodeIds.has(key));
+  const hasStepKey = Object.keys(candidate).some((key) => Number.isInteger(Number(key)) && Number(key) > 0);
+  if (hasNodeKey || !hasStepKey) {
+    return { ...DEFAULT_STATE.nodeStatuses, ...(state.nodeStatuses || {}), ...candidate };
+  }
+
+  const projected = { ...DEFAULT_STATE.nodeStatuses, ...(state.nodeStatuses || {}) };
+  for (const [step, status] of Object.entries(candidate)) {
+    const nodeId = getNodeIdByStepForState(step, state);
+    if (nodeId) {
+      projected[nodeId] = status;
+    }
+  }
+  return projected;
+}
+
+function getFirstUnfinishedNodeId(statuses = {}, stateOverride = null) {
+  const state = stateOverride || {};
+  const nodeStatuses = normalizeStatusMapForNodes(statuses, state);
+  if (workflowEngine?.getFirstUnfinishedNodeId) {
+    return workflowEngine.getFirstUnfinishedNodeId(nodeStatuses, state);
+  }
+  const nodeIds = getNodeIdsForState(state);
+  for (const nodeId of nodeIds) {
+    if (!isStepDoneStatus(nodeStatuses[nodeId] || 'pending')) {
+      return nodeId;
+    }
+  }
+  return '';
+}
+
 function getFirstUnfinishedStep(statuses = {}, stateOverride = null) {
   const state = stateOverride || {};
-  const activeStepIds = typeof getStepIdsForState === 'function'
-    ? getStepIdsForState(state)
-    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
-      ? STEP_IDS
-      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
-  for (const step of activeStepIds) {
-    if (!isStepDoneStatus(statuses[step] || 'pending')) return step;
+  const firstNodeId = getFirstUnfinishedNodeId(statuses, state);
+  if (firstNodeId) {
+    return getStepIdByNodeIdForState(firstNodeId, state);
   }
   return null;
 }
 
+function hasSavedNodeProgress(statuses = {}, stateOverride = null) {
+  const state = stateOverride || {};
+  const nodeStatuses = normalizeStatusMapForNodes(statuses, state);
+  if (workflowEngine?.hasSavedProgress) {
+    return workflowEngine.hasSavedProgress(nodeStatuses, state);
+  }
+  const merged = { ...DEFAULT_STATE.nodeStatuses, ...nodeStatuses };
+  return getNodeIdsForState(state).some((nodeId) => (merged[nodeId] || 'pending') !== 'pending');
+}
+
 function hasSavedProgress(statuses = {}, stateOverride = null) {
   const state = stateOverride || {};
-  const merged = { ...DEFAULT_STATE.stepStatuses, ...statuses };
-  const activeStepIds = typeof getStepIdsForState === 'function'
-    ? getStepIdsForState(state)
-    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
-      ? STEP_IDS
-      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
-  return activeStepIds.some((step) => (merged[step] || 'pending') !== 'pending');
+  return hasSavedNodeProgress(statuses, state);
 }
 
 function getDownstreamStateResets(step, state = {}) {
@@ -8442,33 +8565,32 @@ function getDownstreamStateResets(step, state = {}) {
 async function invalidateDownstreamAfterStepRestart(step, options = {}) {
   const { logLabel = `步骤 ${step} 重新执行` } = options;
   const state = await getState();
-  const statuses = { ...(state.stepStatuses || {}) };
-  const changedSteps = [];
+  const nodeStatuses = { ...(state.nodeStatuses || {}) };
+  const changedNodes = [];
+  const activeNodeIds = getNodeIdsForState(state);
+  const currentNodeId = getNodeIdByStepForState(step, state);
+  const currentIndex = activeNodeIds.indexOf(currentNodeId);
 
-  const activeStepIds = typeof getStepIdsForState === 'function'
-    ? getStepIdsForState(state)
-    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
-      ? STEP_IDS
-      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
-  for (const downstream of activeStepIds) {
-    if (downstream <= step) {
-      continue;
-    }
-    if (statuses[downstream] !== 'pending') {
-      statuses[downstream] = 'pending';
-      changedSteps.push(downstream);
+  if (currentIndex >= 0) {
+    for (let index = currentIndex + 1; index < activeNodeIds.length; index += 1) {
+      const downstreamNodeId = activeNodeIds[index];
+      if (nodeStatuses[downstreamNodeId] === 'pending') {
+        continue;
+      }
+      nodeStatuses[downstreamNodeId] = 'pending';
+      changedNodes.push(downstreamNodeId);
     }
   }
 
-  if (changedSteps.length) {
-    await setState({ stepStatuses: statuses });
-    for (const downstream of changedSteps) {
+  if (changedNodes.length) {
+    await setState({ nodeStatuses });
+    for (const nodeId of changedNodes) {
       chrome.runtime.sendMessage({
-        type: 'STEP_STATUS_CHANGED',
-        payload: { step: downstream, status: 'pending' },
+        type: 'NODE_STATUS_CHANGED',
+        payload: { nodeId, status: 'pending' },
       }).catch(() => { });
     }
-    await addLog(`${logLabel}，已重置后续步骤状态：${changedSteps.join(', ')}`, 'warn');
+    await addLog(`${logLabel}，已重置后续节点状态：${changedNodes.join(', ')}`, 'warn');
   }
 
   const resets = getDownstreamStateResets(step, state);
@@ -8478,60 +8600,106 @@ async function invalidateDownstreamAfterStepRestart(step, options = {}) {
   }
 }
 
+async function invalidateDownstreamAfterNodeRestart(nodeId, options = {}) {
+  const state = await getState();
+  const step = getStepIdByNodeIdForState(nodeId, state);
+  if (Number.isInteger(step) && step > 0) {
+    return invalidateDownstreamAfterStepRestart(step, options);
+  }
+
+  const normalizedNodeId = String(nodeId || '').trim();
+  const logLabel = options.logLabel || `节点 ${normalizedNodeId} 重新执行`;
+  const nodeStatuses = { ...(state.nodeStatuses || {}) };
+  const activeNodeIds = getNodeIdsForState(state);
+  const currentIndex = activeNodeIds.indexOf(normalizedNodeId);
+  const changedNodes = [];
+  if (currentIndex >= 0) {
+    for (let index = currentIndex + 1; index < activeNodeIds.length; index += 1) {
+      const downstreamNodeId = activeNodeIds[index];
+      if (nodeStatuses[downstreamNodeId] === 'pending') {
+        continue;
+      }
+      nodeStatuses[downstreamNodeId] = 'pending';
+      changedNodes.push(downstreamNodeId);
+    }
+  }
+  if (changedNodes.length) {
+    await setState({ nodeStatuses });
+    for (const changedNodeId of changedNodes) {
+      chrome.runtime.sendMessage({
+        type: 'NODE_STATUS_CHANGED',
+        payload: { nodeId: changedNodeId, status: 'pending' },
+      }).catch(() => { });
+    }
+    await addLog(`${logLabel}，已重置后续节点状态：${changedNodes.join(', ')}`, 'warn');
+  }
+}
+
 function clearStopRequest() {
   stopRequested = false;
 }
 
+function getRunningNodeIds(statuses = {}, stateOverride = null) {
+  const state = stateOverride || {};
+  const nodeStatuses = normalizeStatusMapForNodes(statuses, state);
+  if (workflowEngine?.getRunningNodeIds) {
+    return workflowEngine.getRunningNodeIds(nodeStatuses, state);
+  }
+  const merged = { ...DEFAULT_STATE.nodeStatuses, ...nodeStatuses };
+  return getNodeIdsForState(state).filter((nodeId) => merged[nodeId] === 'running');
+}
+
 function getRunningSteps(statuses = {}, stateOverride = null) {
   const state = stateOverride || {};
-  const merged = { ...DEFAULT_STATE.stepStatuses, ...statuses };
-  const activeStepIds = typeof getStepIdsForState === 'function'
-    ? getStepIdsForState(state)
-    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
-      ? STEP_IDS
-      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
-  return activeStepIds
-    .filter((step) => merged[step] === 'running')
+  return getRunningNodeIds(statuses, state)
+    .map((nodeId) => getStepIdByNodeIdForState(nodeId, state))
+    .filter((step) => Number.isInteger(step) && step > 0)
     .sort((a, b) => a - b);
 }
 
-function inferStoppedRecordStep(state = {}) {
-  const statuses = { ...DEFAULT_STATE.stepStatuses, ...(state?.stepStatuses || {}) };
-  const stepIds = typeof getStepIdsForState === 'function'
-    ? getStepIdsForState(state)
-    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
-      ? STEP_IDS
-      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
-
-  const runningSteps = stepIds.filter((step) => statuses[step] === 'running');
-  if (runningSteps.length) {
-    return runningSteps[0];
+function inferStoppedRecordNode(state = {}) {
+  const nodeStatuses = normalizeStatusMapForNodes(state?.nodeStatuses || {}, state);
+  const nodeIds = getNodeIdsForState(state);
+  const runningNode = nodeIds.find((nodeId) => nodeStatuses[nodeId] === 'running');
+  if (runningNode) {
+    return runningNode;
   }
 
-  const hasProgress = stepIds.some((step) => statuses[step] !== 'pending');
-  if (!hasProgress) {
-    return null;
-  }
-
-  for (const step of stepIds) {
-    const status = statuses[step] || 'pending';
-    if (!(status === 'completed' || status === 'manual_completed' || status === 'skipped')) {
-      return step;
+  const currentNodeId = String(state?.currentNodeId || '').trim();
+  if (currentNodeId && nodeIds.includes(currentNodeId)) {
+    const currentStatus = String(nodeStatuses[currentNodeId] || '').trim();
+    if (!isStepDoneStatus(currentStatus)) {
+      return currentNodeId;
     }
   }
 
-  return null;
+  const hasProgress = nodeIds.some((nodeId) => String(nodeStatuses[nodeId] || 'pending') !== 'pending');
+  if (!hasProgress) {
+    return '';
+  }
+
+  return nodeIds.find((nodeId) => !isStepDoneStatus(nodeStatuses[nodeId] || 'pending')) || '';
+}
+
+function inferStoppedRecordStep(state = {}) {
+  const nodeId = inferStoppedRecordNode(state);
+  return nodeId ? getStepIdByNodeIdForState(nodeId, state) : null;
 }
 
 function resolveAccountRunRecordStatusForStop(status, state = {}) {
   const normalizedStatus = String(status || '').trim().toLowerCase();
   if (normalizedStatus === 'stopped') {
-    const inferredStep = inferStoppedRecordStep(state);
-    if (Number.isInteger(inferredStep) && inferredStep > 0) {
-      return `step${inferredStep}_stopped`;
+    const inferredNodeId = inferStoppedRecordNode(state);
+    if (inferredNodeId) {
+      return `node:${inferredNodeId}:stopped`;
     }
   }
   return status;
+}
+
+function extractStoppedNodeFromRecordStatus(status = '') {
+  const match = String(status || '').trim().match(/^node:([^:]+):stopped$/i);
+  return match ? String(match[1] || '').trim() : '';
 }
 
 function extractStoppedStepFromRecordStatus(status = '') {
@@ -8545,6 +8713,17 @@ function extractStoppedStepFromRecordStatus(status = '') {
 
 function resolveAccountRunRecordReasonForStop(status, reason = '') {
   const text = String(reason || '').trim();
+  const stoppedNodeId = extractStoppedNodeFromRecordStatus(status);
+  if (stoppedNodeId) {
+    if (!text || text === STOP_ERROR_MESSAGE || /^流程已被用户停止。?$/.test(text)) {
+      return `节点 ${stoppedNodeId} 已被用户停止。`;
+    }
+    if (/流程尚未完成/.test(text) || /已使用(?:邮箱|手机号)/.test(text)) {
+      return text.replace(/^步骤\s*\d+/, `节点 ${stoppedNodeId}`);
+    }
+    return text;
+  }
+
   const stoppedStep = extractStoppedStepFromRecordStatus(status);
 
   if (!stoppedStep) {
@@ -9024,55 +9203,52 @@ async function ensureManualInteractionAllowed(actionLabel) {
   return state;
 }
 
-async function skipStep(step) {
+async function skipNode(nodeId) {
   const state = await ensureManualInteractionAllowed('跳过步骤');
-  const activeStepIds = typeof getStepIdsForState === 'function'
-    ? getStepIdsForState(state)
-    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
-      ? STEP_IDS
-      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
+  const normalizedNodeId = String(nodeId || '').trim();
+  const activeNodeIds = getNodeIdsForState(state);
 
-  if (!Number.isInteger(step) || !activeStepIds.includes(step)) {
-    throw new Error(`无效步骤：${step}`);
+  if (!normalizedNodeId || !activeNodeIds.includes(normalizedNodeId)) {
+    throw new Error(`无效节点：${normalizedNodeId || nodeId}`);
   }
 
-  const statuses = { ...(state.stepStatuses || {}) };
-  const currentStatus = statuses[step];
+  const statuses = normalizeStatusMapForNodes(state.nodeStatuses || {}, state);
+  const currentStatus = statuses[normalizedNodeId];
   if (currentStatus === 'running') {
-    throw new Error(`步骤 ${step} 正在运行中，不能跳过。`);
+    throw new Error(`节点 ${normalizedNodeId} 正在运行中，不能跳过。`);
   }
   if (isStepDoneStatus(currentStatus)) {
-    throw new Error(`步骤 ${step} 已完成，无需再跳过。`);
+    throw new Error(`节点 ${normalizedNodeId} 已完成，无需再跳过。`);
   }
 
-  const currentIndex = activeStepIds.indexOf(step);
+  const currentIndex = activeNodeIds.indexOf(normalizedNodeId);
   if (currentIndex > 0) {
-    const prevStep = activeStepIds[currentIndex - 1];
-    const prevStatus = statuses[prevStep];
+    const prevNodeId = activeNodeIds[currentIndex - 1];
+    const prevStatus = statuses[prevNodeId];
     if (!isStepDoneStatus(prevStatus)) {
-      throw new Error(`请先完成步骤 ${prevStep}，再跳过步骤 ${step}。`);
+      throw new Error(`请先完成节点 ${prevNodeId}，再跳过节点 ${normalizedNodeId}。`);
     }
   }
 
-  await setStepStatus(step, 'skipped');
-  await addLog(`步骤 ${step} 已跳过`, 'warn');
+  await setNodeStatus(normalizedNodeId, 'skipped');
+  await addLog(`节点 ${normalizedNodeId} 已跳过`, 'warn');
 
-  if (step === 1) {
+  if (normalizedNodeId === 'open-chatgpt') {
     const latestState = await getState();
-    const skippedSteps = [];
-    for (let linkedStep = 2; linkedStep <= 5; linkedStep += 1) {
-      const linkedStatus = latestState.stepStatuses?.[linkedStep];
+    const skippedNodes = [];
+    for (const linkedNodeId of ['submit-signup-email', 'fill-password', 'fetch-signup-code', 'fill-profile']) {
+      const linkedStatus = latestState.nodeStatuses?.[linkedNodeId];
       if (!isStepDoneStatus(linkedStatus) && linkedStatus !== 'running') {
-        await setStepStatus(linkedStep, 'skipped');
-        skippedSteps.push(linkedStep);
+        await setNodeStatus(linkedNodeId, 'skipped');
+        skippedNodes.push(linkedNodeId);
       }
     }
-    if (skippedSteps.length) {
-      await addLog(`步骤 1 已跳过，步骤 ${skippedSteps.join('、')} 也已同时跳过。`, 'warn');
+    if (skippedNodes.length) {
+      await addLog(`节点 open-chatgpt 已跳过，节点 ${skippedNodes.join('、')} 也已同时跳过。`, 'warn');
     }
   }
 
-  return { ok: true, step, status: 'skipped' };
+  return { ok: true, nodeId: normalizedNodeId, status: 'skipped' };
 }
 
 function throwIfStopped(error = null) {
@@ -9269,9 +9445,10 @@ async function handleStepData(step, payload) {
       }
       if (payload.skippedPasswordStep) {
         const latestState = await getState();
-        const step3Status = latestState.stepStatuses?.[3];
-        if (step3Status !== 'running' && step3Status !== 'completed' && step3Status !== 'manual_completed') {
-          await setStepStatus(3, 'skipped');
+        const step3NodeId = getNodeIdByStepForState(3, latestState);
+        const step3Status = step3NodeId ? latestState.nodeStatuses?.[step3NodeId] : '';
+        if (step3NodeId && step3Status !== 'running' && step3Status !== 'completed' && step3Status !== 'manual_completed') {
+          await setNodeStatus(step3NodeId, 'skipped');
           const identityLabel = payload.accountIdentifierType === 'phone' ? '手机号' : '邮箱';
           await addLog(`步骤 2：提交${identityLabel}后页面直接进入验证码页，已自动跳过步骤 3。`, 'warn');
         }
@@ -9284,9 +9461,10 @@ async function handleStepData(step, payload) {
       }
       if (payload.skipProfileStep) {
         const latestState = await getState();
-        const step5Status = latestState.stepStatuses?.[5];
-        if (step5Status !== 'running' && step5Status !== 'completed' && step5Status !== 'manual_completed') {
-          await setStepStatus(5, 'skipped');
+        const step5NodeId = getNodeIdByStepForState(5, latestState);
+        const step5Status = step5NodeId ? latestState.nodeStatuses?.[step5NodeId] : '';
+        if (step5NodeId && step5Status !== 'running' && step5Status !== 'completed' && step5Status !== 'manual_completed') {
+          await setNodeStatus(step5NodeId, 'skipped');
           await addLog('步骤 3：页面已直接进入已登录态，已自动跳过步骤 5。', 'warn');
         }
       }
@@ -9348,11 +9526,22 @@ async function handleStepData(step, payload) {
   }
 }
 
+async function handleNodeData(nodeId, payload) {
+  const state = await getState();
+  const step = getStepIdByNodeIdForState(nodeId, state);
+  if (!Number.isInteger(step) || step <= 0) {
+    return;
+  }
+  return handleStepData(step, payload);
+}
+
 // ============================================================
 // Step Completion Waiting
 // ============================================================
 
-// Map of step -> { resolve, reject } for waiting on step completion
+// Map of nodeId -> { resolve, reject } for waiting on node completion
+const nodeWaiters = new Map();
+// Legacy boundary waiters are kept only for callers that still pass a display step.
 const stepWaiters = new Map();
 let resumeWaiter = null;
 const AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS = 120000;
@@ -9388,16 +9577,19 @@ const AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY = new Map([
   ['plus-checkout-create', 20000],
 ]);
 
-function waitForStepComplete(step, timeoutMs = 120000) {
+function waitForNodeComplete(nodeId, timeoutMs = 120000) {
   throwIfStopped();
-  const normalizedStep = Number(step);
-  const existingWaiter = stepWaiters.get(normalizedStep);
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) {
+    return Promise.reject(new Error('等待节点完成失败：缺少 nodeId。'));
+  }
+  const existingWaiter = nodeWaiters.get(normalizedNodeId);
   if (existingWaiter?.promise) {
-    console.log(LOG_PREFIX, `[waitForStepComplete] reuse existing waiter for step ${normalizedStep}`);
+    console.log(LOG_PREFIX, `[waitForNodeComplete] reuse existing waiter for node ${normalizedNodeId}`);
     return existingWaiter.promise;
   }
 
-  console.log(LOG_PREFIX, `[waitForStepComplete] register step ${normalizedStep}, timeout=${timeoutMs}ms`);
+  console.log(LOG_PREFIX, `[waitForNodeComplete] register node ${normalizedNodeId}, timeout=${timeoutMs}ms`);
   const waiter = {
     promise: null,
     resolve: null,
@@ -9406,31 +9598,41 @@ function waitForStepComplete(step, timeoutMs = 120000) {
 
   waiter.promise = new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      if (stepWaiters.get(normalizedStep) === waiter) {
-        stepWaiters.delete(normalizedStep);
+      if (nodeWaiters.get(normalizedNodeId) === waiter) {
+        nodeWaiters.delete(normalizedNodeId);
       }
-      console.warn(LOG_PREFIX, `[waitForStepComplete] timeout for step ${normalizedStep} after ${timeoutMs}ms`);
-      reject(new Error(`步骤 ${normalizedStep} 等待超时（>${timeoutMs / 1000} 秒）`));
+      console.warn(LOG_PREFIX, `[waitForNodeComplete] timeout for node ${normalizedNodeId} after ${timeoutMs}ms`);
+      reject(new Error(`节点 ${normalizedNodeId} 等待超时（>${timeoutMs / 1000} 秒）`));
     }, timeoutMs);
 
     waiter.resolve = (data) => {
       clearTimeout(timer);
-      if (stepWaiters.get(normalizedStep) === waiter) {
-        stepWaiters.delete(normalizedStep);
+      if (nodeWaiters.get(normalizedNodeId) === waiter) {
+        nodeWaiters.delete(normalizedNodeId);
       }
       resolve(data);
     };
     waiter.reject = (err) => {
       clearTimeout(timer);
-      if (stepWaiters.get(normalizedStep) === waiter) {
-        stepWaiters.delete(normalizedStep);
+      if (nodeWaiters.get(normalizedNodeId) === waiter) {
+        nodeWaiters.delete(normalizedNodeId);
       }
       reject(err);
     };
   });
 
-  stepWaiters.set(normalizedStep, waiter);
+  nodeWaiters.set(normalizedNodeId, waiter);
   return waiter.promise;
+}
+
+function waitForStepComplete(step, timeoutMs = 120000) {
+  return getState().then((state) => {
+    const nodeId = getNodeIdByStepForState(step, state);
+    if (!nodeId) {
+      throw new Error(`等待步骤 ${step} 完成失败：当前 flow 中未找到对应节点。`);
+    }
+    return waitForNodeComplete(nodeId, timeoutMs);
+  });
 }
 
 function getStepExecutionKeyForState(step, state = {}) {
@@ -9440,88 +9642,136 @@ function getStepExecutionKeyForState(step, state = {}) {
   return String(getStepDefinitionForState(step, state)?.key || '').trim();
 }
 
+function getNodeExecutionKeyForState(nodeId, state = {}) {
+  return String(getNodeDefinitionForState(nodeId, state)?.executeKey || nodeId || '').trim();
+}
+
+function doesNodeUseBackgroundCompletion(nodeId, state = {}) {
+  const executionKey = getNodeExecutionKeyForState(nodeId, state);
+  return AUTO_RUN_BACKGROUND_COMPLETED_STEP_KEYS.has(executionKey || nodeId);
+}
+
 function doesStepUseBackgroundCompletion(step, state = {}) {
-  const stepKey = getStepExecutionKeyForState(step, state);
-  if (stepKey) {
-    return AUTO_RUN_BACKGROUND_COMPLETED_STEP_KEYS.has(stepKey);
-  }
-  return AUTO_RUN_BACKGROUND_COMPLETED_STEPS.has(step);
+  return doesNodeUseBackgroundCompletion(getNodeIdByStepForState(step, state), state);
+}
+
+function doesNodeUseCompletionSignal(nodeId, state = {}) {
+  const executionKey = getNodeExecutionKeyForState(nodeId, state);
+  return STEP_COMPLETION_SIGNAL_STEP_KEYS.has(executionKey || nodeId);
 }
 
 function doesStepUseCompletionSignal(step, state = {}) {
-  const stepKey = getStepExecutionKeyForState(step, state);
-  if (stepKey) {
-    return STEP_COMPLETION_SIGNAL_STEP_KEYS.has(stepKey);
-  }
-  return STEP_COMPLETION_SIGNAL_STEPS.has(step);
+  return doesNodeUseCompletionSignal(getNodeIdByStepForState(step, state), state);
+}
+
+function getAutoRunPreExecutionDelayMsForNode(nodeId, state = {}) {
+  const executionKey = getNodeExecutionKeyForState(nodeId, state);
+  return AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY.get(executionKey || nodeId) || 0;
 }
 
 function getAutoRunPreExecutionDelayMs(step, state = {}) {
-  const stepKey = getStepExecutionKeyForState(step, state);
-  if (stepKey) {
-    return AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY.get(stepKey) || 0;
-  }
-  return 0;
+  return getAutoRunPreExecutionDelayMsForNode(getNodeIdByStepForState(step, state), state);
+}
+
+function getNodeCompletionSignalTimeoutMs(nodeId, state = {}) {
+  const executionKey = getNodeExecutionKeyForState(nodeId, state);
+  return STEP_COMPLETION_SIGNAL_TIMEOUTS_BY_STEP_KEY.get(executionKey || nodeId) || AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS;
 }
 
 function getStepCompletionSignalTimeoutMs(step, state = {}) {
-  const stepKey = getStepExecutionKeyForState(step, state);
-  if (stepKey) {
-    return STEP_COMPLETION_SIGNAL_TIMEOUTS_BY_STEP_KEY.get(stepKey) || AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS;
-  }
-  return AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS;
+  return getNodeCompletionSignalTimeoutMs(getNodeIdByStepForState(step, state), state);
+}
+
+function notifyNodeComplete(nodeId, payload) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  const waiter = nodeWaiters.get(normalizedNodeId);
+  console.log(LOG_PREFIX, `[notifyNodeComplete] node ${normalizedNodeId}, hasWaiter=${Boolean(waiter)}`);
+  if (waiter) waiter.resolve(payload);
 }
 
 function notifyStepComplete(step, payload) {
+  getState().then((state) => {
+    const nodeId = getNodeIdByStepForState(step, state);
+    if (nodeId) {
+      notifyNodeComplete(nodeId, payload);
+    }
+  }).catch(() => {});
   const waiter = stepWaiters.get(step);
   console.log(LOG_PREFIX, `[notifyStepComplete] step ${step}, hasWaiter=${Boolean(waiter)}`);
   if (waiter) waiter.resolve(payload);
 }
 
+function notifyNodeError(nodeId, error) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  const waiter = nodeWaiters.get(normalizedNodeId);
+  console.warn(LOG_PREFIX, `[notifyNodeError] node ${normalizedNodeId}, hasWaiter=${Boolean(waiter)}, error=${error}`);
+  if (waiter) waiter.reject(new Error(error));
+}
+
 function notifyStepError(step, error) {
+  getState().then((state) => {
+    const nodeId = getNodeIdByStepForState(step, state);
+    if (nodeId) {
+      notifyNodeError(nodeId, error);
+    }
+  }).catch(() => {});
   const waiter = stepWaiters.get(step);
   console.warn(LOG_PREFIX, `[notifyStepError] step ${step}, hasWaiter=${Boolean(waiter)}, error=${error}`);
   if (waiter) waiter.reject(new Error(error));
 }
 
 async function runCompletedStepSideEffects(step, payload, completionState, lastStepId) {
-  await handleStepData(step, payload);
-  if (step === lastStepId) {
+  const state = await getState();
+  const nodeId = getNodeIdByStepForState(step, state);
+  const lastNodeId = getNodeIdByStepForState(lastStepId, state);
+  return runCompletedNodeSideEffects(nodeId, payload, completionState, lastNodeId);
+}
+
+async function reportCompletedStepSideEffectError(step, error) {
+  const state = await getState();
+  return reportCompletedNodeSideEffectError(getNodeIdByStepForState(step, state), error);
+}
+
+async function runCompletedNodeSideEffects(nodeId, payload, completionState, lastNodeId) {
+  await handleNodeData(nodeId, payload);
+  if (nodeId === lastNodeId) {
     await appendAndBroadcastAccountRunRecord('success', completionState);
   }
 }
 
-async function reportCompletedStepSideEffectError(step, error) {
+async function reportCompletedNodeSideEffectError(nodeId, error) {
   const message = getErrorMessage(error);
-  console.warn(LOG_PREFIX, `[completeStepFromBackground] step ${step} post-completion side effect failed:`, error);
-  await addLog(`已完成，但完成后的收尾处理失败：${message}`, 'warn', { step });
+  console.warn(LOG_PREFIX, `[completeNodeFromBackground] node ${nodeId} post-completion side effect failed:`, error);
+  await addLog(`已完成，但完成后的收尾处理失败：${message}`, 'warn', { nodeId });
 }
 
-async function completeStepFromBackground(step, payload = {}) {
+async function completeNodeFromBackground(nodeId, payload = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) {
+    throw new Error('completeNodeFromBackground 缺少 nodeId。');
+  }
   if (stopRequested) {
-    await setStepStatus(step, 'stopped');
-    await appendManualAccountRunRecordIfNeeded(`step${step}_stopped`, null, STOP_ERROR_MESSAGE);
-    notifyStepError(step, STOP_ERROR_MESSAGE);
+    await setNodeStatus(normalizedNodeId, 'stopped');
+    await appendManualAccountRunRecordIfNeeded(`node:${normalizedNodeId}:stopped`, null, STOP_ERROR_MESSAGE);
+    notifyNodeError(normalizedNodeId, STOP_ERROR_MESSAGE);
     return;
   }
 
   const latestState = await getState();
-  const lastStepId = typeof getLastStepIdForState === 'function'
-    ? getLastStepIdForState(latestState)
-    : (typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10);
-  const completionState = step === lastStepId ? latestState : null;
-  await setStepStatus(step, 'completed');
-  await addLog('已完成', 'ok', { step });
+  const lastNodeId = getLastNodeIdForState(latestState);
+  const completionState = normalizedNodeId === lastNodeId ? latestState : null;
+  await setNodeStatus(normalizedNodeId, 'completed');
+  await addLog('已完成', 'ok', { nodeId: normalizedNodeId });
 
-  if (step === lastStepId) {
-    notifyStepComplete(step, payload);
-    void runCompletedStepSideEffects(step, payload, completionState, lastStepId)
-      .catch((error) => reportCompletedStepSideEffectError(step, error));
+  if (normalizedNodeId === lastNodeId) {
+    notifyNodeComplete(normalizedNodeId, payload);
+    void runCompletedNodeSideEffects(normalizedNodeId, payload, completionState, lastNodeId)
+      .catch((error) => reportCompletedNodeSideEffectError(normalizedNodeId, error));
     return;
   }
 
-  await runCompletedStepSideEffects(step, payload, completionState, lastStepId);
-  notifyStepComplete(step, payload);
+  await runCompletedNodeSideEffects(normalizedNodeId, payload, completionState, lastNodeId);
+  notifyNodeComplete(normalizedNodeId, payload);
 }
 
 async function appendManualAccountRunRecordIfNeeded(status, stateOverride = null, reason = '') {
@@ -9533,42 +9783,53 @@ async function appendManualAccountRunRecordIfNeeded(status, stateOverride = null
   return appendAndBroadcastAccountRunRecord(status, state, reason);
 }
 
-async function finalizeDeferredStepExecutionError(step, error) {
+async function finalizeDeferredNodeExecutionError(nodeId, error) {
   const latestState = await getState();
-  const currentStatus = latestState.stepStatuses?.[step];
+  const normalizedNodeId = String(nodeId || '').trim();
+  const currentStatus = latestState.nodeStatuses?.[normalizedNodeId];
   if (currentStatus === 'completed' || currentStatus === 'failed' || currentStatus === 'stopped') {
     return;
   }
 
   if (isStopError(error)) {
-    await setStepStatus(step, 'stopped');
-    await addLog('已被用户停止', 'warn', { step });
-    await appendManualAccountRunRecordIfNeeded(`step${step}_stopped`, latestState, getErrorMessage(error));
+    await setNodeStatus(normalizedNodeId, 'stopped');
+    await addLog('已被用户停止', 'warn', { nodeId: normalizedNodeId });
+    await appendManualAccountRunRecordIfNeeded(`node:${normalizedNodeId}:stopped`, latestState, getErrorMessage(error));
     return;
   }
 
-  await setStepStatus(step, 'failed');
-  await addLog(`失败：${getErrorMessage(error)}`, 'error', { step });
-  await appendManualAccountRunRecordIfNeeded(`step${step}_failed`, latestState, getErrorMessage(error));
+  await setNodeStatus(normalizedNodeId, 'failed');
+  await addLog(`失败：${getErrorMessage(error)}`, 'error', { nodeId: normalizedNodeId });
+  await appendManualAccountRunRecordIfNeeded(`node:${normalizedNodeId}:failed`, latestState, getErrorMessage(error));
 }
 
-async function executeStepViaCompletionSignal(step, timeoutMs = 0) {
+async function finalizeDeferredStepExecutionError(step, error) {
+  const latestState = await getState();
+  const nodeId = getNodeIdByStepForState(step, latestState);
+  if (!nodeId) {
+    return;
+  }
+  return finalizeDeferredNodeExecutionError(nodeId, error);
+}
+
+async function executeNodeViaCompletionSignal(nodeId, timeoutMs = 0) {
+  const normalizedNodeId = String(nodeId || '').trim();
   const executionState = await getState();
   const resolvedTimeoutMs = Number(timeoutMs) > 0
     ? timeoutMs
-    : getStepCompletionSignalTimeoutMs(step, executionState);
-  const completionResultPromise = waitForStepComplete(step, resolvedTimeoutMs).then(
+    : getNodeCompletionSignalTimeoutMs(normalizedNodeId, executionState);
+  const completionResultPromise = waitForNodeComplete(normalizedNodeId, resolvedTimeoutMs).then(
     payload => ({ ok: true, payload }),
     error => ({ ok: false, error }),
   );
 
   let executeError = null;
   try {
-    await executeStep(step, { deferRetryableTransportError: true });
+    await executeNode(normalizedNodeId, { deferRetryableTransportError: true });
   } catch (err) {
     executeError = err;
     if (isStopError(err) || !isRetryableContentScriptTransportError(err)) {
-      notifyStepError(step, getErrorMessage(err));
+      notifyNodeError(normalizedNodeId, getErrorMessage(err));
     }
   }
 
@@ -9577,7 +9838,7 @@ async function executeStepViaCompletionSignal(step, timeoutMs = 0) {
     if (executeError) {
       console.warn(
         LOG_PREFIX,
-        `[executeStepViaCompletionSignal] step ${step} completed after deferred execute error: ${getErrorMessage(executeError)}`
+        `[executeNodeViaCompletionSignal] node ${normalizedNodeId} completed after deferred execute error: ${getErrorMessage(executeError)}`
       );
     }
     return completionResult.payload;
@@ -9586,7 +9847,7 @@ async function executeStepViaCompletionSignal(step, timeoutMs = 0) {
   if (executeError && isRetryableContentScriptTransportError(executeError)) {
     const completionMessage = getErrorMessage(completionResult.error);
     if (/等待超时/.test(completionMessage)) {
-      await finalizeDeferredStepExecutionError(step, executeError);
+      await finalizeDeferredNodeExecutionError(normalizedNodeId, executeError);
       throw executeError;
     }
     throw completionResult.error;
@@ -9599,6 +9860,15 @@ async function executeStepViaCompletionSignal(step, timeoutMs = 0) {
   throw completionResult.error;
 }
 
+async function executeStepViaCompletionSignal(step, timeoutMs = 0) {
+  const state = await getState();
+  const nodeId = getNodeIdByStepForState(step, state);
+  if (!nodeId) {
+    throw new Error(`执行步骤 ${step} 失败：当前 flow 中未找到对应节点。`);
+  }
+  return executeNodeViaCompletionSignal(nodeId, timeoutMs);
+}
+
 function getLatestLogTimestamp(logs = [], fallback = 0) {
   if (!Array.isArray(logs) || !logs.length) {
     return Number.isFinite(Number(fallback)) ? Number(fallback) : 0;
@@ -9609,11 +9879,12 @@ function getLatestLogTimestamp(logs = [], fallback = 0) {
   }, Number.isFinite(Number(fallback)) ? Number(fallback) : 0);
 }
 
-function buildAutoRunStepIdleRestartError(step, idleMs = AUTO_RUN_STEP_IDLE_LOG_TIMEOUT_MS) {
+function buildAutoRunNodeIdleRestartError(nodeId, idleMs = AUTO_RUN_STEP_IDLE_LOG_TIMEOUT_MS) {
   const seconds = Math.max(1, Math.round((Number(idleMs) || AUTO_RUN_STEP_IDLE_LOG_TIMEOUT_MS) / 1000));
-  const error = new Error(`${AUTO_RUN_STEP_IDLE_RESTART_ERROR_PREFIX}步骤 ${step} 已连续 ${seconds} 秒没有新日志，准备重新开始当前步骤。`);
+  const normalizedNodeId = String(nodeId || '').trim();
+  const error = new Error(`${AUTO_RUN_STEP_IDLE_RESTART_ERROR_PREFIX}节点 ${normalizedNodeId} 已连续 ${seconds} 秒没有新日志，准备重新开始当前节点。`);
   error.autoRunStepIdleRestart = true;
-  error.failedStep = Math.floor(Number(step) || 0);
+  error.failedNodeId = normalizedNodeId;
   return error;
 }
 
@@ -9622,9 +9893,10 @@ function isAutoRunStepIdleRestartError(error) {
   return Boolean(error?.autoRunStepIdleRestart) || message.startsWith(AUTO_RUN_STEP_IDLE_RESTART_ERROR_PREFIX);
 }
 
-function startAutoRunStepIdleLogWatchdog(step, options = {}) {
+function startAutoRunNodeIdleLogWatchdog(nodeId, options = {}) {
   const idleTimeoutMs = Math.max(1000, Math.floor(Number(options.idleTimeoutMs) || AUTO_RUN_STEP_IDLE_LOG_TIMEOUT_MS));
   const checkIntervalMs = Math.max(250, Math.min(idleTimeoutMs, Math.floor(Number(options.checkIntervalMs) || AUTO_RUN_STEP_IDLE_LOG_CHECK_INTERVAL_MS)));
+  const normalizedNodeId = String(nodeId || '').trim();
   let cancelled = false;
   let timer = null;
   let lastActivityAt = Date.now();
@@ -9658,7 +9930,7 @@ function startAutoRunStepIdleLogWatchdog(step, options = {}) {
 
         const idleForMs = Date.now() - lastActivityAt;
         if (idleForMs >= idleTimeoutMs) {
-          reject(buildAutoRunStepIdleRestartError(step, idleForMs));
+          reject(buildAutoRunNodeIdleRestartError(normalizedNodeId, idleForMs));
           return;
         }
       } catch (_err) {
@@ -9681,9 +9953,10 @@ function startAutoRunStepIdleLogWatchdog(step, options = {}) {
   };
 }
 
-async function runAutoStepActionWithIdleLogWatchdog(step, action, options = {}) {
+async function runAutoNodeActionWithIdleLogWatchdog(nodeId, action, options = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
   const executionPromise = Promise.resolve().then(action);
-  const watchdog = startAutoRunStepIdleLogWatchdog(step, options);
+  const watchdog = startAutoRunNodeIdleLogWatchdog(normalizedNodeId, options);
   try {
     return await Promise.race([
       executionPromise,
@@ -9696,7 +9969,7 @@ async function runAutoStepActionWithIdleLogWatchdog(step, action, options = {}) 
         if (!lateMessage || isStopError(lateError) || isAutoRunStepIdleRestartError(lateError)) {
           return;
         }
-        addLog(`步骤 ${step}：无日志重开后收到原执行失败：${lateMessage}`, 'warn').catch(() => {});
+        addLog(`节点 ${normalizedNodeId}：无日志重开后收到原执行失败：${lateMessage}`, 'warn').catch(() => {});
       });
     }
     throw error;
@@ -9705,36 +9978,39 @@ async function runAutoStepActionWithIdleLogWatchdog(step, action, options = {}) 
   }
 }
 
-async function executeStepAndWaitWithAutoRunIdleLogWatchdog(step, delayAfter = 2000, options = {}) {
-  return runAutoStepActionWithIdleLogWatchdog(
-    step,
-    () => executeStepAndWait(step, delayAfter),
+async function executeNodeAndWaitWithAutoRunIdleLogWatchdog(nodeId, delayAfter = 2000, options = {}) {
+  return runAutoNodeActionWithIdleLogWatchdog(
+    nodeId,
+    () => executeNodeAndWait(nodeId, delayAfter),
     options
   );
 }
 
-async function waitForRunningStepsToFinish(payload = {}) {
+async function waitForRunningNodesToFinish(payload = {}) {
   let currentState = await getState();
-  let runningSteps = getRunningSteps(currentState.stepStatuses, currentState);
-  if (!runningSteps.length) {
+  let runningNodes = getRunningNodeIds(currentState.nodeStatuses, currentState);
+  if (!runningNodes.length) {
     return currentState;
   }
 
-  await addLog(`自动继续：检测到步骤 ${runningSteps.join(', ')} 正在运行，等待完成后再继续自动流程...`, 'info');
+  await addLog(`自动继续：检测到节点 ${runningNodes.join(', ')} 正在运行，等待完成后再继续自动流程...`, 'info');
   await broadcastAutoRunStatus('waiting_step', payload);
 
-  while (runningSteps.length) {
+  while (runningNodes.length) {
     await sleepWithStop(250);
     currentState = await getState();
-    runningSteps = getRunningSteps(currentState.stepStatuses, currentState);
+    runningNodes = getRunningNodeIds(currentState.nodeStatuses, currentState);
   }
 
-  await addLog('自动继续：当前运行步骤已结束，准备按最新进度继续自动流程...', 'info');
+  await addLog('自动继续：当前运行节点已结束，准备按最新进度继续自动流程...', 'info');
   return currentState;
 }
 
-const AUTH_CHAIN_STEP_IDS = new Set([7, 8, 9, 10, 11, 12, 13]);
-const AUTH_CHAIN_STEP_KEYS = new Set([
+async function waitForRunningStepsToFinish(payload = {}) {
+  return waitForRunningNodesToFinish(payload);
+}
+
+const AUTH_CHAIN_NODE_IDS = new Set([
   'oauth-login',
   'fetch-login-code',
   'confirm-oauth',
@@ -9742,19 +10018,17 @@ const AUTH_CHAIN_STEP_KEYS = new Set([
 ]);
 let activeTopLevelAuthChainExecution = null;
 
-function isAuthChainStep(step, state = {}) {
-  const stepKey = typeof getStepDefinitionForState === 'function'
-    ? String(getStepDefinitionForState(step, state)?.key || '').trim()
-    : '';
-  if (stepKey && typeof AUTH_CHAIN_STEP_KEYS !== 'undefined') {
-    return AUTH_CHAIN_STEP_KEYS.has(stepKey);
-  }
-  return AUTH_CHAIN_STEP_IDS.has(Number(step));
+function isAuthChainNode(nodeId) {
+  return AUTH_CHAIN_NODE_IDS.has(String(nodeId || '').trim());
 }
 
-async function acquireTopLevelAuthChainExecution(step, state = {}) {
-  const normalizedStep = Number(step);
-  if (!isAuthChainStep(normalizedStep, state)) {
+function isAuthChainStep(step, state = {}) {
+  return isAuthChainNode(getNodeIdByStepForState(step, state));
+}
+
+async function acquireTopLevelAuthChainExecutionForNode(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!isAuthChainNode(normalizedNodeId)) {
     return {
       joined: false,
       release() {},
@@ -9764,7 +10038,7 @@ async function acquireTopLevelAuthChainExecution(step, state = {}) {
   if (activeTopLevelAuthChainExecution) {
     const activeExecution = activeTopLevelAuthChainExecution;
     await addLog(
-      `步骤 ${normalizedStep}：检测到步骤 ${activeExecution.step} 正在运行，本次请求将复用当前授权链，不再重复启动。`,
+      `节点 ${normalizedNodeId}：检测到节点 ${activeExecution.nodeId} 正在运行，本次请求将复用当前授权链，不再重复启动。`,
       'warn'
     );
     const result = await activeExecution.promise;
@@ -9782,7 +10056,7 @@ async function acquireTopLevelAuthChainExecution(step, state = {}) {
     settleExecution = (error = null) => resolve({ error });
   });
   const execution = {
-    step: normalizedStep,
+    nodeId: normalizedNodeId,
     promise,
   };
   activeTopLevelAuthChainExecution = execution;
@@ -9798,20 +10072,24 @@ async function acquireTopLevelAuthChainExecution(step, state = {}) {
   };
 }
 
-async function markRunningStepsStopped() {
+async function markRunningNodesStopped() {
   const state = await getState();
-  const runningSteps = getRunningSteps(state.stepStatuses, state);
+  const runningNodes = getRunningNodeIds(state.nodeStatuses, state);
 
-  for (const step of runningSteps) {
-    await setStepStatus(step, 'stopped');
+  for (const nodeId of runningNodes) {
+    await setNodeStatus(nodeId, 'stopped');
   }
+}
+
+async function markRunningStepsStopped() {
+  return markRunningNodesStopped();
 }
 
 async function requestStop(options = {}) {
   const { logMessage = '已收到停止请求，正在取消当前操作...' } = options;
   const state = await getState();
-  const runningSteps = getRunningSteps(state.stepStatuses, state);
-  const inferredStopStep = inferStoppedRecordStep(state);
+  const runningNodes = getRunningNodeIds(state.nodeStatuses, state);
+  const inferredStopNode = inferStoppedRecordNode(state);
   const timerPlan = getPendingAutoRunTimerPlan(state);
 
   if (timerPlan?.kind === AUTO_RUN_TIMER_KIND_SCHEDULED_START && !autoRunActive) {
@@ -9860,10 +10138,14 @@ async function requestStop(options = {}) {
   await addLog(logMessage, 'warn');
   await broadcastStopToContentScripts();
 
-  if (!runningSteps.length && Number.isInteger(inferredStopStep) && inferredStopStep > 0) {
+  if (!runningNodes.length && inferredStopNode) {
     await appendAndBroadcastAccountRunRecord('stopped', state, STOP_ERROR_MESSAGE);
   }
 
+  for (const waiter of nodeWaiters.values()) {
+    waiter.reject(new Error(STOP_ERROR_MESSAGE));
+  }
+  nodeWaiters.clear();
   for (const waiter of stepWaiters.values()) {
     waiter.reject(new Error(STOP_ERROR_MESSAGE));
   }
@@ -9887,7 +10169,7 @@ async function requestStop(options = {}) {
     resumeWaiter = null;
   }
 
-  await markRunningStepsStopped();
+  await markRunningNodesStopped();
   autoRunActive = false;
   await broadcastAutoRunStatus('stopped', {
     currentRun: autoRunCurrentRun,
@@ -9911,11 +10193,16 @@ const STEP_FETCH_NETWORK_RETRY_POLICIES = new Map([
   [9, { maxAttempts: 3, cooldownMs: 12000 }],
 ]);
 
-async function executeStep(step, options = {}) {
+async function executeNode(nodeId, options = {}) {
   const { deferRetryableTransportError = false } = options;
-  console.log(LOG_PREFIX, `Executing step ${step}`);
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) {
+    throw new Error('executeNode 缺少 nodeId。');
+  }
+  console.log(LOG_PREFIX, `Executing node ${normalizedNodeId}`);
   let state = await getState();
-  const authChainClaim = await acquireTopLevelAuthChainExecution(step, state);
+  const step = getStepIdByNodeIdForState(normalizedNodeId, state);
+  const authChainClaim = await acquireTopLevelAuthChainExecutionForNode(normalizedNodeId, state);
   if (authChainClaim.joined) {
     return;
   }
@@ -9923,8 +10210,8 @@ async function executeStep(step, options = {}) {
   let executionError = null;
   throwIfStopped();
   try {
-    await setStepStatus(step, 'running');
-    await addLog('开始执行', 'info', { step });
+    await setNodeStatus(normalizedNodeId, 'running');
+    await addLog('开始执行', 'info', { nodeId: normalizedNodeId });
     await humanStepDelay();
     const fetchRetryPolicy = typeof getStepFetchNetworkRetryPolicy === 'function'
       ? getStepFetchNetworkRetryPolicy(step)
@@ -9941,25 +10228,27 @@ async function executeStep(step, options = {}) {
       state = await getState();
 
       // Set flow start time on first step
-      if (step === 1 && !state.flowStartTime) {
+      if (normalizedNodeId === 'open-chatgpt' && !state.flowStartTime) {
         await setState({ flowStartTime: Date.now() });
       }
 
       const activeStepRegistry = getStepRegistryForState(state);
-      if (!activeStepRegistry?.getStepDefinition?.(step)) {
-        throw new Error(`当前模式下不存在步骤：${step}`);
+      if (!activeStepRegistry?.getNodeDefinition?.(normalizedNodeId)) {
+        throw new Error(`当前模式下不存在节点：${normalizedNodeId}`);
       }
 
       try {
-        await activeStepRegistry.executeStep(step, {
+        await activeStepRegistry.executeNode(normalizedNodeId, {
           ...state,
           visibleStep: Number(step),
+          nodeId: normalizedNodeId,
+          nodeDefinition: getNodeDefinitionForState(normalizedNodeId, state),
           stepDefinition: getStepDefinitionForState(step, state),
         });
 
         if (attempt > 1) {
           await addLog(
-            `[NETWORK_FETCH_RETRY] 步骤 ${step}：网络请求异常已恢复，当前重试成功（${attempt}/${fetchRetryPolicy?.maxAttempts || attempt}）。`,
+            `[NETWORK_FETCH_RETRY] 节点 ${normalizedNodeId}：网络请求异常已恢复，当前重试成功（${attempt}/${fetchRetryPolicy?.maxAttempts || attempt}）。`,
             'ok'
           );
         }
@@ -9973,7 +10262,7 @@ async function executeStep(step, options = {}) {
         const cooldownMs = fetchRetryPolicy.cooldownMs;
         const cooldownSeconds = Math.max(1, Math.ceil(cooldownMs / 1000));
         await addLog(
-          `[NETWORK_FETCH_RETRY] 步骤 ${step}：检测到网络请求异常（${getErrorMessage(attemptError)}），${cooldownSeconds} 秒后重试（${nextAttempt}/${fetchRetryPolicy.maxAttempts}）。`,
+          `[NETWORK_FETCH_RETRY] 节点 ${normalizedNodeId}：检测到网络请求异常（${getErrorMessage(attemptError)}），${cooldownSeconds} 秒后重试（${nextAttempt}/${fetchRetryPolicy.maxAttempts}）。`,
           'warn'
         );
         if (cooldownMs > 0) {
@@ -9986,9 +10275,9 @@ async function executeStep(step, options = {}) {
     executionError = err;
     const errorState = await getState();
     if (isStopError(err)) {
-      await setStepStatus(step, 'stopped');
-      await addLog('已被用户停止', 'warn', { step });
-      await appendManualAccountRunRecordIfNeeded(`step${step}_stopped`, errorState, getErrorMessage(err));
+      await setNodeStatus(normalizedNodeId, 'stopped');
+      await addLog('已被用户停止', 'warn', { nodeId: normalizedNodeId });
+      await appendManualAccountRunRecordIfNeeded(`node:${normalizedNodeId}:stopped`, errorState, getErrorMessage(err));
       throw err;
     }
     if (isTerminalSecurityBlockedError(err)) {
@@ -9999,14 +10288,14 @@ async function executeStep(step, options = {}) {
       await handleBrowserSwitchRequired(err);
       throw new Error(STOP_ERROR_MESSAGE);
     }
-    if (!(deferRetryableTransportError && doesStepUseCompletionSignal(step, errorState) && isRetryableContentScriptTransportError(err))) {
-      await setStepStatus(step, 'failed');
-      await addLog(`失败：${err.message}`, 'error', { step });
-      await appendManualAccountRunRecordIfNeeded(`step${step}_failed`, errorState, getErrorMessage(err));
+    if (!(deferRetryableTransportError && doesNodeUseCompletionSignal(normalizedNodeId, errorState) && isRetryableContentScriptTransportError(err))) {
+      await setNodeStatus(normalizedNodeId, 'failed');
+      await addLog(`失败：${err.message}`, 'error', { nodeId: normalizedNodeId });
+      await appendManualAccountRunRecordIfNeeded(`node:${normalizedNodeId}:failed`, errorState, getErrorMessage(err));
     } else {
       console.warn(
         LOG_PREFIX,
-        `[executeStep] deferring retryable transport error for step ${step}: ${getErrorMessage(err)}`
+        `[executeNode] deferring retryable transport error for node ${normalizedNodeId}: ${getErrorMessage(err)}`
       );
     }
     throw err;
@@ -10015,52 +10304,52 @@ async function executeStep(step, options = {}) {
   }
 }
 
-/**
- * Execute a step and wait for it to complete before returning.
- * @param {number} step
- * @param {number} delayAfter - ms to wait after completion (for page transitions)
- */
-async function executeStepAndWait(step, delayAfter = 2000) {
+async function executeNodeAndWait(nodeId, delayAfter = 2000) {
   throwIfStopped();
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) {
+    throw new Error('executeNodeAndWait 缺少 nodeId。');
+  }
   let completionPayload = null;
 
   const delaySeconds = normalizeAutoStepDelaySeconds((await getState()).autoStepDelaySeconds, null);
   if (delaySeconds > 0) {
     await addLog(
-      `自动运行：步骤 ${step} 执行前额外等待 ${delaySeconds} 秒，避免节奏过快。`,
+      `自动运行：节点 ${normalizedNodeId} 执行前额外等待 ${delaySeconds} 秒，避免节奏过快。`,
       'info'
     );
     await sleepWithStop(delaySeconds * 1000);
   }
 
   let executionState = await getState();
-  const preExecutionDelayMs = getAutoRunPreExecutionDelayMs(step, executionState);
+  const step = getStepIdByNodeIdForState(normalizedNodeId, executionState);
+  const preExecutionDelayMs = getAutoRunPreExecutionDelayMsForNode(normalizedNodeId, executionState);
   if (preExecutionDelayMs > 0) {
     await addLog(
-      `自动运行：步骤 ${step} 执行前固定等待 ${Math.round(preExecutionDelayMs / 1000)} 秒，确保 Plus Checkout 创建前页面稳定。`,
+      `自动运行：节点 ${normalizedNodeId} 执行前固定等待 ${Math.round(preExecutionDelayMs / 1000)} 秒，确保 Plus Checkout 创建前页面稳定。`,
       'info'
     );
     await sleepWithStop(preExecutionDelayMs);
     executionState = await getState();
   }
 
-  if (doesStepUseBackgroundCompletion(step, executionState)) {
-    await addLog(`自动运行：步骤 ${step} 由后台流程负责收尾，执行函数返回后将直接进入下一步。`, 'info');
-    await executeStep(step);
+  if (doesNodeUseBackgroundCompletion(normalizedNodeId, executionState)) {
+    await addLog(`自动运行：节点 ${normalizedNodeId} 由后台流程负责收尾，执行函数返回后将直接进入下一步。`, 'info');
+    await executeNode(normalizedNodeId);
     const latestState = await getState();
-    await addLog(`自动运行：步骤 ${step} 已执行返回，当前状态为 ${latestState.stepStatuses?.[step] || 'pending'}，准备继续后续步骤。`, 'info');
-  } else if (doesStepUseCompletionSignal(step, executionState)) {
-    await addLog(`自动运行：步骤 ${step} 已发起，正在等待完成信号（超时 ${AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS / 1000} 秒）。`, 'info');
-    completionPayload = await executeStepViaCompletionSignal(step, AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS);
-    await addLog(`自动运行：步骤 ${step} 已收到完成信号，准备继续后续步骤。`, 'info');
+    await addLog(`自动运行：节点 ${normalizedNodeId} 已执行返回，当前状态为 ${latestState.nodeStatuses?.[normalizedNodeId] || 'pending'}，准备继续后续节点。`, 'info');
+  } else if (doesNodeUseCompletionSignal(normalizedNodeId, executionState)) {
+    await addLog(`自动运行：节点 ${normalizedNodeId} 已发起，正在等待完成信号（超时 ${AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS / 1000} 秒）。`, 'info');
+    completionPayload = await executeNodeViaCompletionSignal(normalizedNodeId, AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS);
+    await addLog(`自动运行：节点 ${normalizedNodeId} 已收到完成信号，准备继续后续节点。`, 'info');
   } else {
-    await executeStep(step);
+    await executeNode(normalizedNodeId);
   }
 
-  if (step === 5) {
+  if (normalizedNodeId === 'fill-profile') {
     const signupTabId = await getTabId('signup-page');
     if (signupTabId) {
-      await addLog('自动运行：步骤 5 已收到完成信号，正在等待当前页面完成加载并稳定...', 'info');
+      await addLog('自动运行：填写资料节点已收到完成信号，正在等待当前页面完成加载并稳定...', 'info');
       await waitForTabStableComplete(signupTabId, {
         timeoutMs: 30000,
         retryDelayMs: 300,
@@ -10070,8 +10359,8 @@ async function executeStepAndWait(step, delayAfter = 2000) {
       try {
         await validateStep5PostCompletion(signupTabId, completionPayload || {});
       } catch (step5ValidationError) {
-        await setStepStatus(5, 'failed');
-        await addLog(`失败：${getErrorMessage(step5ValidationError)}`, 'error', { step: 5 });
+        await setNodeStatus(normalizedNodeId, 'failed');
+        await addLog(`失败：${getErrorMessage(step5ValidationError)}`, 'error', { nodeId: normalizedNodeId });
         throw step5ValidationError;
       }
     }
@@ -10304,23 +10593,35 @@ const VERIFICATION_POLL_MAX_ROUNDS = 5;
 const STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS = 25000;
 const MAIL_2925_VERIFICATION_MAX_ATTEMPTS = 15;
 const MAIL_2925_VERIFICATION_INTERVAL_MS = 15000;
-const AUTO_STEP_DELAYS = {
-  1: 2000,
-  2: 2000,
-  3: 3000,
-  4: 2000,
-  5: 0,
-  6: 3000,
-  7: 2000,
-  8: 2000,
-  9: 1000,
-};
+const AUTO_RUN_NODE_DELAYS = Object.freeze({
+  'open-chatgpt': 2000,
+  'submit-signup-email': 2000,
+  'fill-password': 3000,
+  'fetch-signup-code': 2000,
+  'fill-profile': 0,
+  'wait-registration-success': 3000,
+  'plus-checkout-create': 3000,
+  'plus-checkout-billing': 2000,
+  'gopay-subscription-confirm': 2000,
+  'paypal-approve': 2000,
+  'plus-checkout-return': 1000,
+  'oauth-login': 2000,
+  'fetch-login-code': 2000,
+  'confirm-oauth': 1000,
+  'platform-verify': 0,
+});
+
+function getAutoRunNodeDelayMs(nodeId) {
+  return AUTO_RUN_NODE_DELAYS[String(nodeId || '').trim()] ?? 0;
+}
 const accountRunHistoryHelpers = self.MultiPageBackgroundAccountRunHistory?.createAccountRunHistoryHelpers({
   ACCOUNT_RUN_HISTORY_STORAGE_KEY,
   addLog,
   buildLocalHelperEndpoint: (baseUrl, path) => buildHotmailLocalEndpoint(baseUrl, path),
   chrome,
   getErrorMessage,
+  getNodeIdByStepForState,
+  getNodeTitleForState,
   getState,
   normalizeAccountRunHistoryHelperBaseUrl,
 });
@@ -10710,12 +11011,12 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   ensureHotmailMailboxReadyForAutoRunRound: (...args) => ensureHotmailMailboxReadyForAutoRunRound(...args),
   getAutoRunStatusPayload,
   getErrorMessage,
-  getFirstUnfinishedStep,
+  getFirstUnfinishedNodeId,
   getPendingAutoRunTimerPlan,
-  getRunningSteps,
+  getRunningNodeIds,
   getState,
   getStopRequested: () => stopRequested,
-  hasSavedProgress,
+  hasSavedNodeProgress,
   isAddPhoneAuthFailure,
   isPhoneSmsPlatformRateLimitFailure,
   isPlusCheckoutNonFreeTrialFailure,
@@ -10729,7 +11030,7 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   onAutoRunRoundSuccess: (payload = {}) => maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload),
   persistAutoRunTimerPlan,
   resetState,
-  runAutoSequenceFromStep: (...args) => runAutoSequenceFromStep(...args),
+  runAutoSequenceFromNode: (...args) => runAutoSequenceFromNode(...args),
   runtime: {
     get: () => ({
       autoRunActive,
@@ -10749,7 +11050,7 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   setState,
   sleepWithStop,
   throwIfAutoRunSessionStopped: (sessionId) => throwIfAutoRunSessionStopped(sessionId),
-  waitForRunningStepsToFinish,
+  waitForRunningNodesToFinish,
   throwIfStopped: () => throwIfStopped(),
   chrome,
 });
@@ -11092,15 +11393,42 @@ async function ensureAutoEmailReady(targetRun, totalRuns, attemptRuns) {
   return resumedState.email;
 }
 
-async function runAutoSequenceFromStep(startStep, context = {}) {
+async function runAutoSequenceFromNode(startNodeId, context = {}) {
+  const state = await getState();
+  const normalizedStartNodeId = String(startNodeId || '').trim();
+  if (!normalizedStartNodeId || !getAutoRunWorkflowNodeIds(state).includes(normalizedStartNodeId)) {
+    throw new Error(`自动运行无法从未知节点继续：${startNodeId}`);
+  }
+  return runAutoSequenceFromNodeGraph(normalizedStartNodeId, context);
+}
+
+function getAutoRunWorkflowNodeIds(state = {}) {
+  if (typeof getNodeIdsForState === 'function') {
+    const nodeIds = getNodeIdsForState(state);
+    if (Array.isArray(nodeIds) && nodeIds.length) {
+      return nodeIds.map((nodeId) => String(nodeId || '').trim()).filter(Boolean);
+    }
+  }
+
+  if (typeof getStepIdsForState === 'function' && typeof getNodeIdByStepForState === 'function') {
+    return getStepIdsForState(state)
+      .map((step) => getNodeIdByStepForState(step, state))
+      .map((nodeId) => String(nodeId || '').trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
   const { targetRun, totalRuns, attemptRuns, continued = false } = context;
   let postStep7RestartCount = 0;
   let goPayCheckoutRestartCount = 0;
   let gpcCheckoutRestartCount = 0;
   let plusCheckoutRestartCount = 0;
   let step4RestartCount = 0;
-  const stepIdleRestartCounts = new Map();
-  let currentStartStep = startStep;
+  const nodeIdleRestartCounts = new Map();
+  let currentStartNodeId = String(startNodeId || '').trim();
   let continueCurrentAttempt = continued;
   const resolvedSignupMethod = await ensureResolvedSignupMethodForRun();
   const normalizePlusPaymentMethodForRun = typeof normalizePlusPaymentMethod === 'function'
@@ -11109,12 +11437,62 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
   const plusPaymentMethodGpcHelper = typeof PLUS_PAYMENT_METHOD_GPC_HELPER === 'string'
     ? PLUS_PAYMENT_METHOD_GPC_HELPER
     : 'gpc-helper';
-  const attachFailedStep = (error, step) => {
-    const failedStep = Math.floor(Number(step) || 0);
-    if (!error || typeof error !== 'object' || failedStep <= 0) {
+  const getNodeStatusForNode = (state, nodeId) => (
+    String(state?.nodeStatuses?.[nodeId] || 'pending').trim() || 'pending'
+  );
+  const getDisplayStepForNode = (nodeId, state = {}) => {
+    const displayStep = typeof getStepIdByNodeIdForState === 'function'
+      ? Number(getStepIdByNodeIdForState(nodeId, state))
+      : 0;
+    return Number.isInteger(displayStep) && displayStep > 0 ? displayStep : null;
+  };
+  const getNodeExecutionKey = (nodeId, state = {}) => {
+    const nodeDefinition = typeof getNodeDefinitionForState === 'function'
+      ? getNodeDefinitionForState(nodeId, state)
+      : null;
+    return String(nodeDefinition?.executeKey || nodeDefinition?.command || nodeId || '').trim();
+  };
+  const getNodeLabel = (nodeId, state = {}) => {
+    const title = typeof getNodeTitleForState === 'function'
+      ? getNodeTitleForState(nodeId, state)
+      : '';
+    return title && title !== nodeId ? `${nodeId}（${title}）` : nodeId;
+  };
+  const getNodeIndex = (state, nodeId) => getAutoRunWorkflowNodeIds(state).indexOf(nodeId);
+  const shouldRunNamedNode = async (nodeId) => {
+    const state = await getState();
+    const nodeIds = getAutoRunWorkflowNodeIds(state);
+    const targetIndex = nodeIds.indexOf(nodeId);
+    if (targetIndex < 0) {
+      return false;
+    }
+    const startIndex = nodeIds.indexOf(currentStartNodeId);
+    return startIndex < 0 || startIndex <= targetIndex;
+  };
+  const getPreviousNodeId = (nodeId, state = {}) => {
+    const nodeIds = getAutoRunWorkflowNodeIds(state);
+    const index = nodeIds.indexOf(nodeId);
+    return index > 0 ? nodeIds[index - 1] : '';
+  };
+  const setRestartNode = (nodeId) => {
+    currentStartNodeId = String(nodeId || '').trim();
+    continueCurrentAttempt = true;
+  };
+  const attachFailedNode = (error, nodeId, state = {}) => {
+    const failedNodeId = String(nodeId || '').trim();
+    if (!error || typeof error !== 'object' || !failedNodeId) {
       return error;
     }
 
+    if (!String(error.failedNodeId || '').trim()) {
+      try {
+        error.failedNodeId = failedNodeId;
+      } catch (_err) {
+        // Some host errors may be non-extensible; state-based inference still covers normal paths.
+      }
+    }
+
+    const failedStep = getDisplayStepForNode(failedNodeId, state);
     if (!Number.isInteger(Number(error.failedStep)) || Number(error.failedStep) <= 0) {
       try {
         error.failedStep = failedStep;
@@ -11125,16 +11503,27 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
 
     return error;
   };
-  const restartCurrentStepAfterIdle = async (step, error) => {
+  const invalidateDownstreamAfterAutoRunNodeRestart = async (nodeId, options = {}) => {
+    if (typeof invalidateDownstreamAfterNodeRestart === 'function') {
+      return invalidateDownstreamAfterNodeRestart(nodeId, options);
+    }
+    const state = await getState();
+    const step = getDisplayStepForNode(nodeId, state);
+    if (Number.isInteger(step) && step > 0 && typeof invalidateDownstreamAfterStepRestart === 'function') {
+      return invalidateDownstreamAfterStepRestart(step, options);
+    }
+    return undefined;
+  };
+  const restartCurrentNodeAfterIdle = async (nodeId, error) => {
     if (!isAutoRunStepIdleRestartError(error)) {
       return false;
     }
 
-    const idleRestartCount = (stepIdleRestartCounts.get(step) || 0) + 1;
-    stepIdleRestartCounts.set(step, idleRestartCount);
+    const idleRestartCount = (nodeIdleRestartCounts.get(nodeId) || 0) + 1;
+    nodeIdleRestartCounts.set(nodeId, idleRestartCount);
     if (idleRestartCount > AUTO_RUN_STEP_IDLE_RESTART_MAX_ATTEMPTS) {
       await addLog(
-        `步骤 ${step}：已连续 ${AUTO_RUN_STEP_IDLE_RESTART_MAX_ATTEMPTS} 次因 5 分钟无新日志而重开，停止自动重试。原因：${getErrorMessage(error)}`,
+        `节点 ${nodeId}：已连续 ${AUTO_RUN_STEP_IDLE_RESTART_MAX_ATTEMPTS} 次因 5 分钟无新日志而重开，停止自动重试。原因：${getErrorMessage(error)}`,
         'error'
       );
       throw error;
@@ -11142,62 +11531,63 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
 
     const reason = getErrorMessage(error);
     if (typeof cancelPendingCommands === 'function') {
-      cancelPendingCommands(`步骤 ${step} 5 分钟没有新日志，准备重开当前步骤。`);
+      cancelPendingCommands(`节点 ${nodeId} 5 分钟没有新日志，准备重开当前节点。`);
     }
     if (typeof broadcastStopToContentScripts === 'function') {
       await broadcastStopToContentScripts();
     }
     await addLog(
-      `步骤 ${step}：5 分钟没有新日志，准备重新开始当前步骤（第 ${idleRestartCount}/${AUTO_RUN_STEP_IDLE_RESTART_MAX_ATTEMPTS} 次）。原因：${reason}`,
+      `节点 ${nodeId}：5 分钟没有新日志，准备重新开始当前节点（第 ${idleRestartCount}/${AUTO_RUN_STEP_IDLE_RESTART_MAX_ATTEMPTS} 次）。原因：${reason}`,
       'warn'
     );
-    await invalidateDownstreamAfterStepRestart(Math.max(0, step - 1), {
-      logLabel: `步骤 ${step} 因 5 分钟无新日志准备重开（第 ${idleRestartCount}/${AUTO_RUN_STEP_IDLE_RESTART_MAX_ATTEMPTS} 次）`,
+    const latestState = await getState();
+    const resetAnchorNodeId = getPreviousNodeId(nodeId, latestState) || nodeId;
+    await invalidateDownstreamAfterAutoRunNodeRestart(resetAnchorNodeId, {
+      logLabel: `节点 ${nodeId} 因 5 分钟无新日志准备重开（第 ${idleRestartCount}/${AUTO_RUN_STEP_IDLE_RESTART_MAX_ATTEMPTS} 次）`,
     });
-    currentStartStep = step;
-    continueCurrentAttempt = true;
+    setRestartNode(nodeId);
     return true;
   };
 
   while (true) {
 
   if (continueCurrentAttempt) {
-    await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：继续当前进度，从步骤 ${startStep} 开始（第 ${attemptRuns} 次尝试）===`, 'info');
+    await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：继续当前进度，从节点 ${currentStartNodeId} 开始（第 ${attemptRuns} 次尝试）===`, 'info');
   } else {
     await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：第 ${attemptRuns} 次尝试，阶段 1，打开官网并进入密码页 ===`, 'info');
   }
 
-  if (currentStartStep <= 1) {
+  if (await shouldRunNamedNode('open-chatgpt')) {
     try {
-      await executeStepAndWaitWithAutoRunIdleLogWatchdog(1, AUTO_STEP_DELAYS[1]);
+      await executeNodeAndWaitWithAutoRunIdleLogWatchdog('open-chatgpt', getAutoRunNodeDelayMs('open-chatgpt'));
     } catch (err) {
-      attachFailedStep(err, 1);
+      attachFailedNode(err, 'open-chatgpt', await getState());
       if (isStopError(err)) {
         throw err;
       }
-      if (await restartCurrentStepAfterIdle(1, err)) {
+      if (await restartCurrentNodeAfterIdle('open-chatgpt', err)) {
         continue;
       }
       throw err;
     }
   }
 
-  if (currentStartStep <= 2) {
+  if (await shouldRunNamedNode('submit-signup-email')) {
     try {
-      await runAutoStepActionWithIdleLogWatchdog(2, async () => {
+      await runAutoNodeActionWithIdleLogWatchdog('submit-signup-email', async () => {
         if (resolvedSignupMethod === SIGNUP_METHOD_PHONE) {
           await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：本轮注册方式为手机号注册，将跳过邮箱预获取 ===`, 'info');
         } else {
           await ensureAutoEmailReady(targetRun, totalRuns, attemptRuns);
         }
-        await executeStepAndWait(2, AUTO_STEP_DELAYS[2]);
+        await executeNodeAndWait('submit-signup-email', getAutoRunNodeDelayMs('submit-signup-email'));
       });
     } catch (err) {
-      attachFailedStep(err, 2);
+      attachFailedNode(err, 'submit-signup-email', await getState());
       if (isStopError(err)) {
         throw err;
       }
-      if (await restartCurrentStepAfterIdle(2, err)) {
+      if (await restartCurrentNodeAfterIdle('submit-signup-email', err)) {
         continue;
       }
       throw err;
@@ -11206,33 +11596,32 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
 
   let restartFromStep1WithCurrentEmail = false;
 
-  if (currentStartStep <= 3) {
+  if (await shouldRunNamedNode('fill-password')) {
     const latestState = await getState();
-    const step3Status = latestState.stepStatuses?.[3] || 'pending';
+    const fillPasswordStatus = getNodeStatusForNode(latestState, 'fill-password');
     await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：阶段 2，填写密码、验证、登录并完成授权（第 ${attemptRuns} 次尝试）===`, 'info');
     await broadcastAutoRunStatus('running', {
       currentRun: targetRun,
       totalRuns,
       attemptRun: attemptRuns,
     });
-    if (isStepDoneStatus(step3Status)) {
-      await addLog(`自动运行：步骤 3 当前状态为 ${step3Status}，将直接继续后续流程。`, 'info');
+    if (isStepDoneStatus(fillPasswordStatus)) {
+      await addLog(`自动运行：节点 fill-password 当前状态为 ${fillPasswordStatus}，将直接继续后续流程。`, 'info');
     } else {
       try {
-        await executeStepAndWaitWithAutoRunIdleLogWatchdog(3, AUTO_STEP_DELAYS[3]);
+        await executeNodeAndWaitWithAutoRunIdleLogWatchdog('fill-password', getAutoRunNodeDelayMs('fill-password'));
       } catch (err) {
-        attachFailedStep(err, 3);
+        attachFailedNode(err, 'fill-password', latestState);
         if (isStopError(err)) {
           throw err;
         }
-        if (await restartCurrentStepAfterIdle(3, err)) {
+        if (await restartCurrentNodeAfterIdle('fill-password', err)) {
           continue;
         }
         if (isSignupPhonePasswordMismatchFailure(err)) {
           step4RestartCount += 1;
-          await restartSignupPhonePasswordMismatchAttemptFromStep(3, step4RestartCount, err);
-          currentStartStep = 1;
-          continueCurrentAttempt = true;
+          await restartSignupPhonePasswordMismatchAttemptFromNode('fill-password', step4RestartCount, err);
+          setRestartNode('open-chatgpt');
           restartFromStep1WithCurrentEmail = true;
           continue;
         }
@@ -11252,42 +11641,48 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
     await chrome.tabs.update(signupTabId, { active: true });
   }
 
-  let step = Math.max(currentStartStep, 4);
-  while (step <= (typeof getLastStepIdForState === 'function'
-    ? getLastStepIdForState(await getState())
-    : (typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10))) {
+  let loopState = await getState();
+  let nodeIds = getAutoRunWorkflowNodeIds(loopState);
+  const firstVerificationIndex = nodeIds.indexOf('fetch-signup-code');
+  const startIndex = nodeIds.indexOf(currentStartNodeId);
+  let nodeIndex = Math.max(
+    startIndex >= 0 ? startIndex : 0,
+    firstVerificationIndex >= 0 ? firstVerificationIndex : 0
+  );
+  while (nodeIndex < nodeIds.length) {
     const latestState = await getState();
-    if (typeof getStepDefinitionForState === 'function' && !getStepDefinitionForState(step, latestState)) {
-      step += 1;
+    nodeIds = getAutoRunWorkflowNodeIds(latestState);
+    const nodeId = nodeIds[nodeIndex];
+    if (!nodeId) {
+      nodeIndex += 1;
       continue;
     }
-    const currentStatus = latestState.stepStatuses?.[step] || 'pending';
+    const currentStatus = getNodeStatusForNode(latestState, nodeId);
     if (isStepDoneStatus(currentStatus)) {
-      await addLog(`自动运行：步骤 ${step} 当前状态为 ${currentStatus}，将直接继续后续流程。`, 'info');
-      step += 1;
+      await addLog(`自动运行：节点 ${nodeId} 当前状态为 ${currentStatus}，将直接继续后续流程。`, 'info');
+      nodeIndex += 1;
       continue;
     }
     try {
-      await executeStepAndWaitWithAutoRunIdleLogWatchdog(step, AUTO_STEP_DELAYS[step]);
-      step += 1;
+      await executeNodeAndWaitWithAutoRunIdleLogWatchdog(nodeId, getAutoRunNodeDelayMs(nodeId));
+      nodeIndex += 1;
     } catch (err) {
-      attachFailedStep(err, step);
+      attachFailedNode(err, nodeId, latestState);
       if (isStopError(err)) {
         throw err;
       }
 
-      if (await restartCurrentStepAfterIdle(step, err)) {
+      if (await restartCurrentNodeAfterIdle(nodeId, err)) {
         continue;
       }
 
-      const stepExecutionKey = typeof getStepExecutionKeyForState === 'function'
-        ? getStepExecutionKeyForState(step, latestState)
-        : '';
+      const step = getDisplayStepForNode(nodeId, latestState);
+      const nodeExecutionKey = getNodeExecutionKey(nodeId, latestState);
       const isGpcCheckoutStep = normalizePlusPaymentMethodForRun(latestState?.plusPaymentMethod) === plusPaymentMethodGpcHelper
         || String(latestState?.plusCheckoutSource || '').trim() === plusPaymentMethodGpcHelper;
-      if (isPlusCheckoutRestartStep(step, stepExecutionKey, latestState)
+      if (isPlusCheckoutRestartStep(step, nodeExecutionKey, latestState)
         && isPlusCheckoutRestartRequiredFailure(err)) {
-        const isGoPayCheckoutStep = stepExecutionKey === 'gopay-subscription-confirm'
+        const isGoPayCheckoutStep = nodeExecutionKey === 'gopay-subscription-confirm'
           || normalizePlusPaymentMethodForRun(latestState?.plusPaymentMethod) === 'gopay';
         if (isGpcCheckoutStep) {
           gpcCheckoutRestartCount += 1;
@@ -11306,39 +11701,40 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
           ? '重新创建 GPC 任务'
           : (isGoPayCheckoutStep ? '重新创建 GoPay 订阅' : '重新创建 Plus Checkout');
         await addLog(
-          `步骤 ${step}：检测到 ${checkoutLabel} 失败/卡住，准备回到步骤 6 ${recreateLabel}（第 ${checkoutRestartCount} 次）。原因：${getErrorMessage(err)}`,
+          `节点 ${getNodeLabel(nodeId, latestState)}：检测到 ${checkoutLabel} 失败/卡住，准备回到节点 plus-checkout-create ${recreateLabel}（第 ${checkoutRestartCount} 次）。原因：${getErrorMessage(err)}`,
           'warn'
         );
-        await invalidateDownstreamAfterStepRestart(5, {
-          logLabel: `步骤 ${step} ${checkoutLabel}失败后准备回到步骤 6 重试（第 ${checkoutRestartCount} 次）`,
+        const checkoutResetAnchorNodeId = getPreviousNodeId('plus-checkout-create', latestState) || 'fill-profile';
+        await invalidateDownstreamAfterAutoRunNodeRestart(checkoutResetAnchorNodeId, {
+          logLabel: `节点 ${nodeId} ${checkoutLabel}失败后准备回到 plus-checkout-create 重试（第 ${checkoutRestartCount} 次）`,
         });
-        step = 6;
+        nodeIndex = Math.max(0, getNodeIndex(await getState(), 'plus-checkout-create'));
         continue;
       }
 
-      if (step === 8 && isGoPayCheckoutRestartRequiredFailure(err)) {
+      if (nodeId === 'paypal-approve' && isGoPayCheckoutRestartRequiredFailure(err)) {
         goPayCheckoutRestartCount += 1;
         if (goPayCheckoutRestartCount > 3) {
-          await addLog(`步骤 8：GoPay Checkout 已连续重建 ${goPayCheckoutRestartCount - 1} 次仍失败，停止自动重试。原因：${getErrorMessage(err)}`, 'error');
+          await addLog(`节点 paypal-approve：GoPay Checkout 已连续重建 ${goPayCheckoutRestartCount - 1} 次仍失败，停止自动重试。原因：${getErrorMessage(err)}`, 'error');
           throw err;
         }
         await addLog(
-          `步骤 8：检测到 GoPay 支付页失效/卡死，准备关闭旧页并回到步骤 6 重新创建 Checkout（第 ${goPayCheckoutRestartCount}/3 次）。原因：${getErrorMessage(err)}`,
+          `节点 paypal-approve：检测到 GoPay 支付页失效/卡死，准备关闭旧页并回到节点 plus-checkout-create 重新创建 Checkout（第 ${goPayCheckoutRestartCount}/3 次）。原因：${getErrorMessage(err)}`,
           'warn'
         );
-        await invalidateDownstreamAfterStepRestart(5, {
-          logLabel: `步骤 8 GoPay 支付页失效后准备回到步骤 6 重试（第 ${goPayCheckoutRestartCount}/3 次）`,
+        await invalidateDownstreamAfterAutoRunNodeRestart(getPreviousNodeId('plus-checkout-create', latestState) || 'fill-profile', {
+          logLabel: `节点 paypal-approve GoPay 支付页失效后准备回到 plus-checkout-create 重试（第 ${goPayCheckoutRestartCount}/3 次）`,
         });
-        step = 6;
+        nodeIndex = Math.max(0, getNodeIndex(await getState(), 'plus-checkout-create'));
         continue;
       }
 
-      if (step === 4) {
+      if (nodeId === 'fetch-signup-code') {
         if (isSignupUserAlreadyExistsFailure(err)) {
           throw err;
         }
         if (isMail2925ThreadTerminatedError(err)) {
-          await addLog(`步骤 4：2925 已切换账号并要求结束当前尝试：${getErrorMessage(err)}`, 'warn');
+          await addLog(`节点 fetch-signup-code：2925 已切换账号并要求结束当前尝试：${getErrorMessage(err)}`, 'warn');
           throw err;
         }
         step4RestartCount += 1;
@@ -11346,18 +11742,18 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
           && typeof phoneVerificationHelpers?.isPhoneResendBannedNumberError === 'function'
           && phoneVerificationHelpers.isPhoneResendBannedNumberError(err);
         if (isSignupPhonePasswordMismatchFailure(err) || isPhoneResendBanned) {
-          await restartSignupPhonePasswordMismatchAttemptFromStep(4, step4RestartCount, err);
+          await restartSignupPhonePasswordMismatchAttemptFromNode('fetch-signup-code', step4RestartCount, err);
         } else {
           const preservedState = await getState();
           const preservedEmail = String(preservedState.email || '').trim();
           const preservedPassword = String(preservedState.password || '').trim();
           const emailSuffix = preservedEmail ? `当前邮箱：${preservedEmail}；` : '';
           await addLog(
-            `步骤 4：执行失败，准备沿用当前邮箱回到步骤 1 重新开始（第 ${step4RestartCount} 次重开）。${emailSuffix}原因：${getErrorMessage(err)}`,
+            `节点 fetch-signup-code：执行失败，准备沿用当前邮箱回到节点 open-chatgpt 重新开始（第 ${step4RestartCount} 次重开）。${emailSuffix}原因：${getErrorMessage(err)}`,
             'warn'
           );
-          await invalidateDownstreamAfterStepRestart(1, {
-            logLabel: `步骤 4 报错后准备回到步骤 1 沿用当前邮箱重试（第 ${step4RestartCount} 次重开）`,
+          await invalidateDownstreamAfterAutoRunNodeRestart('open-chatgpt', {
+            logLabel: `节点 fetch-signup-code 报错后准备回到 open-chatgpt 沿用当前邮箱重试（第 ${step4RestartCount} 次重开）`,
           });
           const restorePayload = {};
           if (preservedEmail) restorePayload.email = preservedEmail;
@@ -11366,8 +11762,7 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
             await setState(restorePayload);
           }
         }
-        currentStartStep = 1;
-        continueCurrentAttempt = true;
+        setRestartNode('open-chatgpt');
         restartFromStep1WithCurrentEmail = true;
         break;
       }
@@ -11375,11 +11770,9 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
       const restartDecision = await getPostStep6AutoRestartDecision(step, err);
       if (restartDecision.shouldRestart) {
         postStep7RestartCount += 1;
-        const restartStep = restartDecision.restartStep
-          || (typeof getAuthChainStartStepId === 'function'
-            ? getAuthChainStartStepId(await getState())
-            : FINAL_OAUTH_CHAIN_START_STEP);
-        const resetAfterStep = Math.max(1, restartStep - 1);
+        const restartStep = restartDecision.restartStep;
+        const restartNodeId = String(getNodeIdByStepForState(restartStep, await getState()) || 'oauth-login').trim();
+        const resetAfterNodeId = getPreviousNodeId(restartNodeId, await getState()) || restartNodeId;
         const authState = restartDecision.authState;
         const authStateLabel = authState?.state ? getLoginAuthStateLabel(authState.state) : '未知页面';
         const authStateSuffix = authState?.url
@@ -11388,22 +11781,20 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
             ? `当前认证页：${authStateLabel}`
             : '未获取到认证页状态';
         await addLog(
-          `步骤 ${step}：检测到报错且当前未进入 add-phone，正在回到步骤 ${restartStep} 重新开始授权流程（第 ${postStep7RestartCount} 次重开）。${authStateSuffix}；原因：${restartDecision.errorMessage || '未知错误'}`,
+          `节点 ${getNodeLabel(nodeId, latestState)}：检测到报错且当前未进入 add-phone，正在回到节点 ${restartNodeId} 重新开始授权流程（第 ${postStep7RestartCount} 次重开）。${authStateSuffix}；原因：${restartDecision.errorMessage || '未知错误'}`,
           'warn'
         );
-        await invalidateDownstreamAfterStepRestart(resetAfterStep, {
-          logLabel: `步骤 ${step} 报错后准备回到步骤 ${restartStep} 重试（第 ${postStep7RestartCount} 次重开）`,
+        await invalidateDownstreamAfterAutoRunNodeRestart(resetAfterNodeId, {
+          logLabel: `节点 ${nodeId} 报错后准备回到 ${restartNodeId} 重试（第 ${postStep7RestartCount} 次重开）`,
         });
-        step = restartStep;
+        nodeIndex = Math.max(0, getNodeIndex(await getState(), restartNodeId));
         continue;
       }
 
       if (restartDecision.blockedByAddPhone) {
         const addPhoneUrl = restartDecision.authState?.url || 'https://auth.openai.com/add-phone';
-        const authChainStartStep = typeof getAuthChainStartStepId === 'function'
-          ? getAuthChainStartStepId(await getState())
-          : FINAL_OAUTH_CHAIN_START_STEP;
-        await addLog(`步骤 ${step}：检测到认证流程进入 add-phone（${addPhoneUrl}），停止自动回到步骤 ${authChainStartStep} 重开。`, 'warn');
+        const authChainStartNodeId = String(getNodeIdByStepForState(restartDecision.restartStep, await getState()) || 'oauth-login').trim();
+        await addLog(`节点 ${getNodeLabel(nodeId, latestState)}：检测到认证流程进入 add-phone（${addPhoneUrl}），停止自动回到节点 ${authChainStartNodeId} 重开。`, 'warn');
       }
       throw err;
     }
@@ -11595,11 +11986,12 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   closeConflictingTabsForSource,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
   CLOUD_MAIL_PROVIDER,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   confirmCustomVerificationStepBypassRequest: (step) => chrome.runtime.sendMessage({
     type: 'REQUEST_CUSTOM_VERIFICATION_BYPASS_CONFIRMATION',
     payload: { step },
   }),
+  getNodeIdByStepForState,
   getHotmailVerificationPollConfig,
   getHotmailVerificationRequestTimestamp,
   handleMail2925LimitReachedError,
@@ -11619,8 +12011,8 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   sendToContentScript,
   sendToContentScriptResilient,
   sendToMailContentScriptResilient,
+  setNodeStatus,
   setState,
-  setStepStatus,
   sleepWithStop,
   throwIfStopped,
   VERIFICATION_POLL_MAX_ROUNDS,
@@ -11683,13 +12075,13 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
 });
 const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   addLog,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   openSignupEntryTab,
 });
 const step2Executor = self.MultiPageBackgroundStep2?.createStep2Executor({
   addLog,
   chrome,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   ensureContentScriptReadyOnTab,
   ensureSignupAuthEntryPageReady,
   ensureSignupEntryPageReady,
@@ -11731,7 +12123,7 @@ async function ensureIcloudMailSessionForVerification(options = {}) {
 const step4Executor = self.MultiPageBackgroundStep4?.createStep4Executor({
   addLog,
   chrome,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   confirmCustomVerificationStepBypass: verificationFlowHelpers.confirmCustomVerificationStepBypass,
   generateRandomBirthday,
   generateRandomName,
@@ -11765,14 +12157,14 @@ const step5Executor = self.MultiPageBackgroundStep5?.createStep5Executor({
 const step6Executor = self.MultiPageBackgroundStep6?.createStep6Executor({
   addLog,
   chrome,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   getErrorMessage,
   registrationSuccessWaitMs: STEP6_REGISTRATION_SUCCESS_WAIT_MS,
   sleepWithStop,
 });
 const step7Executor = self.MultiPageBackgroundStep7?.createStep7Executor({
   addLog,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   getErrorMessage,
   getLoginAuthStateLabel,
   getOAuthFlowStepTimeoutMs,
@@ -11794,7 +12186,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   chrome,
   CLOUDFLARE_TEMP_EMAIL_PROVIDER,
   CLOUD_MAIL_PROVIDER,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   confirmCustomVerificationStepBypass: verificationFlowHelpers.confirmCustomVerificationStepBypass,
   ensureMail2925MailboxSession,
   ensureIcloudMailSession: ensureIcloudMailSessionForVerification,
@@ -11828,7 +12220,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
 const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.createPlusCheckoutCreateExecutor({
   addLog,
   chrome,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   createAutomationTab,
   ensureContentScriptReadyOnTabUntilStopped,
   fetch: typeof fetch === 'function' ? fetch.bind(globalThis) : null,
@@ -11844,7 +12236,7 @@ const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?
   addLog,
   broadcastDataUpdate,
   chrome,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   ensureContentScriptReadyOnTabUntilStopped,
   fetch: typeof fetch === 'function' ? fetch.bind(globalThis) : null,
   generateRandomName,
@@ -11875,7 +12267,7 @@ const goPayManualConfirmExecutor = self.MultiPageBackgroundGoPayManualConfirm?.c
 const payPalApproveExecutor = self.MultiPageBackgroundPayPalApprove?.createPayPalApproveExecutor({
   addLog,
   chrome,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   ensureContentScriptReadyOnTabUntilStopped,
   queryTabsInAutomationWindow,
   getTabId,
@@ -11889,7 +12281,7 @@ const payPalApproveExecutor = self.MultiPageBackgroundPayPalApprove?.createPayPa
 const goPayApproveExecutor = self.MultiPageBackgroundGoPayApprove?.createGoPayApproveExecutor({
   addLog,
   chrome,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   ensureContentScriptReadyOnTabUntilStopped,
   getTabId,
   isTabAlive,
@@ -11907,7 +12299,7 @@ const goPayApproveExecutor = self.MultiPageBackgroundGoPayApprove?.createGoPayAp
 });
 const plusReturnConfirmExecutor = self.MultiPageBackgroundPlusReturnConfirm?.createPlusReturnConfirmExecutor({
   addLog,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   getTabId,
   isTabAlive,
   setState,
@@ -11918,7 +12310,7 @@ const step10Executor = self.MultiPageBackgroundStep10?.createStep10Executor({
   addLog,
   chrome,
   closeConflictingTabsForSource,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   ensureContentScriptReadyOnTab,
   getPanelMode,
   getTabId,
@@ -11972,18 +12364,18 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   clearStopRequest,
   closeLocalhostCallbackTabs,
   closeTabsByUrlPrefix,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   deleteHotmailAccount,
   deleteHotmailAccounts,
   deleteIcloudAlias,
   deleteUsedIcloudAliases,
   findPayPalAccount,
   disableUsedLuckmailPurchases,
-  doesStepUseCompletionSignal,
+  doesNodeUseCompletionSignal,
   ensureMail2925MailboxSession,
   ensureManualInteractionAllowed,
-  executeStep,
-  executeStepViaCompletionSignal,
+  executeNode,
+  executeNodeViaCompletionSignal,
   exportSettingsBundle,
   fetchGeneratedEmail,
   refreshGpcCardBalance,
@@ -12004,6 +12396,9 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   getPendingAutoRunTimerPlan,
   getSourceLabel,
   getState,
+  getNodeDefinitionForState,
+  getNodeIdsForState,
+  getStepIdByNodeIdForState,
   getStepDefinitionForState,
   getStepIdsForState,
   getLastStepIdForState,
@@ -12038,8 +12433,8 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   normalizePayPalAccounts,
   normalizeRunCount,
   AUTO_RUN_TIMER_KIND_SCHEDULED_START,
-  notifyStepComplete,
-  notifyStepError,
+  notifyNodeComplete,
+  notifyNodeError,
   patchHotmailAccount,
   patchMail2925Account,
   registerTab,
@@ -12068,9 +12463,9 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   setLuckmailPurchaseUsedState,
   setPersistentSettings,
   setState,
-  setStepStatus,
+  setNodeStatus,
   skipAutoRunCountdown,
-  skipStep,
+  skipNode,
   startContributionFlow: (...args) => contributionOAuthManager?.startContributionFlow?.(...args),
   startAutoRunLoop,
   pollContributionStatus: (...args) => contributionOAuthManager?.pollContributionStatus?.(...args),
@@ -12085,13 +12480,41 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   verifyHotmailAccount,
 });
 
-function buildStepRegistry(definitions = []) {
-  return self.MultiPageBackgroundStepRegistry?.createStepRegistry(
+function buildNodeRegistry(definitions = []) {
+  return self.MultiPageBackgroundStepRegistry?.createNodeRegistry(
     definitions.map((definition) => ({
       ...definition,
-      execute: stepExecutorsByKey[definition.key],
+      nodeId: definition.nodeId || definition.key,
+      displayOrder: definition.displayOrder || definition.order,
+      executeKey: definition.executeKey || definition.key,
+      execute: stepExecutorsByKey[definition.executeKey || definition.key || definition.nodeId],
     }))
   );
+}
+
+function buildStepRegistry(definitions = []) {
+  const nodeRegistry = buildNodeRegistry(definitions);
+  return {
+    executeNode: (nodeId, state) => nodeRegistry.executeNode(nodeId, state),
+    getNodeDefinition: (nodeId) => nodeRegistry.getNodeDefinition(nodeId),
+    getOrderedNodes: () => nodeRegistry.getOrderedNodes(),
+    executeStep: (step, state) => {
+      const nodeId = String(getStepDefinitionForState(step, state)?.key || '').trim();
+      if (!nodeId) {
+        throw new Error(`未知节点：${step}`);
+      }
+      return nodeRegistry.executeNode(nodeId, state);
+    },
+    getStepDefinition: (step) => {
+      const nodeId = String(getStepDefinitionForState(step, {})?.key || '').trim();
+      return nodeId ? nodeRegistry.getNodeDefinition(nodeId) : null;
+    },
+    getOrderedSteps: () => nodeRegistry.getOrderedNodes(),
+  };
+}
+
+async function acquireTopLevelAuthChainExecution(step, state = {}) {
+  return acquireTopLevelAuthChainExecutionForNode(getNodeIdByStepForState(step, state), state);
 }
 
 const normalStepRegistry = buildStepRegistry(NORMAL_STEP_DEFINITIONS);
@@ -12539,9 +12962,9 @@ async function getPostStep6AutoRestartDecision(step, error) {
   const lastStepId = typeof getLastStepIdForState === 'function'
     ? getLastStepIdForState(latestState)
     : (typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10);
-  const currentStepKey = resolveStepKey(normalizedStep, latestState);
+  const currentNodeKey = resolveStepKey(normalizedStep, latestState);
   const confirmOauthStep = findStepIdByKeyForState('confirm-oauth', latestState);
-  const shouldRetryFromConfirmStep = currentStepKey === 'platform-verify'
+  const shouldRetryFromConfirmStep = currentNodeKey === 'platform-verify'
     && Number.isFinite(confirmOauthStep)
     && confirmOauthStep > 0
     && confirmOauthStep < normalizedStep
@@ -12923,12 +13346,13 @@ async function rerunStep7ForStep8Recovery(options = {}) {
   const authLoginStep = typeof getAuthChainStartStepId === 'function'
     ? getAuthChainStartStepId(initialState)
     : FINAL_OAUTH_CHAIN_START_STEP;
+  const authLoginNodeId = getNodeIdByStepForState(authLoginStep, initialState) || 'oauth-login';
   await addLog(logMessage, 'warn', {
     step: logStep,
     stepKey: logStepKey,
   });
-  await setStepStatus(authLoginStep, 'running');
-  await addLog('开始执行', 'info', { step: authLoginStep });
+  await setNodeStatus(authLoginNodeId, 'running');
+  await addLog('开始执行', 'info', { nodeId: authLoginNodeId });
 
   try {
     await step7Executor.executeStep7({
@@ -12938,18 +13362,18 @@ async function rerunStep7ForStep8Recovery(options = {}) {
   } catch (err) {
     const latestState = await getState();
     if (isStopError(err)) {
-      await setStepStatus(authLoginStep, 'stopped');
-      await addLog('已被用户停止', 'warn', { step: authLoginStep });
-      await appendManualAccountRunRecordIfNeeded(`step${authLoginStep}_stopped`, latestState, getErrorMessage(err));
+      await setNodeStatus(authLoginNodeId, 'stopped');
+      await addLog('已被用户停止', 'warn', { nodeId: authLoginNodeId });
+      await appendManualAccountRunRecordIfNeeded(`node:${authLoginNodeId}:stopped`, latestState, getErrorMessage(err));
       throw err;
     }
     if (isTerminalSecurityBlockedError(err)) {
       await handleCloudflareSecurityBlocked(err);
       throw new Error(STOP_ERROR_MESSAGE);
     }
-    await setStepStatus(authLoginStep, 'failed');
-    await addLog(`失败：${getErrorMessage(err)}`, 'error', { step: authLoginStep });
-    await appendManualAccountRunRecordIfNeeded(`step${authLoginStep}_failed`, latestState, getErrorMessage(err));
+    await setNodeStatus(authLoginNodeId, 'failed');
+    await addLog(`失败：${getErrorMessage(err)}`, 'error', { nodeId: authLoginNodeId });
+    await appendManualAccountRunRecordIfNeeded(`node:${authLoginNodeId}:failed`, latestState, getErrorMessage(err));
     throw err;
   }
 
@@ -13543,7 +13967,7 @@ const step9Executor = self.MultiPageBackgroundStep9?.createStep9Executor({
   chrome,
   cleanupStep8NavigationListeners,
   clickWithDebugger,
-  completeStepFromBackground,
+  completeNodeFromBackground,
   ensureStep8SignupPageReady,
   getOAuthFlowStepTimeoutMs,
   getStep8CallbackUrlFromNavigation,
@@ -13640,7 +14064,7 @@ async function executeContributionStep10(state) {
           step: platformVerifyStep,
           stepKey: 'platform-verify',
         });
-        await completeStepFromBackground(platformVerifyStep, {
+        await completeNodeFromBackground(state?.nodeId || 'platform-verify', {
           contributionStatus: status,
           contributionStatusMessage: latestState.contributionStatusMessage || '',
           localhostUrl: callbackUrl,

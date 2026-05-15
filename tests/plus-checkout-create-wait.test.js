@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -204,7 +204,7 @@ test('Plus checkout create does not wait 20 seconds after opening checkout page'
         },
       },
     },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       events.push({ type: 'complete', step, payload });
     },
     ensureContentScriptReadyOnTabUntilStopped: async () => {
@@ -267,7 +267,7 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
         update: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     registerTab: async () => {},
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
@@ -370,7 +370,7 @@ test('GPC manual checkout injects Plus script before reading ChatGPT session tok
         remove: async (tabId) => events.push({ type: 'tab-remove', tabId }),
       },
     },
-    completeStepFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
     fetch: async (url, options = {}) => {
       fetchCalls.push({ url, options });
@@ -438,7 +438,7 @@ test('GPC manual checkout injects Plus script before reading ChatGPT session tok
   assert.equal(events.find((event) => event.type === 'set-state')?.payload?.gopayHelperRemoteStage, 'checkout_start');
   assert.equal(events.find((event) => event.type === 'set-state')?.payload?.gopayHelperReferenceId, '');
   assert.ok(events.find((event) => event.type === 'set-state')?.payload?.gopayHelperOrderCreatedAt > 0);
-  assert.equal(events.find((event) => event.type === 'complete')?.step, 6);
+  assert.equal(events.find((event) => event.type === 'complete')?.step, 'plus-checkout-create');
   assert.equal(events.find((event) => event.type === 'complete')?.payload?.plusCheckoutSource, 'gpc-helper');
 });
 
@@ -456,7 +456,7 @@ test('GPC auto checkout only sends access token and API Key', async () => {
         remove: async () => {},
       },
     },
-    completeStepFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     fetch: async (url, options = {}) => {
       fetchCalls.push({ url, options });
@@ -507,7 +507,7 @@ test('GPC auto checkout only sends access token and API Key', async () => {
   assert.equal(statePayload.gopayHelperTaskId, 'task_auto');
   assert.equal(Object.prototype.hasOwnProperty.call(statePayload, 'gopayHelperPhoneMode'), false);
   assert.equal(statePayload.gopayHelperTaskStatus, 'queued');
-  assert.equal(events.find((event) => event.type === 'complete')?.step, 6);
+  assert.equal(events.find((event) => event.type === 'complete')?.step, 'plus-checkout-create');
 });
 
 test('GPC auto checkout keeps running when balance payload omits auto mode permission', async () => {
@@ -523,7 +523,7 @@ test('GPC auto checkout keeps running when balance payload omits auto mode permi
         remove: async () => {},
       },
     },
-    completeStepFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     fetch: async (url, options = {}) => {
       fetchCalls.push({ url, options });
@@ -564,7 +564,7 @@ test('GPC auto checkout keeps running when balance payload omits auto mode permi
   const statePayload = events.find((event) => event.type === 'set-state')?.payload || {};
   assert.equal(statePayload.gopayHelperTaskId, 'task_auto_unknown_permission');
   assert.equal(Object.prototype.hasOwnProperty.call(statePayload, 'gopayHelperPhoneMode'), false);
-  assert.equal(events.find((event) => event.type === 'complete')?.step, 6);
+  assert.equal(events.find((event) => event.type === 'complete')?.step, 'plus-checkout-create');
 });
 
 test('GPC auto checkout blocks API Keys without auto mode permission', async () => {
@@ -579,7 +579,7 @@ test('GPC auto checkout blocks API Keys without auto mode permission', async () 
         remove: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     fetch: async (url, options = {}) => {
       fetchCalls.push({ url, options });
@@ -623,7 +623,7 @@ test('GPC checkout blocks exhausted API Keys before creating task', async () => 
         remove: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     fetch: async (url, options = {}) => {
       fetchCalls.push({ url, options });
@@ -668,7 +668,7 @@ test('GPC checkout forwards selected SMS OTP channel', async () => {
         remove: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     fetch: async (url, options = {}) => {
       fetchCalls.push({ url, options });
@@ -720,7 +720,7 @@ test('GPC checkout surfaces unified queue API errors', async () => {
         remove: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     fetch: async (url, options = {}) => {
       fetchCalls.push({ url, options });
@@ -780,7 +780,7 @@ test('GPC checkout does not fall back to browser GoPay phone fields', async () =
         remove: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     fetch: async () => {
       throw new Error('should not call helper API without helper phone');
@@ -821,7 +821,7 @@ test('GPC checkout rejects missing API Key before calling helper API', async () 
         remove: async () => {},
       },
     },
-    completeStepFromBackground: async () => {},
+    completeNodeFromBackground: async () => {},
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     fetch: async () => {
       throw new Error('should not call helper API without API Key');

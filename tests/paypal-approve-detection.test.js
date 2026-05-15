@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -56,7 +56,7 @@ function createExecutor({
         },
       },
     },
-    completeStepFromBackground: async (step, payload) => {
+    completeNodeFromBackground: async (step, payload) => {
       events.completed.push({ step, payload });
     },
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
@@ -259,7 +259,7 @@ test('PayPal approve keeps original combined email and password login path', asy
   });
 
   assert.equal(events.submittedPayloads.length, 1);
-  assert.deepEqual(events.completed.map((item) => item.step), [8]);
+  assert.deepEqual(events.completed.map((item) => item.step), ['paypal-approve']);
   assert.equal(events.messages.includes('PAYPAL_CLICK_APPROVE'), true);
 });
 
@@ -404,7 +404,7 @@ test('PayPal approve discovers an already open unregistered PayPal tab', async (
 
   assert.deepEqual(events.updatedTabs, [{ tabId: 7, updateInfo: { active: true } }]);
   assert.equal(events.logs.some(({ message }) => /发现 PayPal 页面/.test(message)), true);
-  assert.deepEqual(events.completed.map((item) => item.step), [8]);
+  assert.deepEqual(events.completed.map((item) => item.step), ['paypal-approve']);
   assert.equal(events.messages.includes('PAYPAL_CLICK_APPROVE'), true);
 });
 
@@ -440,7 +440,7 @@ test('PayPal approve discovers PayPal tabs through the locked automation window 
 
   assert.deepEqual(queries, [{}]);
   assert.deepEqual(events.updatedTabs, [{ tabId: 9, updateInfo: { active: true } }]);
-  assert.deepEqual(events.completed.map((item) => item.step), [8]);
+  assert.deepEqual(events.completed.map((item) => item.step), ['paypal-approve']);
 });
 
 test('PayPal approve auto-detects split email then password pages', async () => {
@@ -464,7 +464,7 @@ test('PayPal approve auto-detects split email then password pages', async () => 
   });
 
   assert.equal(events.submittedPayloads.length, 2);
-  assert.deepEqual(events.completed.map((item) => item.step), [8]);
+  assert.deepEqual(events.completed.map((item) => item.step), ['paypal-approve']);
   assert.equal(events.logs.some(({ message }) => /识别到密码页/.test(message)), true);
   assert.equal(events.messages.includes('PAYPAL_CLICK_APPROVE'), true);
 });
@@ -490,6 +490,6 @@ test('PayPal approve finishes when login redirects away from PayPal', async () =
   });
 
   assert.equal(events.submittedPayloads.length, 1);
-  assert.deepEqual(events.completed.map((item) => item.step), [8]);
+  assert.deepEqual(events.completed.map((item) => item.step), ['paypal-approve']);
   assert.equal(events.messages.includes('PAYPAL_CLICK_APPROVE'), false);
 });

@@ -40,6 +40,7 @@ test('mail rule registry exposes canonical OpenAI verification poll payloads', (
     {
       flowId: 'openai',
       ruleId: 'openai-signup-code',
+      nodeId: 'fetch-signup-code',
       step: 4,
       artifactType: 'code',
       codePatterns: [
@@ -78,6 +79,7 @@ test('mail rule registry exposes canonical OpenAI verification poll payloads', (
     {
       flowId: 'openai',
       ruleId: 'openai-login-code',
+      nodeId: 'fetch-login-code',
       step: 8,
       artifactType: 'code',
       codePatterns: [
@@ -104,6 +106,14 @@ test('mail rule registry exposes canonical OpenAI verification poll payloads', (
       maxAttempts: 5,
       intervalMs: 3000,
     }
+  );
+
+  assert.equal(
+    registry.buildVerificationPollPayloadForNode('fetch-signup-code', {
+      activeFlowId: 'openai',
+      email: 'node@example.com',
+    }).nodeId,
+    'fetch-signup-code'
   );
 });
 

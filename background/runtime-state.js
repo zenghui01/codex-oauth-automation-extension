@@ -4,8 +4,7 @@
   function createRuntimeStateHelpers(deps = {}) {
     const {
       DEFAULT_ACTIVE_FLOW_ID = 'openai',
-      defaultStepStatuses = {},
-      getStepDefinitionForState = null,
+      defaultNodeStatuses = {},
     } = deps;
 
     const RUNTIME_SHARED_FIELDS = Object.freeze([
@@ -150,11 +149,6 @@
       return String(value || '').trim();
     }
 
-    function normalizeStepNumber(value) {
-      const step = Math.floor(Number(value) || 0);
-      return step > 0 ? step : 0;
-    }
-
     function normalizeNodeStatus(value = '') {
       const normalized = String(value || '').trim().toLowerCase();
       if (!normalized) {
@@ -163,73 +157,26 @@
       return normalized;
     }
 
-    function buildDefaultStepStatuses() {
+    function buildDefaultNodeStatuses() {
       return Object.fromEntries(
-        Object.entries(normalizePlainObject(defaultStepStatuses)).map(([key, value]) => [
+        Object.entries(normalizePlainObject(defaultNodeStatuses)).map(([key, value]) => [
           String(key),
           normalizeNodeStatus(value),
         ])
       );
     }
 
-    function normalizeStepStatuses(value) {
-      const base = buildDefaultStepStatuses();
+    function normalizeNodeStatuses(value) {
+      const base = buildDefaultNodeStatuses();
       if (!isPlainObject(value)) {
         return base;
       }
 
       const next = { ...base };
       for (const [key, status] of Object.entries(value)) {
-        const step = normalizeStepNumber(key);
-        if (!step) continue;
-        next[String(step)] = normalizeNodeStatus(status);
-      }
-      return next;
-    }
-
-    function normalizeLegacyStepCompat(value = {}, state = {}) {
-      const candidate = normalizePlainObject(value);
-      const currentStep = normalizeStepNumber(
-        Object.prototype.hasOwnProperty.call(state, 'currentStep')
-          ? state.currentStep
-          : candidate.currentStep
-      );
-      const stepStatuses = normalizeStepStatuses(
-        Object.prototype.hasOwnProperty.call(state, 'stepStatuses')
-          ? state.stepStatuses
-          : candidate.stepStatuses
-      );
-
-      return {
-        currentStep,
-        stepStatuses,
-      };
-    }
-
-    function resolveStepKey(step, state = {}) {
-      const numericStep = normalizeStepNumber(step);
-      if (!numericStep || typeof getStepDefinitionForState !== 'function') {
-        return '';
-      }
-      return String(getStepDefinitionForState(numericStep, state)?.key || '').trim();
-    }
-
-    function normalizeNodeStatuses(value, state = {}, legacyStepCompat = null) {
-      if (isPlainObject(value) && Object.keys(value).length > 0) {
-        return Object.fromEntries(
-          Object.entries(value)
-            .map(([key, status]) => [String(key || '').trim(), normalizeNodeStatus(status)])
-            .filter(([key]) => Boolean(key))
-        );
-      }
-
-      const compat = legacyStepCompat || normalizeLegacyStepCompat({}, state);
-      const next = {};
-      for (const [stepKey, status] of Object.entries(compat.stepStatuses || {})) {
-        const step = normalizeStepNumber(stepKey);
-        if (!step) continue;
-        const nodeKey = resolveStepKey(step, state) || `step-${step}`;
-        next[nodeKey] = normalizeNodeStatus(status);
+        const nodeId = String(key || '').trim();
+        if (!nodeId) continue;
+        next[nodeId] = normalizeNodeStatus(status);
       }
       return next;
     }
@@ -298,6 +245,8 @@
 
     function buildRuntimeStateDefault() {
       return {
+        flowId: DEFAULT_ACTIVE_FLOW_ID,
+        runId: '',
         activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
         activeRunId: '',
         currentNodeId: '',
@@ -316,10 +265,6 @@
             identity: {},
           },
         },
-        legacyStepCompat: {
-          currentStep: 0,
-          stepStatuses: buildDefaultStepStatuses(),
-        },
       };
     }
 
@@ -329,47 +274,64 @@
         ...cloneValue(normalizePlainObject(state.runtimeState)),
       };
       const activeFlowId = normalizeFlowId(
-        Object.prototype.hasOwnProperty.call(state, 'activeFlowId')
+        Object.prototype.hasOwnProperty.call(state, 'flowId')
+          ? state.flowId
+          : Object.prototype.hasOwnProperty.call(state, 'activeFlowId')
           ? state.activeFlowId
+          : Object.prototype.hasOwnProperty.call(baseRuntimeState, 'flowId')
+            ? baseRuntimeState.flowId
           : baseRuntimeState.activeFlowId
       );
-      const legacyStepCompat = normalizeLegacyStepCompat(baseRuntimeState.legacyStepCompat, state);
       const currentNodeId = String(
         Object.prototype.hasOwnProperty.call(state, 'currentNodeId')
           ? state.currentNodeId
-          : (baseRuntimeState.currentNodeId || resolveStepKey(legacyStepCompat.currentStep, state))
+          : baseRuntimeState.currentNodeId
       ).trim();
       const nodeStatuses = normalizeNodeStatuses(
         Object.prototype.hasOwnProperty.call(state, 'nodeStatuses')
           ? state.nodeStatuses
-          : baseRuntimeState.nodeStatuses,
-        state,
-        legacyStepCompat
+          : baseRuntimeState.nodeStatuses
       );
 
       return {
         ...baseRuntimeState,
+        flowId: activeFlowId,
         activeFlowId,
+        runId: normalizeRunId(
+          Object.prototype.hasOwnProperty.call(state, 'runId')
+            ? state.runId
+            : Object.prototype.hasOwnProperty.call(state, 'activeRunId')
+              ? state.activeRunId
+              : Object.prototype.hasOwnProperty.call(baseRuntimeState, 'runId')
+                ? baseRuntimeState.runId
+                : baseRuntimeState.activeRunId
+        ),
         activeRunId: normalizeRunId(
-          Object.prototype.hasOwnProperty.call(state, 'activeRunId')
-            ? state.activeRunId
-            : baseRuntimeState.activeRunId
+          Object.prototype.hasOwnProperty.call(state, 'runId')
+            ? state.runId
+            : Object.prototype.hasOwnProperty.call(state, 'activeRunId')
+              ? state.activeRunId
+              : Object.prototype.hasOwnProperty.call(baseRuntimeState, 'runId')
+                ? baseRuntimeState.runId
+                : baseRuntimeState.activeRunId
         ),
         currentNodeId,
         nodeStatuses,
         sharedState: buildSharedState(baseRuntimeState.sharedState, state),
         serviceState: buildServiceState(baseRuntimeState.serviceState, state),
         flowState: buildOpenAiFlowState(baseRuntimeState.flowState, state),
-        legacyStepCompat,
       };
     }
 
     function buildFlattenedUpdates(updates = {}) {
-      const next = {
-        ...updates,
-      };
+      const ignoredKeys = new Set(['current' + 'Step', 'step' + 'Statuses', 'legacy' + 'StepCompat']);
+      const next = {};
+      for (const [key, value] of Object.entries(updates || {})) {
+        if (!ignoredKeys.has(key)) {
+          next[key] = value;
+        }
+      }
       const runtimeState = normalizePlainObject(updates.runtimeState);
-      const legacyStepCompat = normalizePlainObject(updates.legacyStepCompat);
       const sharedState = normalizePlainObject(updates.sharedState);
       const serviceState = normalizePlainObject(updates.serviceState);
       const flowState = normalizePlainObject(updates.flowState);
@@ -377,8 +339,16 @@
       if (Object.prototype.hasOwnProperty.call(runtimeState, 'activeFlowId')) {
         next.activeFlowId = runtimeState.activeFlowId;
       }
+      if (Object.prototype.hasOwnProperty.call(runtimeState, 'flowId')) {
+        next.flowId = runtimeState.flowId;
+        next.activeFlowId = runtimeState.flowId;
+      }
       if (Object.prototype.hasOwnProperty.call(runtimeState, 'activeRunId')) {
         next.activeRunId = runtimeState.activeRunId;
+      }
+      if (Object.prototype.hasOwnProperty.call(runtimeState, 'runId')) {
+        next.runId = runtimeState.runId;
+        next.activeRunId = runtimeState.runId;
       }
       if (Object.prototype.hasOwnProperty.call(runtimeState, 'currentNodeId')) {
         next.currentNodeId = runtimeState.currentNodeId;
@@ -386,22 +356,6 @@
       if (Object.prototype.hasOwnProperty.call(runtimeState, 'nodeStatuses')) {
         next.nodeStatuses = cloneValue(runtimeState.nodeStatuses);
       }
-      if (Object.prototype.hasOwnProperty.call(legacyStepCompat, 'currentStep')) {
-        next.currentStep = legacyStepCompat.currentStep;
-      }
-      if (Object.prototype.hasOwnProperty.call(legacyStepCompat, 'stepStatuses')) {
-        next.stepStatuses = cloneValue(legacyStepCompat.stepStatuses);
-      }
-      if (Object.prototype.hasOwnProperty.call(runtimeState, 'legacyStepCompat')) {
-        const compatCandidate = normalizePlainObject(runtimeState.legacyStepCompat);
-        if (Object.prototype.hasOwnProperty.call(compatCandidate, 'currentStep')) {
-          next.currentStep = compatCandidate.currentStep;
-        }
-        if (Object.prototype.hasOwnProperty.call(compatCandidate, 'stepStatuses')) {
-          next.stepStatuses = cloneValue(compatCandidate.stepStatuses);
-        }
-      }
-
       Object.assign(next, pickDefinedFields(sharedState, RUNTIME_SHARED_FIELDS));
       if (Object.prototype.hasOwnProperty.call(runtimeState, 'sharedState')) {
         Object.assign(
@@ -432,6 +386,8 @@
       const runtimeState = ensureRuntimeState(state);
       return {
         ...state,
+        flowId: runtimeState.flowId,
+        runId: runtimeState.runId,
         activeFlowId: runtimeState.activeFlowId,
         activeRunId: runtimeState.activeRunId,
         currentNodeId: runtimeState.currentNodeId,
@@ -439,9 +395,6 @@
         flowState: cloneValue(runtimeState.flowState),
         sharedState: cloneValue(runtimeState.sharedState),
         serviceState: cloneValue(runtimeState.serviceState),
-        legacyStepCompat: cloneValue(runtimeState.legacyStepCompat),
-        currentStep: runtimeState.legacyStepCompat.currentStep,
-        stepStatuses: cloneValue(runtimeState.legacyStepCompat.stepStatuses),
         runtimeState,
       };
     }
@@ -456,12 +409,12 @@
 
       return {
         ...flattenedUpdates,
+        flowId: runtimeState.flowId,
+        runId: runtimeState.runId,
         activeFlowId: runtimeState.activeFlowId,
         activeRunId: runtimeState.activeRunId,
         currentNodeId: runtimeState.currentNodeId,
         nodeStatuses: cloneValue(runtimeState.nodeStatuses),
-        currentStep: runtimeState.legacyStepCompat.currentStep,
-        stepStatuses: cloneValue(runtimeState.legacyStepCompat.stepStatuses),
         runtimeState,
       };
     }

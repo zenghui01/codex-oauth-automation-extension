@@ -5,7 +5,7 @@
     const {
       addLog,
       chrome,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       ensureContentScriptReadyOnTab,
       ensureSignupAuthEntryPageReady,
       ensureSignupEntryPageReady,
@@ -152,7 +152,8 @@
 
       try {
         return await sendToContentScriptResilient('signup-page', {
-          type: 'EXECUTE_STEP',
+          type: 'EXECUTE_NODE',
+          nodeId: 'submit-signup-email',
           step: 2,
           source: 'background',
           payload,
@@ -391,7 +392,7 @@
         skipUrlWait: Boolean(step2Result?.alreadyOnPasswordPage),
       });
 
-      await completeStepFromBackground(2, {
+      await completeNodeFromBackground('submit-signup-email', {
         accountIdentifierType: 'phone',
         accountIdentifier: phoneNumber,
         signupPhoneNumber: phoneNumber,
@@ -484,7 +485,7 @@
         skipUrlWait: Boolean(step2Result?.alreadyOnPasswordPage),
       });
 
-      await completeStepFromBackground(2, {
+      await completeNodeFromBackground('submit-signup-email', {
         email: resolvedEmail,
         accountIdentifierType: 'email',
         accountIdentifier: resolvedEmail,

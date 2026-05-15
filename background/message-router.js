@@ -21,17 +21,17 @@
       clearStopRequest,
       closeLocalhostCallbackTabs,
       closeTabsByUrlPrefix,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       deleteHotmailAccount,
       deleteHotmailAccounts,
       deleteIcloudAlias,
       deleteUsedIcloudAliases,
       disableUsedLuckmailPurchases,
-      doesStepUseCompletionSignal,
+      doesNodeUseCompletionSignal,
       ensureMail2925MailboxSession,
       ensureManualInteractionAllowed,
-      executeStep,
-      executeStepViaCompletionSignal,
+      executeNode,
+      executeNodeViaCompletionSignal,
       exportSettingsBundle,
       fetchGeneratedEmail,
       refreshGpcCardBalance,
@@ -47,6 +47,9 @@
       getPendingAutoRunTimerPlan,
       getSourceLabel,
       getState,
+      getNodeDefinitionForState,
+      getNodeIdsForState,
+      getStepIdByNodeIdForState,
       getStepDefinitionForState,
       getStepIdsForState,
       getLastStepIdForState,
@@ -137,8 +140,8 @@
       normalizePayPalAccounts,
       normalizeRunCount,
       AUTO_RUN_TIMER_KIND_SCHEDULED_START,
-      notifyStepComplete,
-      notifyStepError,
+      notifyNodeComplete,
+      notifyNodeError,
       patchMail2925Account,
       patchHotmailAccount,
       pollContributionStatus,
@@ -169,9 +172,9 @@
       setLuckmailPurchaseUsedState,
       setPersistentSettings,
       setState,
-      setStepStatus,
+      setNodeStatus,
       skipAutoRunCountdown,
-      skipStep,
+      skipNode,
       startContributionFlow,
       startAutoRunLoop,
       deleteMail2925Account,
@@ -215,27 +218,92 @@
       }
     }
 
+    const DEFAULT_OPENAI_NODE_BY_STEP = Object.freeze({
+      1: 'open-chatgpt',
+      2: 'submit-signup-email',
+      3: 'fill-password',
+      4: 'fetch-signup-code',
+      5: 'fill-profile',
+      6: 'wait-registration-success',
+      7: 'oauth-login',
+      8: 'fetch-login-code',
+      9: 'confirm-oauth',
+      10: 'platform-verify',
+      11: 'fetch-login-code',
+      12: 'confirm-oauth',
+      13: 'platform-verify',
+    });
+
     function getStepKeyForState(step, state = {}) {
       if (typeof getStepDefinitionForState === 'function') {
         return String(getStepDefinitionForState(step, state)?.key || '').trim();
       }
-      return '';
+      return DEFAULT_OPENAI_NODE_BY_STEP[Number(step)] || '';
     }
 
-    function isStaleAutoRunStepMessage(step, state = {}) {
+    function findStepByNodeId(nodeId, state = {}) {
+      const normalizedNodeId = String(nodeId || '').trim();
+      if (normalizedNodeId && typeof getStepIdByNodeIdForState === 'function') {
+        const step = getStepIdByNodeIdForState(normalizedNodeId, state);
+        if (Number.isInteger(step) && step > 0) {
+          return step;
+        }
+      }
+      if (!normalizedNodeId || typeof getStepIdsForState !== 'function') {
+        return 0;
+      }
+      for (const stepId of getStepIdsForState(state)) {
+        if (getStepKeyForState(stepId, state) === normalizedNodeId) {
+          return Number(stepId) || 0;
+        }
+      }
+      return 0;
+    }
+
+    async function normalizeNodeProtocolMessage(message = {}) {
+      const type = String(message?.type || '').trim();
+      const nodeProtocolTypes = new Set([
+        'EXECUTE_NODE',
+        'NODE_COMPLETE',
+        'NODE_ERROR',
+        'SKIP_NODE',
+      ]);
+      if (!nodeProtocolTypes.has(type)) {
+        return message;
+      }
+
+      const nodeId = String(message?.payload?.nodeId || message?.nodeId || '').trim();
+      if (!nodeId) {
+        throw new Error(`${type} 缺少 nodeId。`);
+      }
+      const state = await getState();
+      const step = findStepByNodeId(nodeId, state);
+      if (!step) {
+        throw new Error(`当前 flow 中未找到节点：${nodeId}`);
+      }
+
+      const payload = {
+        ...(message.payload || {}),
+        nodeId,
+        step,
+      };
+      return { ...message, nodeId, step, payload };
+    }
+
+    function isStaleAutoRunNodeMessage(nodeId, state = {}) {
+      const normalizedNodeId = String(nodeId || '').trim();
+      if (!normalizedNodeId) {
+        return false;
+      }
       if (typeof isAutoRunLockedState !== 'function' || !isAutoRunLockedState(state)) {
         return false;
       }
-      const normalizedStep = Number(step);
-      if (!Number.isInteger(normalizedStep) || normalizedStep <= 0) {
-        return false;
-      }
-      const currentStatus = String(state?.stepStatuses?.[normalizedStep] || '').trim();
+      const currentStatus = String(state?.nodeStatuses?.[normalizedNodeId] || '').trim();
       if (currentStatus === 'running') {
         return false;
       }
-      const currentStep = Number(state?.currentStep) || 0;
-      if (currentStep > 0 && normalizedStep !== currentStep) {
+      const currentNodeId = String(state?.currentNodeId || '').trim();
+      if (currentNodeId && normalizedNodeId !== currentNodeId) {
         return true;
       }
       return ['completed', 'manual_completed', 'skipped', 'failed', 'stopped'].includes(currentStatus);
@@ -383,22 +451,36 @@
         || status === 'skipped';
     }
 
-    function findStepByKeyAfter(currentStep, targetKey, state = {}) {
+    function findStepByKeyAfter(currentOrder, targetKey, state = {}) {
       const activeStepIds = typeof getStepIdsForState === 'function'
         ? getStepIdsForState(state)
         : [];
-      const candidates = activeStepIds.length ? activeStepIds : [Number(currentStep) + 1, 8];
+      const candidates = activeStepIds.length ? activeStepIds : [Number(currentOrder) + 1, 8];
       return candidates.find((stepId) => {
         const numericStep = Number(stepId);
-        if (!Number.isFinite(numericStep) || numericStep <= Number(currentStep)) {
+        if (!Number.isFinite(numericStep) || numericStep <= Number(currentOrder)) {
           return false;
         }
         const stepKey = getStepKeyForState(numericStep, state);
         if (stepKey) {
           return stepKey === targetKey;
         }
-        return targetKey === 'fetch-login-code' && Number(currentStep) === 7 && numericStep === 8;
+        return targetKey === 'fetch-login-code' && Number(currentOrder) === 7 && numericStep === 8;
       }) || null;
+    }
+
+    function getNodeStatusByStep(step, state = {}) {
+      const nodeId = getStepKeyForState(step, state);
+      return nodeId ? (state.nodeStatuses?.[nodeId] || 'pending') : 'pending';
+    }
+
+    async function setNodeStatusByStep(step, status, state = {}) {
+      const nodeId = getStepKeyForState(step, state);
+      if (!nodeId) {
+        throw new Error(`未找到步骤 ${step} 对应节点。`);
+      }
+      await setNodeStatus(nodeId, status);
+      return nodeId;
     }
 
     function normalizePlusPaymentMethodForDisplay(value = '') {
@@ -500,9 +582,9 @@
           const latestState = await getState();
           const loginCodeStep = findStepByKeyAfter(step, 'fetch-login-code', latestState);
           if (loginCodeStep) {
-            const currentStatus = latestState.stepStatuses?.[loginCodeStep];
+            const currentStatus = getNodeStatusByStep(loginCodeStep, latestState);
             if (!isStepProtectedFromAutoSkip(currentStatus)) {
-              await setStepStatus(loginCodeStep, 'skipped');
+              await setNodeStatusByStep(loginCodeStep, 'skipped', latestState);
               await addLog(`认证页已直接进入 OAuth 授权页，已自动跳过步骤 ${loginCodeStep} 的登录验证码。`, 'warn', {
                 step,
                 stepKey: 'oauth-login',
@@ -571,21 +653,21 @@
           await syncStepAccountIdentityFromPayload(payload);
           if (payload.skipRegistrationFlow) {
             const latestState = await getState();
-            for (const skipStep of [3, 4, 5]) {
-              const status = latestState.stepStatuses?.[skipStep];
+            for (const skippedStep of [3, 4, 5]) {
+              const status = getNodeStatusByStep(skippedStep, latestState);
               if (status === 'running' || status === 'completed' || status === 'manual_completed') {
                 continue;
               }
-              await setStepStatus(skipStep, 'skipped');
+              await setNodeStatusByStep(skippedStep, 'skipped', latestState);
             }
             await addLog('步骤 2：检测到当前已登录会话，已自动跳过步骤 3/4/5，流程将直接进入步骤 6。', 'warn');
             break;
           }
           if (payload.skippedPasswordStep) {
             const latestState = await getState();
-            const step3Status = latestState.stepStatuses?.[3];
+            const step3Status = getNodeStatusByStep(3, latestState);
             if (step3Status !== 'running' && step3Status !== 'completed' && step3Status !== 'manual_completed') {
-              await setStepStatus(3, 'skipped');
+              await setNodeStatusByStep(3, 'skipped', latestState);
               const identityLabel = payload.accountIdentifierType === 'phone' ? '手机号' : '邮箱';
               await addLog(`步骤 2：提交${identityLabel}后页面直接进入验证码页，已自动跳过步骤 3。`, 'warn');
             }
@@ -598,9 +680,9 @@
           }
           if (payload.skipProfileStep) {
             const latestState = await getState();
-            const step5Status = latestState.stepStatuses?.[5];
+            const step5Status = getNodeStatusByStep(5, latestState);
             if (step5Status !== 'running' && step5Status !== 'completed' && step5Status !== 'manual_completed') {
-              await setStepStatus(5, 'skipped');
+              await setNodeStatusByStep(5, 'skipped', latestState);
               await addLog('步骤 3：页面已直接进入已登录态，已自动跳过步骤 5。', 'warn');
             }
           }
@@ -621,9 +703,9 @@
           });
           if (payload.skipProfileStep) {
             const latestState = await getState();
-            const step5Status = latestState.stepStatuses?.[5];
+            const step5Status = getNodeStatusByStep(5, latestState);
             if (step5Status !== 'running' && step5Status !== 'completed' && step5Status !== 'manual_completed') {
-              await setStepStatus(5, 'skipped');
+              await setNodeStatusByStep(5, 'skipped', latestState);
               if (payload.skipProfileStepReason === 'combined_verification_profile') {
                 await addLog('步骤 4：当前验证码页已内嵌完成注册资料提交，已自动跳过步骤 5。', 'warn');
               } else {
@@ -664,7 +746,8 @@
       }
     }
 
-    async function handleMessage(message, sender) {
+    async function handleMessage(rawMessage, sender) {
+      const message = await normalizeNodeProtocolMessage(rawMessage);
       switch (message.type) {
         case 'CONTENT_SCRIPT_READY': {
           const tabId = sender.tab?.id;
@@ -690,20 +773,30 @@
           return { ok: true };
         }
 
-        case 'STEP_COMPLETE': {
+        case 'NODE_COMPLETE': {
+          const currentStateForNode = await getState();
+          const nodeId = String(message.nodeId || message.payload?.nodeId || '').trim();
+          const resolvedStep = findStepByNodeId(nodeId, currentStateForNode);
+          if (!nodeId || !resolvedStep) {
+            throw new Error('NODE_COMPLETE 缺少 nodeId。');
+          }
           const currentState = await getState();
-          if (isStaleAutoRunStepMessage(message.step, currentState)) {
-            await addLog(`自动运行：忽略过期的步骤 ${message.step} 完成消息，当前流程已在步骤 ${currentState.currentStep || '未知'}。`, 'warn', { step: message.step });
+          if (isStaleAutoRunNodeMessage(nodeId, currentState)) {
+            await addLog(
+              `自动运行：忽略过期的节点 ${nodeId} 完成消息，当前流程已在节点 ${currentState.currentNodeId || '未知'}。`,
+              'warn',
+              { nodeId }
+            );
             return { ok: true, ignored: true };
           }
           if (getStopRequested()) {
-            await setStepStatus(message.step, 'stopped');
-            await appendManualAccountRunRecordIfNeeded(`step${message.step}_stopped`, null, '流程已被用户停止。');
-            notifyStepError(message.step, '流程已被用户停止。');
+            await setNodeStatus(nodeId, 'stopped');
+            await appendManualAccountRunRecordIfNeeded(`node:${nodeId}:stopped`, null, '流程已被用户停止。');
+            notifyNodeError(nodeId, '流程已被用户停止。');
             return { ok: true };
           }
           try {
-            if (message.step === 3 && typeof finalizeStep3Completion === 'function') {
+            if (nodeId === 'fill-password' && typeof finalizeStep3Completion === 'function') {
               await finalizeStep3Completion(message.payload || {});
             }
           } catch (error) {
@@ -711,60 +804,74 @@
               const userMessage = typeof handleCloudflareSecurityBlocked === 'function'
                 ? await handleCloudflareSecurityBlocked(error)
                 : (error?.message || String(error || ''));
-              notifyStepError(message.step, '流程已被用户停止。');
+              notifyNodeError(nodeId, '流程已被用户停止。');
               return { ok: true, error: userMessage };
             }
             const errorMessage = error?.message || String(error || '步骤 3 提交后确认失败');
-            await setStepStatus(message.step, 'failed');
-            await addLog(`失败：${errorMessage}`, 'error', { step: message.step });
-            await appendManualAccountRunRecordIfNeeded(`step${message.step}_failed`, null, errorMessage);
-            notifyStepError(message.step, errorMessage);
+            await setNodeStatus(nodeId, 'failed');
+            await addLog(`失败：${errorMessage}`, 'error', {
+              nodeId,
+            });
+            await appendManualAccountRunRecordIfNeeded(`node:${nodeId}:failed`, null, errorMessage);
+            notifyNodeError(nodeId, errorMessage);
             return { ok: true, error: errorMessage };
           }
 
           const completionStateCandidate = await getState();
-          const lastStepId = typeof getLastStepIdForState === 'function'
-            ? getLastStepIdForState(completionStateCandidate)
-            : 10;
-          const completionState = message.step === lastStepId ? completionStateCandidate : null;
-          await setStepStatus(message.step, 'completed');
-          await addLog('已完成', 'ok', { step: message.step });
-          await handleStepData(message.step, message.payload);
-          if (message.step === lastStepId && typeof appendAccountRunRecord === 'function') {
+          const nodeIds = typeof getNodeIdsForState === 'function' ? getNodeIdsForState(completionStateCandidate) : [];
+          const lastNodeId = nodeIds[nodeIds.length - 1] || '';
+          const isFinalNode = nodeId === lastNodeId;
+          const completionState = isFinalNode ? completionStateCandidate : null;
+          await setNodeStatus(nodeId, 'completed');
+          await addLog('已完成', 'ok', { nodeId });
+          await handleStepData(resolvedStep, message.payload);
+          if (isFinalNode && typeof appendAccountRunRecord === 'function') {
             await appendAccountRunRecord('success', completionState);
           }
-          notifyStepComplete(message.step, message.payload);
+          notifyNodeComplete(nodeId, message.payload);
           return { ok: true };
         }
 
-        case 'STEP_ERROR': {
+        case 'NODE_ERROR': {
+          const stateForNode = await getState();
+          const nodeId = String(message.nodeId || message.payload?.nodeId || '').trim();
+          const resolvedStep = findStepByNodeId(nodeId, stateForNode);
+          if (!nodeId || !resolvedStep) {
+            throw new Error('NODE_ERROR 缺少 nodeId。');
+          }
           const staleCheckState = await getState();
-          if (isStaleAutoRunStepMessage(message.step, staleCheckState)) {
-            await addLog(`自动运行：忽略过期的步骤 ${message.step} 失败消息，当前流程已在步骤 ${staleCheckState.currentStep || '未知'}。原始错误：${message.error || '未知错误'}`, 'warn', { step: message.step });
+          if (isStaleAutoRunNodeMessage(nodeId, staleCheckState)) {
+            await addLog(
+              `自动运行：忽略过期的节点 ${nodeId} 失败消息，当前流程已在节点 ${staleCheckState.currentNodeId || '未知'}。原始错误：${message.error || '未知错误'}`,
+              'warn',
+              { nodeId }
+            );
             return { ok: true, ignored: true };
           }
           if (typeof isCloudflareSecurityBlockedError === 'function' && isCloudflareSecurityBlockedError(message.error)) {
             const userMessage = typeof handleCloudflareSecurityBlocked === 'function'
               ? await handleCloudflareSecurityBlocked(message.error)
               : (typeof message.error === 'string' ? message.error : String(message.error || ''));
-            notifyStepError(message.step, '流程已被用户停止。');
+            notifyNodeError(nodeId, '流程已被用户停止。');
             return { ok: true, error: userMessage };
           }
           const currentState = await getState();
-          const currentStepStatus = currentState?.stepStatuses?.[message.step] || '';
+          const currentNodeStatus = currentState?.nodeStatuses?.[nodeId] || '';
           const isSignupPhonePasswordMismatch = /SIGNUP_PHONE_PASSWORD_MISMATCH::/i.test(String(message.error || ''));
           if (isStopError(message.error)) {
-            await setStepStatus(message.step, 'stopped');
-            await addLog('已被用户停止', 'warn', { step: message.step });
-            await appendManualAccountRunRecordIfNeeded(`step${message.step}_stopped`, null, message.error);
-            notifyStepError(message.step, message.error);
+            await setNodeStatus(nodeId, 'stopped');
+            await addLog('已被用户停止', 'warn', { nodeId });
+            await appendManualAccountRunRecordIfNeeded(`node:${nodeId}:stopped`, null, message.error);
+            notifyNodeError(nodeId, message.error);
           } else {
-            if (!(isSignupPhonePasswordMismatch && currentStepStatus === 'failed')) {
-              await setStepStatus(message.step, 'failed');
-              await addLog(`失败：${message.error}`, 'error', { step: message.step });
-              await appendManualAccountRunRecordIfNeeded(`step${message.step}_failed`, null, message.error);
+            if (!(isSignupPhonePasswordMismatch && currentNodeStatus === 'failed')) {
+              await setNodeStatus(nodeId, 'failed');
+              await addLog(`失败：${message.error}`, 'error', {
+                nodeId,
+              });
+              await appendManualAccountRunRecordIfNeeded(`node:${nodeId}:failed`, null, message.error);
             }
-            notifyStepError(message.step, message.error);
+            notifyNodeError(nodeId, message.error);
           }
           return { ok: true };
         }
@@ -772,6 +879,7 @@
         case 'RESOLVE_PLUS_MANUAL_CONFIRMATION': {
           const currentState = await getState();
           const step = Number(message.payload?.step) || Number(currentState?.plusManualConfirmationStep) || 0;
+          const confirmationNodeId = getStepKeyForState(step, currentState) || String(currentState?.currentNodeId || '').trim();
           const confirmed = Boolean(message.payload?.confirmed);
           const requestId = String(message.payload?.requestId || '').trim();
           const currentRequestId = String(currentState?.plusManualConfirmationRequestId || '').trim();
@@ -818,7 +926,7 @@
           if (confirmed) {
             const methodLabel = method === 'gopay' ? 'GoPay' : '手动';
             await addLog(`步骤 ${step}：已确认${methodLabel}订阅完成，准备继续下一步。`, 'ok');
-            await completeStepFromBackground(step, {
+            await completeNodeFromBackground(confirmationNodeId, {
               plusManualConfirmationMethod: currentState?.plusManualConfirmationMethod || '',
               plusManualConfirmedAt: Date.now(),
             });
@@ -828,10 +936,14 @@
           const cancelMessage = method === 'gopay'
             ? '已取消 GoPay 订阅确认'
             : (isGpcOtp ? '已取消 GPC OTP 输入' : '已取消当前手动确认');
-          await setStepStatus(step, 'failed');
+          await setNodeStatus(confirmationNodeId, 'failed');
           await addLog(`步骤 ${step}：${cancelMessage}。`, 'warn');
-          await appendManualAccountRunRecordIfNeeded(`step${step}_failed`, null, cancelMessage);
-          notifyStepError(step, cancelMessage);
+          await appendManualAccountRunRecordIfNeeded(
+            confirmationNodeId ? `node:${confirmationNodeId}:failed` : 'failed',
+            null,
+            cancelMessage
+          );
+          notifyNodeError(confirmationNodeId, cancelMessage);
           return { ok: true };
         }
 
@@ -864,7 +976,7 @@
         case 'SET_CONTRIBUTION_MODE': {
           const enabled = Boolean(message.payload?.enabled);
           const state = await ensureManualInteractionAllowed(enabled ? '进入贡献模式' : '退出贡献模式');
-          if (Object.values(state.stepStatuses || {}).some((status) => status === 'running')) {
+          if (Object.values(state.nodeStatuses || {}).some((status) => status === 'running')) {
             throw new Error(enabled ? '当前有步骤正在执行，无法进入贡献模式。' : '当前有步骤正在执行，无法退出贡献模式。');
           }
           if (typeof setContributionMode !== 'function') {
@@ -878,7 +990,7 @@
 
         case 'START_CONTRIBUTION_FLOW': {
           const state = await ensureManualInteractionAllowed('开始贡献');
-          if (Object.values(state.stepStatuses || {}).some((status) => status === 'running')) {
+          if (Object.values(state.nodeStatuses || {}).some((status) => status === 'running')) {
             throw new Error('当前有步骤正在执行，无法开始贡献流程。');
           }
           if (typeof startContributionFlow !== 'function') {
@@ -950,18 +1062,23 @@
           return { ok: true, ...result };
         }
 
-        case 'EXECUTE_STEP': {
+        case 'EXECUTE_NODE': {
           clearStopRequest();
+          const requestState = await getState();
+          const nodeId = String(message.nodeId || message.payload?.nodeId || '').trim();
+          const resolvedStep = findStepByNodeId(nodeId, requestState);
+          if (!nodeId || !resolvedStep) {
+            throw new Error('EXECUTE_NODE 缺少 nodeId。');
+          }
           if (message.source === 'sidepanel') {
             await lockAutomationWindowFromMessage(message, sender);
-            await ensureManualInteractionAllowed('手动执行步骤');
-          }
-          const step = message.payload.step;
-          if (message.source === 'sidepanel') {
-            await ensureManualStepPrerequisites(step);
+            await ensureManualInteractionAllowed('手动执行节点');
           }
           if (message.source === 'sidepanel') {
-            await invalidateDownstreamAfterStepRestart(step, { logLabel: `步骤 ${step} 重新执行` });
+            await ensureManualStepPrerequisites(resolvedStep);
+          }
+          if (message.source === 'sidepanel') {
+            await invalidateDownstreamAfterStepRestart(resolvedStep, { logLabel: `节点 ${nodeId} 重新执行` });
           }
           if (message.payload.email) {
             await setEmailState(message.payload.email);
@@ -971,10 +1088,10 @@
             await setState({ emailPrefix: message.payload.emailPrefix });
           }
           const executionState = await getState();
-          if (doesStepUseCompletionSignal(step, executionState)) {
-            await executeStepViaCompletionSignal(step);
+          if (doesNodeUseCompletionSignal(nodeId, executionState)) {
+            await executeNodeViaCompletionSignal(nodeId);
           } else {
-            await executeStep(step);
+            await executeNode(nodeId);
           }
           return { ok: true };
         }
@@ -1094,9 +1211,12 @@
           return { ok: true };
         }
 
-        case 'SKIP_STEP': {
-          const step = Number(message.payload?.step);
-          return await skipStep(step);
+        case 'SKIP_NODE': {
+          const nodeId = String(message.nodeId || message.payload?.nodeId || '').trim();
+          if (!nodeId) {
+            throw new Error('SKIP_NODE 缺少 nodeId。');
+          }
+          return await skipNode(nodeId);
         }
 
         case 'SAVE_SETTING': {
@@ -1156,10 +1276,11 @@
           }
           if (stepModeChanged && typeof getStepIdsForState === 'function') {
             const nextStateForSteps = { ...currentState, ...stateUpdates };
-            stateUpdates.stepStatuses = Object.fromEntries(
-              getStepIdsForState(nextStateForSteps).map((stepId) => [stepId, 'pending'])
-            );
-            stateUpdates.currentStep = 0;
+            const nextNodeIds = typeof getNodeIdsForState === 'function'
+              ? getNodeIdsForState(nextStateForSteps)
+              : getStepIdsForState(nextStateForSteps).map((stepId) => getStepKeyForState(stepId, nextStateForSteps)).filter(Boolean);
+            stateUpdates.nodeStatuses = Object.fromEntries(nextNodeIds.map((nodeId) => [nodeId, 'pending']));
+            stateUpdates.currentNodeId = '';
           }
           await setState(stateUpdates);
           const mergedState = await getState();

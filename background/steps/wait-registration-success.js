@@ -99,7 +99,7 @@
     const {
       addLog = async () => {},
       chrome: chromeApi = globalThis.chrome,
-      completeStepFromBackground,
+      completeNodeFromBackground,
       getErrorMessage = (error) => error?.message || String(error || '未知错误'),
       registrationSuccessWaitMs = DEFAULT_REGISTRATION_SUCCESS_WAIT_MS,
       sleepWithStop = async (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0))),
@@ -149,7 +149,7 @@
       }
       await clearCookiesIfEnabled(state);
       await addLog('步骤 6：注册成功等待完成，准备继续获取 OAuth 链接并登录。', 'ok');
-      await completeStepFromBackground(6);
+      await completeNodeFromBackground('wait-registration-success');
     }
 
     return { executeStep6 };

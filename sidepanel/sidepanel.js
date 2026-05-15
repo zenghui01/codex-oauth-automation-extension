@@ -543,9 +543,16 @@ let stepDefinitions = getStepDefinitionsForMode(false, {
   plusPaymentMethod: currentPlusPaymentMethod,
   signupMethod: currentSignupMethod,
 });
+let workflowNodes = getWorkflowNodesForMode(false, {
+  plusPaymentMethod: currentPlusPaymentMethod,
+  signupMethod: currentSignupMethod,
+});
 let STEP_IDS = stepDefinitions.map((step) => Number(step.id)).filter(Number.isFinite);
 let STEP_DEFAULT_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
 let SKIPPABLE_STEPS = new Set(STEP_IDS);
+let NODE_IDS = workflowNodes.map((node) => String(node.nodeId || '').trim()).filter(Boolean);
+let NODE_DEFAULT_STATUSES = Object.fromEntries(NODE_IDS.map((nodeId) => [nodeId, 'pending']));
+let SKIPPABLE_NODES = new Set(NODE_IDS);
 const AUTO_DELAY_MIN_MINUTES = 1;
 const AUTO_DELAY_MAX_MINUTES = 1440;
 const AUTO_DELAY_DEFAULT_MINUTES = 30;
@@ -816,6 +823,42 @@ function getStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
     });
 }
 
+function getWorkflowNodesForMode(plusModeEnabled = false, options = {}) {
+  const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID !== 'undefined' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
+  const defaultMethod = typeof DEFAULT_PLUS_PAYMENT_METHOD !== 'undefined' ? DEFAULT_PLUS_PAYMENT_METHOD : 'paypal';
+  const rawPaymentMethod = typeof options === 'string'
+    ? options
+    : (options.plusPaymentMethod || currentPlusPaymentMethod || defaultMethod);
+  const rawSignupMethod = typeof options === 'string'
+    ? currentSignupMethod
+    : (options.signupMethod || currentSignupMethod || DEFAULT_SIGNUP_METHOD);
+  const activeFlowId = typeof options === 'string'
+    ? ((typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId)
+    : (options.activeFlowId || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId);
+  const nodes = window.MultiPageStepDefinitions?.getNodes?.({
+    activeFlowId: String(activeFlowId || '').trim().toLowerCase() || defaultFlowId,
+    plusModeEnabled,
+    plusPaymentMethod: normalizePlusPaymentMethod(rawPaymentMethod),
+    signupMethod: normalizeSignupMethod(rawSignupMethod),
+  });
+  if (Array.isArray(nodes) && nodes.length) {
+    return nodes.slice().sort((left, right) => {
+      const leftOrder = Number.isFinite(Number(left.displayOrder)) ? Number(left.displayOrder) : Number(left.legacyStepId);
+      const rightOrder = Number.isFinite(Number(right.displayOrder)) ? Number(right.displayOrder) : Number(right.legacyStepId);
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return String(left.nodeId || '').localeCompare(String(right.nodeId || ''));
+    });
+  }
+
+  return getStepDefinitionsForMode(plusModeEnabled, options).map((step) => ({
+    legacyStepId: Number(step.id),
+    nodeId: String(step.key || '').trim(),
+    title: step.title,
+    displayOrder: Number.isFinite(Number(step.order)) ? Number(step.order) : Number(step.id),
+    executeKey: String(step.key || '').trim(),
+  })).filter((node) => node.nodeId);
+}
+
 function getStepIdByKeyForCurrentMode(stepKey = '') {
   const normalizedKey = String(stepKey || '').trim();
   if (!normalizedKey) {
@@ -823,6 +866,29 @@ function getStepIdByKeyForCurrentMode(stepKey = '') {
   }
   const match = (stepDefinitions || []).find((step) => String(step?.key || '') === normalizedKey);
   return Number(match?.id) || 0;
+}
+
+function getNodeIdByStepForCurrentMode(step) {
+  const numericStep = Number(step);
+  const node = (workflowNodes || []).find((candidate) => Number(candidate?.legacyStepId) === numericStep);
+  if (node?.nodeId) {
+    return String(node.nodeId).trim();
+  }
+  const definition = (stepDefinitions || []).find((candidate) => Number(candidate?.id) === numericStep);
+  return String(definition?.key || '').trim();
+}
+
+function getStepIdByNodeIdForCurrentMode(nodeId = '') {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) {
+    return 0;
+  }
+  const node = (workflowNodes || []).find((candidate) => String(candidate?.nodeId || '').trim() === normalizedNodeId);
+  const legacyStepId = Number(node?.legacyStepId);
+  if (Number.isInteger(legacyStepId) && legacyStepId > 0) {
+    return legacyStepId;
+  }
+  return getStepIdByKeyForCurrentMode(normalizedNodeId);
 }
 
 function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
@@ -841,9 +907,33 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
     plusPaymentMethod: currentPlusPaymentMethod,
     signupMethod: currentSignupMethod,
   });
+  const nextWorkflowNodes = typeof getWorkflowNodesForMode === 'function'
+    ? getWorkflowNodesForMode(currentPlusModeEnabled, {
+      activeFlowId: options?.activeFlowId,
+      plusPaymentMethod: currentPlusPaymentMethod,
+      signupMethod: currentSignupMethod,
+    })
+    : stepDefinitions.map((step) => ({
+      legacyStepId: Number(step.id),
+      nodeId: String(step.key || step.id || '').trim(),
+      title: step.title,
+      displayOrder: Number.isFinite(Number(step.order)) ? Number(step.order) : Number(step.id),
+    }));
+  if (typeof workflowNodes !== 'undefined') {
+    workflowNodes = nextWorkflowNodes;
+  }
   STEP_IDS = stepDefinitions.map((step) => Number(step.id)).filter(Number.isFinite);
   STEP_DEFAULT_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
   SKIPPABLE_STEPS = new Set(STEP_IDS);
+  if (typeof NODE_IDS !== 'undefined') {
+    NODE_IDS = nextWorkflowNodes.map((node) => String(node.nodeId || '').trim()).filter(Boolean);
+  }
+  if (typeof NODE_DEFAULT_STATUSES !== 'undefined') {
+    NODE_DEFAULT_STATUSES = Object.fromEntries((typeof NODE_IDS !== 'undefined' ? NODE_IDS : []).map((nodeId) => [nodeId, 'pending']));
+  }
+  if (typeof SKIPPABLE_NODES !== 'undefined') {
+    SKIPPABLE_NODES = new Set(typeof NODE_IDS !== 'undefined' ? NODE_IDS : []);
+  }
 }
 const CONTRIBUTION_CONTENT_PROMPT_DISMISSED_VERSION_STORAGE_KEY = 'multipage-contribution-content-prompt-dismissed-version';
 const AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS = 3;
@@ -1189,7 +1279,7 @@ function shouldAttachAutomationWindow(message = {}) {
     return false;
   }
   return [
-    'EXECUTE_STEP',
+    'EXECUTE_NODE',
     'AUTO_RUN',
     'SCHEDULE_AUTO_RUN',
     'RESUME_AUTO_RUN',
@@ -2111,31 +2201,64 @@ function isDoneStatus(status) {
   return status === 'completed' || status === 'manual_completed' || status === 'skipped';
 }
 
+function escapeCssValue(value = '') {
+  const raw = String(value || '');
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(raw);
+  }
+  return raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function getNodeStatuses(state = latestState) {
+  const merged = { ...NODE_DEFAULT_STATUSES, ...(state?.nodeStatuses || {}) };
+  return Object.fromEntries(NODE_IDS.map((nodeId) => [nodeId, merged[nodeId] || 'pending']));
+}
+
 function getStepStatuses(state = latestState) {
-  const merged = { ...STEP_DEFAULT_STATUSES, ...(state?.stepStatuses || {}) };
+  const merged = { ...STEP_DEFAULT_STATUSES };
+  if (typeof getNodeStatuses === 'function') {
+    const nodeStatuses = getNodeStatuses(state);
+    for (const [nodeId, status] of Object.entries(nodeStatuses)) {
+      const step = getStepIdByNodeIdForCurrentMode(nodeId);
+      if (step) {
+        merged[step] = status || 'pending';
+      }
+    }
+  }
   return Object.fromEntries(STEP_IDS.map((stepId) => [stepId, merged[stepId] || 'pending']));
 }
 
-function getFirstUnfinishedStep(state = latestState) {
-  const statuses = getStepStatuses(state);
-  for (const step of STEP_IDS) {
-    if (!isDoneStatus(statuses[step])) {
-      return step;
+function getFirstUnfinishedNode(state = latestState) {
+  const statuses = getNodeStatuses(state);
+  for (const nodeId of NODE_IDS) {
+    if (!isDoneStatus(statuses[nodeId])) {
+      return nodeId;
     }
   }
-  return null;
+  return '';
+}
+
+function getFirstUnfinishedStep(state = latestState) {
+  const nodeId = getFirstUnfinishedNode(state);
+  return nodeId ? getStepIdByNodeIdForCurrentMode(nodeId) : null;
+}
+
+function getRunningNodes(state = latestState) {
+  const statuses = getNodeStatuses(state);
+  return Object.entries(statuses)
+    .filter(([, status]) => status === 'running')
+    .map(([nodeId]) => nodeId);
 }
 
 function getRunningSteps(state = latestState) {
-  const statuses = getStepStatuses(state);
-  return Object.entries(statuses)
-    .filter(([, status]) => status === 'running')
-    .map(([step]) => Number(step))
+  return getRunningNodes(state)
+    .map((nodeId) => getStepIdByNodeIdForCurrentMode(nodeId))
+    .filter((step) => Number.isInteger(step) && step > 0)
     .sort((a, b) => a - b);
 }
 
 function hasSavedProgress(state = latestState) {
-  const statuses = getStepStatuses(state);
+  const statuses = getNodeStatuses(state);
   return Object.values(statuses).some((status) => status !== 'pending');
 }
 
@@ -2150,14 +2273,14 @@ function shouldOfferAutoModeChoice(state = latestState) {
 }
 
 function syncLatestState(nextState) {
-  const mergedStepStatuses = nextState?.stepStatuses
-    ? { ...STEP_DEFAULT_STATUSES, ...(latestState?.stepStatuses || {}), ...nextState.stepStatuses }
-    : getStepStatuses(latestState);
+  const mergedNodeStatuses = nextState?.nodeStatuses
+    ? { ...NODE_DEFAULT_STATUSES, ...(latestState?.nodeStatuses || {}), ...nextState.nodeStatuses }
+    : getNodeStatuses(latestState);
 
   latestState = {
     ...(latestState || {}),
     ...(nextState || {}),
-    stepStatuses: mergedStepStatuses,
+    nodeStatuses: mergedNodeStatuses,
   };
 
   renderAccountRecords(latestState);
@@ -3360,8 +3483,20 @@ function collectSettingsPayload() {
   const currentPhoneSmsMaxPriceValue = typeof inputHeroSmsMaxPrice !== 'undefined' && inputHeroSmsMaxPrice
     ? normalizePhoneSmsMaxPriceValue(inputHeroSmsMaxPrice.value, phoneSmsProviderValue)
     : '';
+  const normalizePhoneSmsMinPriceValueSafe = typeof normalizePhoneSmsMinPriceValue === 'function'
+    ? normalizePhoneSmsMinPriceValue
+    : ((value = '', provider = phoneSmsProviderValue) => {
+      const normalizedProvider = normalizePhoneSmsProvider(provider);
+      if (normalizedProvider === PHONE_SMS_PROVIDER_FIVE_SIM && typeof normalizeFiveSimMaxPriceValue === 'function') {
+        return normalizeFiveSimMaxPriceValue(value);
+      }
+      if (typeof normalizeHeroSmsMaxPriceValue === 'function') {
+        return normalizeHeroSmsMaxPriceValue(value);
+      }
+      return String(value || '').trim();
+    });
   const currentPhoneSmsMinPriceValue = typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice
-    ? normalizePhoneSmsMinPriceValue(inputHeroSmsMinPrice.value, phoneSmsProviderValue)
+    ? normalizePhoneSmsMinPriceValueSafe(inputHeroSmsMinPrice.value, phoneSmsProviderValue)
     : '';
   const heroSmsMaxPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_HERO_SMS
     ? currentPhoneSmsMaxPriceValue
@@ -3370,11 +3505,11 @@ function collectSettingsPayload() {
     ? currentPhoneSmsMaxPriceValue
     : normalizeFiveSimMaxPriceValue(latestState?.fiveSimMaxPrice || '');
   const heroSmsMinPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
-    ? normalizePhoneSmsMinPriceValue(latestState?.heroSmsMinPrice || '', PHONE_SMS_PROVIDER_HERO_SMS)
+    ? normalizePhoneSmsMinPriceValueSafe(latestState?.heroSmsMinPrice || '', PHONE_SMS_PROVIDER_HERO_SMS)
     : currentPhoneSmsMinPriceValue;
   const fiveSimMinPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
     ? currentPhoneSmsMinPriceValue
-    : normalizePhoneSmsMinPriceValue(latestState?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
+    : normalizePhoneSmsMinPriceValueSafe(latestState?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
   const defaultFiveSimProduct = typeof DEFAULT_FIVE_SIM_PRODUCT !== 'undefined'
     ? DEFAULT_FIVE_SIM_PRODUCT
     : 'openai';
@@ -8623,6 +8758,7 @@ function initializeManualStepActions() {
       return;
     }
     const step = Number(row.dataset.step);
+    const nodeId = String(row.dataset.nodeId || getNodeIdByStepForCurrentMode(step) || '').trim();
     const statusEl = row.querySelector('.step-status');
     if (!statusEl) return;
 
@@ -8633,13 +8769,14 @@ function initializeManualStepActions() {
     manualBtn.type = 'button';
     manualBtn.className = 'step-manual-btn';
     manualBtn.dataset.step = String(step);
-    manualBtn.title = '跳过此步';
-    manualBtn.setAttribute('aria-label', `跳过步骤 ${step}`);
+    manualBtn.dataset.nodeId = nodeId;
+    manualBtn.title = '跳过此节点';
+    manualBtn.setAttribute('aria-label', `跳过节点 ${nodeId || step}`);
     manualBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>';
     manualBtn.addEventListener('click', async (event) => {
       event.stopPropagation();
       try {
-        await handleSkipStep(step);
+        await handleSkipNode(nodeId || getNodeIdByStepForCurrentMode(step));
       } catch (err) {
         showToast(err.message, 'error');
       }
@@ -8654,16 +8791,20 @@ function initializeManualStepActions() {
 function renderStepsList() {
   if (!stepsList) return;
 
-  stepsList.innerHTML = stepDefinitions.map((step) => `
-    <div class="step-row" data-step="${step.id}" data-step-key="${escapeHtml(step.key)}">
-      <div class="step-indicator" data-step="${step.id}"><span class="step-num">${step.id}</span></div>
-      <button class="step-btn" data-step="${step.id}" data-step-key="${escapeHtml(step.key)}">${escapeHtml(step.title)}</button>
-      <span class="step-status" data-step="${step.id}"></span>
+  stepsList.innerHTML = workflowNodes.map((node) => {
+    const step = getStepIdByNodeIdForCurrentMode(node.nodeId);
+    const nodeId = String(node.nodeId || '').trim();
+    return `
+    <div class="step-row" data-step="${step}" data-node-id="${escapeHtml(nodeId)}" data-step-key="${escapeHtml(node.executeKey || nodeId)}">
+      <div class="step-indicator" data-step="${step}" data-node-id="${escapeHtml(nodeId)}"><span class="step-num">${step || node.displayOrder || ''}</span></div>
+      <button class="step-btn" data-step="${step}" data-node-id="${escapeHtml(nodeId)}" data-step-key="${escapeHtml(node.executeKey || nodeId)}">${escapeHtml(node.title)}</button>
+      <span class="step-status" data-step="${step}" data-node-id="${escapeHtml(nodeId)}"></span>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   if (stepsProgress) {
-    stepsProgress.textContent = `0 / ${STEP_IDS.length}`;
+    stepsProgress.textContent = `0 / ${NODE_IDS.length}`;
   }
 
   initializeManualStepActions();
@@ -8728,6 +8869,7 @@ function applySettingsState(state) {
         signupMethod: normalizeSignupMethod(state?.signupMethod || DEFAULT_SIGNUP_METHOD),
       };
     syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
+      activeFlowId: state?.flowId || state?.activeFlowId,
       plusPaymentMethod: state?.plusPaymentMethod,
       signupMethod: stepDefinitionState.signupMethod,
     });
@@ -9282,9 +9424,9 @@ async function restoreState() {
       displayLocalhostUrl.textContent = state.localhostUrl;
       displayLocalhostUrl.classList.add('has-value');
     }
-    if (state.stepStatuses) {
-      for (const [step, status] of Object.entries(state.stepStatuses)) {
-        updateStepUI(Number(step), status);
+    if (state.nodeStatuses) {
+      for (const [nodeId, status] of Object.entries(state.nodeStatuses)) {
+        updateNodeUI(nodeId, status);
       }
     }
 
@@ -10911,21 +11053,54 @@ function updatePanelModeUI() {
 // UI Updates
 // ============================================================
 
-function updateStepUI(step, status) {
+function updateNodeUI(nodeId, status) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) return;
   syncLatestState({
-    stepStatuses: {
-      ...getStepStatuses(),
-      [step]: status,
+    nodeStatuses: {
+      ...getNodeStatuses(),
+      [normalizedNodeId]: status,
     },
   });
 
-  renderSingleStepStatus(step, status);
+  renderSingleNodeStatus(normalizedNodeId, status);
   updateButtonStates();
   updateProgressCounter();
   updateConfigMenuControls();
 }
 
+function updateStepUI(step, status) {
+  const nodeId = getNodeIdByStepForCurrentMode(step);
+  if (nodeId) {
+    updateNodeUI(nodeId, status);
+    return;
+  }
+  updateButtonStates();
+  updateProgressCounter();
+  updateConfigMenuControls();
+}
+
+function renderSingleNodeStatus(nodeId, status) {
+  const normalizedStatus = status || 'pending';
+  const normalizedNodeId = String(nodeId || '').trim();
+  const selectorNodeId = escapeCssValue(normalizedNodeId);
+  const statusEl = document.querySelector(`.step-status[data-node-id="${selectorNodeId}"]`);
+  const row = document.querySelector(`.step-row[data-node-id="${selectorNodeId}"]`);
+
+  if (statusEl) statusEl.textContent = STATUS_ICONS[normalizedStatus] || '';
+  if (row) {
+    row.className = `step-row ${normalizedStatus}`;
+  }
+}
+
 function renderSingleStepStatus(step, status) {
+  const nodeId = typeof getNodeIdByStepForCurrentMode === 'function'
+    ? getNodeIdByStepForCurrentMode(step)
+    : '';
+  if (nodeId && typeof renderSingleNodeStatus === 'function') {
+    renderSingleNodeStatus(nodeId, status);
+    return;
+  }
   const normalizedStatus = status || 'pending';
   const statusEl = document.querySelector(`.step-status[data-step="${step}"]`);
   const row = document.querySelector(`.step-row[data-step="${step}"]`);
@@ -10937,20 +11112,32 @@ function renderSingleStepStatus(step, status) {
 }
 
 function renderStepStatuses(state = latestState) {
-  const statuses = getStepStatuses(state);
-  for (const step of STEP_IDS) {
-    renderSingleStepStatus(step, statuses[step]);
+  if (typeof getNodeStatuses === 'function' && typeof NODE_IDS !== 'undefined') {
+    const statuses = getNodeStatuses(state);
+    for (const nodeId of NODE_IDS) {
+      renderSingleNodeStatus(nodeId, statuses[nodeId]);
+    }
+  } else {
+    const statuses = getStepStatuses(state);
+    for (const step of STEP_IDS) {
+      renderSingleStepStatus(step, statuses[step]);
+    }
   }
   updateProgressCounter();
 }
 
 function updateProgressCounter() {
+  if (typeof getNodeStatuses === 'function' && typeof NODE_IDS !== 'undefined') {
+    const completed = Object.values(getNodeStatuses()).filter(isDoneStatus).length;
+    stepsProgress.textContent = `${completed} / ${NODE_IDS.length}`;
+    return;
+  }
   const completed = Object.values(getStepStatuses()).filter(isDoneStatus).length;
   stepsProgress.textContent = `${completed} / ${STEP_IDS.length}`;
 }
 
 function updateButtonStates() {
-  const statuses = getStepStatuses();
+  const statuses = getNodeStatuses();
   const anyRunning = Object.values(statuses).some(s => s === 'running');
   const autoLocked = isAutoRunLockedPhase();
   const autoScheduled = isAutoRunScheduledPhase();
@@ -10958,47 +11145,49 @@ function updateButtonStates() {
     ? selectIcloudTargetMailboxType?.value
     : latestState?.icloudTargetMailboxType;
 
-  for (const step of STEP_IDS) {
-    const btn = document.querySelector(`.step-btn[data-step="${step}"]`);
+  for (const nodeId of NODE_IDS) {
+    const step = getStepIdByNodeIdForCurrentMode(nodeId);
+    const btn = document.querySelector(`.step-btn[data-node-id="${escapeCssValue(nodeId)}"]`);
     if (!btn) continue;
 
     if (anyRunning || autoLocked || autoScheduled) {
       btn.disabled = true;
-    } else if (step === 1) {
+    } else if (NODE_IDS.indexOf(nodeId) === 0) {
       btn.disabled = false;
     } else {
-      const currentIndex = STEP_IDS.indexOf(step);
-      const prevStep = currentIndex > 0 ? STEP_IDS[currentIndex - 1] : null;
-      const prevStatus = prevStep === null ? 'completed' : statuses[prevStep];
-      const currentStatus = statuses[step];
+      const currentIndex = NODE_IDS.indexOf(nodeId);
+      const prevNodeId = currentIndex > 0 ? NODE_IDS[currentIndex - 1] : null;
+      const prevStatus = prevNodeId === null ? 'completed' : statuses[prevNodeId];
+      const currentStatus = statuses[nodeId];
       btn.disabled = !(isDoneStatus(prevStatus) || currentStatus === 'failed' || isDoneStatus(currentStatus) || currentStatus === 'stopped');
     }
   }
 
   document.querySelectorAll('.step-manual-btn').forEach((btn) => {
     const step = Number(btn.dataset.step);
-    const currentStatus = statuses[step];
-    const currentIndex = STEP_IDS.indexOf(step);
-    const prevStep = currentIndex > 0 ? STEP_IDS[currentIndex - 1] : null;
-    const prevStatus = prevStep === null ? 'completed' : statuses[prevStep];
+    const nodeId = String(btn.dataset.nodeId || getNodeIdByStepForCurrentMode(step) || '').trim();
+    const currentStatus = statuses[nodeId];
+    const currentIndex = NODE_IDS.indexOf(nodeId);
+    const prevNodeId = currentIndex > 0 ? NODE_IDS[currentIndex - 1] : null;
+    const prevStatus = prevNodeId === null ? 'completed' : statuses[prevNodeId];
 
-    if (!SKIPPABLE_STEPS.has(step) || anyRunning || autoLocked || autoScheduled || currentStatus === 'running' || isDoneStatus(currentStatus)) {
+    if (!SKIPPABLE_NODES.has(nodeId) || anyRunning || autoLocked || autoScheduled || currentStatus === 'running' || isDoneStatus(currentStatus)) {
       btn.style.display = 'none';
       btn.disabled = true;
       btn.title = '当前不可跳过';
       return;
     }
 
-    if (prevStep !== null && !isDoneStatus(prevStatus)) {
+    if (prevNodeId !== null && !isDoneStatus(prevStatus)) {
       btn.style.display = 'none';
       btn.disabled = true;
-      btn.title = `请先完成步骤 ${prevStep}`;
+      btn.title = `请先完成节点 ${prevNodeId}`;
       return;
     }
 
     btn.style.display = '';
     btn.disabled = false;
-    btn.title = `跳过步骤 ${step}`;
+    btn.title = `跳过节点 ${nodeId}`;
   });
 
   btnReset.disabled = anyRunning || autoScheduled || isAutoRunPausedPhase() || autoLocked;
@@ -11032,9 +11221,10 @@ function updateStopButtonState(active) {
 }
 
 function updateStatusDisplay(state) {
-  if (!state || !state.stepStatuses) return;
+  if (!state || !state.nodeStatuses) return;
 
   statusBar.className = 'status-bar';
+  const nodeStatuses = getNodeStatuses(state);
 
   const countdown = getActiveAutoRunCountdown();
   if (countdown) {
@@ -11064,17 +11254,17 @@ function updateStatusDisplay(state) {
   }
 
   if (isAutoRunWaitingStepPhase()) {
-    const runningSteps = getRunningSteps(state);
-    displayStatus.textContent = runningSteps.length
-      ? `自动等待步骤 ${runningSteps.join(', ')} 完成后继续${getAutoRunLabel()}`
+    const runningNodes = getRunningNodes(state);
+    displayStatus.textContent = runningNodes.length
+      ? `自动等待节点 ${runningNodes.join(', ')} 完成后继续${getAutoRunLabel()}`
       : `自动正在按最新进度准备继续${getAutoRunLabel()}`;
     statusBar.classList.add('running');
     return;
   }
 
-  const running = Object.entries(state.stepStatuses).find(([, s]) => s === 'running');
+  const running = Object.entries(nodeStatuses).find(([, s]) => s === 'running');
   if (running) {
-    displayStatus.textContent = `步骤 ${running[0]} 运行中...`;
+    displayStatus.textContent = `节点 ${running[0]} 运行中...`;
     statusBar.classList.add('running');
     return;
   }
@@ -11085,32 +11275,32 @@ function updateStatusDisplay(state) {
     return;
   }
 
-  const failed = Object.entries(state.stepStatuses).find(([, s]) => s === 'failed');
+  const failed = Object.entries(nodeStatuses).find(([, s]) => s === 'failed');
   if (failed) {
-    displayStatus.textContent = `步骤 ${failed[0]} 失败`;
+    displayStatus.textContent = `节点 ${failed[0]} 失败`;
     statusBar.classList.add('failed');
     return;
   }
 
-  const stopped = Object.entries(state.stepStatuses).find(([, s]) => s === 'stopped');
+  const stopped = Object.entries(nodeStatuses).find(([, s]) => s === 'stopped');
   if (stopped) {
-    displayStatus.textContent = `步骤 ${stopped[0]} 已停止`;
+    displayStatus.textContent = `节点 ${stopped[0]} 已停止`;
     statusBar.classList.add('stopped');
     return;
   }
 
-  const lastCompleted = Object.entries(state.stepStatuses)
+  const lastCompleted = Object.entries(nodeStatuses)
     .filter(([, s]) => isDoneStatus(s))
-    .map(([k]) => Number(k))
-    .sort((a, b) => b - a)[0];
+    .map(([nodeId]) => nodeId)
+    .sort((left, right) => NODE_IDS.indexOf(right) - NODE_IDS.indexOf(left))[0];
 
-  if (lastCompleted === STEP_IDS[STEP_IDS.length - 1]) {
-    displayStatus.textContent = (state.stepStatuses[lastCompleted] === 'manual_completed' || state.stepStatuses[lastCompleted] === 'skipped') ? '全部步骤已跳过/完成' : '全部步骤已完成';
+  if (lastCompleted === NODE_IDS[NODE_IDS.length - 1]) {
+    displayStatus.textContent = (nodeStatuses[lastCompleted] === 'manual_completed' || nodeStatuses[lastCompleted] === 'skipped') ? '全部节点已跳过/完成' : '全部节点已完成';
     statusBar.classList.add('completed');
   } else if (lastCompleted) {
-    displayStatus.textContent = (state.stepStatuses[lastCompleted] === 'manual_completed' || state.stepStatuses[lastCompleted] === 'skipped')
-      ? `步骤 ${lastCompleted} 已跳过`
-      : `步骤 ${lastCompleted} 已完成`;
+    displayStatus.textContent = (nodeStatuses[lastCompleted] === 'manual_completed' || nodeStatuses[lastCompleted] === 'skipped')
+      ? `节点 ${lastCompleted} 已跳过`
+      : `节点 ${lastCompleted} 已完成`;
   } else {
     displayStatus.textContent = '就绪';
   }
@@ -11842,7 +12032,11 @@ async function maybeTakeoverAutoRun(actionLabel) {
   return true;
 }
 
-async function handleSkipStep(step) {
+async function handleSkipNode(nodeId) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) {
+    throw new Error('缺少要跳过的节点。');
+  }
   if (isAutoRunPausedPhase()) {
     const takeoverResponse = await chrome.runtime.sendMessage({
       type: 'TAKEOVER_AUTO_RUN',
@@ -11857,16 +12051,27 @@ async function handleSkipStep(step) {
   await persistCurrentSettingsForAction();
 
   const response = await chrome.runtime.sendMessage({
-    type: 'SKIP_STEP',
+    type: 'SKIP_NODE',
     source: 'sidepanel',
-    payload: { step },
+    payload: {
+      nodeId: normalizedNodeId,
+      step: getStepIdByNodeIdForCurrentMode(normalizedNodeId),
+    },
   });
 
   if (response?.error) {
     throw new Error(response.error);
   }
 
-  showToast(`步骤 ${step} 已跳过`, 'success', 2200);
+  showToast(`节点 ${normalizedNodeId} 已跳过`, 'success', 2200);
+}
+
+async function handleSkipStep(step) {
+  const nodeId = getNodeIdByStepForCurrentMode(step);
+  if (!nodeId) {
+    throw new Error(`无效步骤：${step}`);
+  }
+  return handleSkipNode(nodeId);
 }
 
 // ============================================================
@@ -11880,7 +12085,8 @@ stepsList?.addEventListener('click', async (event) => {
   }
   try {
     const step = Number(btn.dataset.step);
-    if (!(await maybeTakeoverAutoRun(`执行步骤 ${step}`))) {
+    const nodeId = String(btn.dataset.nodeId || getNodeIdByStepForCurrentMode(step) || '').trim();
+    if (!(await maybeTakeoverAutoRun(`执行节点 ${nodeId || step}`))) {
       return;
     }
     await persistCurrentSettingsForAction();
@@ -11898,12 +12104,12 @@ stepsList?.addEventListener('click', async (event) => {
         syncLatestState({ customPassword: inputPassword.value });
       }
       if (shouldExecuteStep3WithSignupPhoneIdentity(latestState)) {
-        const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step } });
+        const response = await sendSidepanelMessage({ type: 'EXECUTE_NODE', source: 'sidepanel', payload: { nodeId } });
         if (response?.error) {
           throw new Error(response.error);
         }
       } else if (selectMailProvider.value === 'hotmail-api' || isLuckmailProvider()) {
-        const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step } });
+        const response = await sendSidepanelMessage({ type: 'EXECUTE_NODE', source: 'sidepanel', payload: { nodeId } });
         if (response?.error) {
           throw new Error(response.error);
         }
@@ -11913,7 +12119,7 @@ stepsList?.addEventListener('click', async (event) => {
           showToast(selectMailProvider.value === GMAIL_PROVIDER ? '请先填写 Gmail 原邮箱。' : '请先填写 2925 邮箱前缀。', 'warn');
           return;
         }
-        const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step, emailPrefix } });
+        const response = await sendSidepanelMessage({ type: 'EXECUTE_NODE', source: 'sidepanel', payload: { nodeId, emailPrefix } });
         if (response?.error) {
           throw new Error(response.error);
         }
@@ -11934,13 +12140,13 @@ stepsList?.addEventListener('click', async (event) => {
         if (!validateCurrentRegistrationEmail(email, { showToastOnFailure: true })) {
           return;
         }
-        const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step, email } });
+        const response = await sendSidepanelMessage({ type: 'EXECUTE_NODE', source: 'sidepanel', payload: { nodeId, email } });
         if (response?.error) {
           throw new Error(response.error);
         }
       }
     } else {
-      const response = await sendSidepanelMessage({ type: 'EXECUTE_STEP', source: 'sidepanel', payload: { step } });
+      const response = await sendSidepanelMessage({ type: 'EXECUTE_NODE', source: 'sidepanel', payload: { nodeId } });
       if (response?.error) {
         throw new Error(response.error);
       }
@@ -12323,7 +12529,7 @@ btnReset.addEventListener('click', async () => {
 
   await chrome.runtime.sendMessage({ type: 'RESET', source: 'sidepanel' });
   syncLatestState({
-    stepStatuses: STEP_DEFAULT_STATUSES,
+    nodeStatuses: NODE_DEFAULT_STATUSES,
     currentHotmailAccountId: null,
     currentLuckmailPurchase: null,
     currentLuckmailMailCursor: null,
@@ -14222,9 +14428,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       break;
 
-    case 'STEP_STATUS_CHANGED': {
-      const { step, status } = message.payload;
-      updateStepUI(step, status);
+    case 'NODE_STATUS_CHANGED': {
+      const { nodeId, status } = message.payload;
+      updateNodeUI(nodeId, status);
       chrome.runtime.sendMessage({ type: 'GET_STATE', source: 'sidepanel' }).then(state => {
         syncLatestState(state);
         syncAutoRunState(state);
@@ -14253,7 +14459,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         localhostUrl: null,
         email: null,
         password: null,
-        stepStatuses: STEP_DEFAULT_STATUSES,
+        nodeStatuses: NODE_DEFAULT_STATUSES,
         logs: [],
         scheduledAutoRunAt: null,
         autoRunCountdownAt: null,
