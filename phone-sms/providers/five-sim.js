@@ -578,7 +578,7 @@
     const maxPrice = normalizeFiveSimMaxPrice(state.fiveSimMaxPrice);
     const operator = normalizeFiveSimOperator(state.fiveSimOperator);
     if (maxPrice && operator !== DEFAULT_OPERATOR) {
-      throw new Error('5sim maxPrice only works when operator is "any"; clear the price limit or switch operator to any before buying a number.');
+      throw new Error('5sim 价格上限仅支持运营商为 "any" 时使用；请清空价格上限，或先把运营商切换为 any。');
     }
   }
 

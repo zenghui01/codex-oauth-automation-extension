@@ -40,5 +40,5 @@ test('phone sms provider registry normalizes ids, order and labels consistently'
     registry.createProvider('5sim', { foo: 1 }),
     { provider: '5sim', deps: { foo: 1 } }
   );
-  assert.throws(() => registry.createProvider('nexsms'), /Phone SMS provider module is not loaded: nexsms/);
+  assert.throws(() => registry.createProvider('nexsms'), /接码平台模块未加载：nexsms/);
 });

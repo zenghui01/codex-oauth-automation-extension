@@ -9,20 +9,16 @@
   const SIGNUP_METHOD_EMAIL = 'email';
   const SIGNUP_METHOD_PHONE = 'phone';
 
-  const NORMAL_STEP_DEFINITIONS = [
+  const NORMAL_PREFIX_STEP_DEFINITIONS = [
     { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网', sourceId: 'chatgpt', driverId: null, command: 'open-chatgpt' },
     { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-signup-email' },
     { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-password' },
     { id: 4, order: 40, key: 'fetch-signup-code', title: '获取注册验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-signup-code' },
     { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-profile' },
     { id: 6, order: 60, key: 'wait-registration-success', title: '等待注册成功', sourceId: 'chatgpt', driverId: null, command: 'wait-registration-success' },
-    { id: 7, order: 70, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
-    { id: 8, order: 80, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
-    { id: 9, order: 90, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
-    { id: 10, order: 100, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
   ];
 
-  const PLUS_PAYPAL_STEP_DEFINITIONS = [
+  const PLUS_PAYPAL_PREFIX_STEP_DEFINITIONS = [
     { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网', sourceId: 'chatgpt', driverId: null, command: 'open-chatgpt' },
     { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-signup-email' },
     { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-password' },
@@ -32,13 +28,9 @@
     { id: 7, order: 70, key: 'plus-checkout-billing', title: '填写账单并提交订单', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-billing' },
     { id: 8, order: 80, key: 'paypal-approve', title: 'PayPal 登录与授权', sourceId: 'paypal-flow', driverId: 'content/paypal-flow', command: 'paypal-approve' },
     { id: 9, order: 90, key: 'plus-checkout-return', title: '订阅回跳确认', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-return' },
-    { id: 10, order: 100, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
-    { id: 11, order: 110, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
-    { id: 12, order: 120, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
-    { id: 13, order: 130, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
   ];
 
-  const PLUS_GOPAY_STEP_DEFINITIONS = [
+  const PLUS_GOPAY_PREFIX_STEP_DEFINITIONS = [
     { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网', sourceId: 'chatgpt', driverId: null, command: 'open-chatgpt' },
     { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-signup-email' },
     { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-password' },
@@ -46,13 +38,9 @@
     { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-profile' },
     { id: 6, order: 60, key: 'plus-checkout-create', title: '打开 GoPay 订阅页', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-create' },
     { id: 7, order: 70, key: 'gopay-subscription-confirm', title: '等待 GoPay 订阅确认', sourceId: 'gopay-flow', driverId: 'content/gopay-flow', command: 'gopay-subscription-confirm' },
-    { id: 10, order: 100, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
-    { id: 11, order: 110, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
-    { id: 12, order: 120, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
-    { id: 13, order: 130, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
   ];
 
-  const PLUS_GPC_STEP_DEFINITIONS = [
+  const PLUS_GPC_PREFIX_STEP_DEFINITIONS = [
     { id: 1, order: 10, key: 'open-chatgpt', title: '打开 ChatGPT 官网', sourceId: 'chatgpt', driverId: null, command: 'open-chatgpt' },
     { id: 2, order: 20, key: 'submit-signup-email', title: '注册并输入邮箱', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-signup-email' },
     { id: 3, order: 30, key: 'fill-password', title: '填写密码并继续', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-password' },
@@ -60,11 +48,49 @@
     { id: 5, order: 50, key: 'fill-profile', title: '填写姓名和生日', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fill-profile' },
     { id: 6, order: 60, key: 'plus-checkout-create', title: '创建 GPC 订单', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-create' },
     { id: 7, order: 70, key: 'plus-checkout-billing', title: '等待 GPC 任务完成', sourceId: 'plus-checkout', driverId: 'content/plus-checkout', command: 'plus-checkout-billing' },
-    { id: 10, order: 100, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
-    { id: 11, order: 110, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
-    { id: 12, order: 120, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
-    { id: 13, order: 130, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
   ];
+
+  function createOpenAiAuthTail(startId, startOrder, signupMethod = SIGNUP_METHOD_EMAIL) {
+    const id = Number(startId) || 7;
+    const order = Number(startOrder) || id * 10;
+    const commonStart = [
+      { id, order, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
+      { id: id + 1, order: order + 10, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
+    ];
+
+    if (signupMethod === SIGNUP_METHOD_PHONE) {
+      return [
+        ...commonStart,
+        { id: id + 2, order: order + 20, key: 'bind-email', title: '绑定邮箱', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'bind-email' },
+        { id: id + 3, order: order + 30, key: 'fetch-bind-email-code', title: '获取绑定邮箱验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'fetch-bind-email-code', mailRuleId: 'openai-login-code' },
+        { id: id + 4, order: order + 40, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
+        { id: id + 5, order: order + 50, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
+      ];
+    }
+
+    return [
+      ...commonStart,
+      { id: id + 2, order: order + 20, key: 'post-login-phone-verification', title: '手机号验证', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'post-login-phone-verification' },
+      { id: id + 3, order: order + 30, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
+      { id: id + 4, order: order + 40, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
+    ];
+  }
+
+  function createOpenAiSteps(prefixSteps, startId, startOrder, signupMethod = SIGNUP_METHOD_EMAIL) {
+    return [
+      ...prefixSteps,
+      ...createOpenAiAuthTail(startId, startOrder, signupMethod),
+    ];
+  }
+
+  const NORMAL_STEP_DEFINITIONS = createOpenAiSteps(NORMAL_PREFIX_STEP_DEFINITIONS, 7, 70, SIGNUP_METHOD_EMAIL);
+  const NORMAL_PHONE_STEP_DEFINITIONS = createOpenAiSteps(NORMAL_PREFIX_STEP_DEFINITIONS, 7, 70, SIGNUP_METHOD_PHONE);
+  const PLUS_PAYPAL_STEP_DEFINITIONS = createOpenAiSteps(PLUS_PAYPAL_PREFIX_STEP_DEFINITIONS, 10, 100, SIGNUP_METHOD_EMAIL);
+  const PLUS_PAYPAL_PHONE_STEP_DEFINITIONS = createOpenAiSteps(PLUS_PAYPAL_PREFIX_STEP_DEFINITIONS, 10, 100, SIGNUP_METHOD_PHONE);
+  const PLUS_GOPAY_STEP_DEFINITIONS = createOpenAiSteps(PLUS_GOPAY_PREFIX_STEP_DEFINITIONS, 10, 100, SIGNUP_METHOD_EMAIL);
+  const PLUS_GOPAY_PHONE_STEP_DEFINITIONS = createOpenAiSteps(PLUS_GOPAY_PREFIX_STEP_DEFINITIONS, 10, 100, SIGNUP_METHOD_PHONE);
+  const PLUS_GPC_STEP_DEFINITIONS = createOpenAiSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS, 10, 100, SIGNUP_METHOD_EMAIL);
+  const PLUS_GPC_PHONE_STEP_DEFINITIONS = createOpenAiSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS, 10, 100, SIGNUP_METHOD_PHONE);
 
   const PHONE_SIGNUP_TITLE_OVERRIDES = Object.freeze({
     'submit-signup-email': '注册并输入手机号',
@@ -103,14 +129,18 @@
   }
 
   function getOpenAiModeStepDefinitions(options = {}) {
+    const signupMethod = getResolvedSignupMethod(options);
     if (!isPlusModeEnabled(options)) {
-      return NORMAL_STEP_DEFINITIONS;
+      return signupMethod === SIGNUP_METHOD_PHONE ? NORMAL_PHONE_STEP_DEFINITIONS : NORMAL_STEP_DEFINITIONS;
     }
     const paymentMethod = normalizePlusPaymentMethod(options?.plusPaymentMethod || options?.paymentMethod);
     if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
-      return PLUS_GPC_STEP_DEFINITIONS;
+      return signupMethod === SIGNUP_METHOD_PHONE ? PLUS_GPC_PHONE_STEP_DEFINITIONS : PLUS_GPC_STEP_DEFINITIONS;
     }
-    return paymentMethod === PLUS_PAYMENT_METHOD_GOPAY ? PLUS_GOPAY_STEP_DEFINITIONS : PLUS_PAYPAL_STEP_DEFINITIONS;
+    if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
+      return signupMethod === SIGNUP_METHOD_PHONE ? PLUS_GOPAY_PHONE_STEP_DEFINITIONS : PLUS_GOPAY_STEP_DEFINITIONS;
+    }
+    return signupMethod === SIGNUP_METHOD_PHONE ? PLUS_PAYPAL_PHONE_STEP_DEFINITIONS : PLUS_PAYPAL_STEP_DEFINITIONS;
   }
 
   function getOpenAiPlusPaymentStepTitle(options = {}) {
@@ -141,9 +171,13 @@
         const keyed = new Map();
         for (const step of [
           ...NORMAL_STEP_DEFINITIONS,
+          ...NORMAL_PHONE_STEP_DEFINITIONS,
           ...PLUS_PAYPAL_STEP_DEFINITIONS,
+          ...PLUS_PAYPAL_PHONE_STEP_DEFINITIONS,
           ...PLUS_GOPAY_STEP_DEFINITIONS,
+          ...PLUS_GOPAY_PHONE_STEP_DEFINITIONS,
           ...PLUS_GPC_STEP_DEFINITIONS,
+          ...PLUS_GPC_PHONE_STEP_DEFINITIONS,
         ]) {
           keyed.set(`${step.id}:${step.key}`, step);
         }
@@ -317,10 +351,14 @@
     DEFAULT_ACTIVE_FLOW_ID,
     STEP_DEFINITIONS: NORMAL_STEP_DEFINITIONS,
     NORMAL_STEP_DEFINITIONS,
+    NORMAL_PHONE_STEP_DEFINITIONS,
     PLUS_STEP_DEFINITIONS: PLUS_PAYPAL_STEP_DEFINITIONS,
     PLUS_PAYPAL_STEP_DEFINITIONS,
+    PLUS_PAYPAL_PHONE_STEP_DEFINITIONS,
     PLUS_GOPAY_STEP_DEFINITIONS,
+    PLUS_GOPAY_PHONE_STEP_DEFINITIONS,
     PLUS_GPC_STEP_DEFINITIONS,
+    PLUS_GPC_PHONE_STEP_DEFINITIONS,
     SIGNUP_METHOD_EMAIL,
     SIGNUP_METHOD_PHONE,
     getAllSteps,

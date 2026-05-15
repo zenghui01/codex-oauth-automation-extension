@@ -96,7 +96,7 @@ test('step 8 submits login verification directly without replaying step 7', asyn
   assert.equal(calls.resolveOptions.completionStep, 8);
 });
 
-test('step 8 keeps phone-registered accounts on email-code flow when page is email verification', async () => {
+test('step 8 rejects ordinary email verification page in phone login mode', async () => {
   const calls = {
     getMailConfigCalls: 0,
     helperCalls: [],
@@ -159,18 +159,21 @@ test('step 8 keeps phone-registered accounts on email-code flow when page is ema
     throwIfStopped: () => {},
   });
 
-  await executor.executeStep8({
-    visibleStep: 8,
-    accountIdentifierType: 'phone',
-    signupPhoneCompletedActivation: {
-      activationId: 'signup-done',
-      phoneNumber: '66959916439',
-    },
-    oauthUrl: 'https://oauth.example/latest',
-  });
+  await assert.rejects(
+    () => executor.executeStep8({
+      visibleStep: 8,
+      accountIdentifierType: 'phone',
+      signupPhoneCompletedActivation: {
+        activationId: 'signup-done',
+        phoneNumber: '66959916439',
+      },
+      oauthUrl: 'https://oauth.example/latest',
+    }),
+    /手机号注册模式只允许处理手机登录验证码/
+  );
 
-  assert.equal(calls.getMailConfigCalls, 1);
-  assert.equal(calls.resolveCalls, 1);
+  assert.equal(calls.getMailConfigCalls, 0);
+  assert.equal(calls.resolveCalls, 0);
   assert.deepStrictEqual(calls.helperCalls, []);
   assert.deepStrictEqual(calls.completions, []);
 });
@@ -260,9 +263,154 @@ test('step 8 routes only a real phone verification page through sms helper', asy
   ]);
 });
 
-test('step 8 submits add-email before polling the email verification code', async () => {
+test('post-login phone verification completes only on phone pages', async () => {
+  const calls = {
+    helperCalls: [],
+    completions: [],
+  };
+
+  const executor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      calls.completions.push({ step, payload });
+    },
+    ensureStep8VerificationPageReady: async () => {
+      throw new Error('post-login phone step should inspect auth state directly');
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    phoneVerificationHelpers: {
+      completePhoneVerificationFlow: async (tabId, pageState, options) => {
+        calls.helperCalls.push({ tabId, pageState, options });
+        return { code: '112233' };
+      },
+    },
+    reuseOrCreateTab: async () => 1,
+    sendToContentScriptResilient: async () => ({
+      state: 'add_phone_page',
+      url: 'https://auth.openai.com/add-phone',
+    }),
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await executor.executePostLoginPhoneVerification({
+    visibleStep: 9,
+    nodeId: 'post-login-phone-verification',
+    phoneVerificationEnabled: true,
+    oauthUrl: 'https://oauth.example/latest',
+  });
+
+  assert.deepStrictEqual(calls.helperCalls, [
+    {
+      tabId: 1,
+      pageState: {
+        state: 'add_phone_page',
+        url: 'https://auth.openai.com/add-phone',
+      },
+      options: {
+        step: 9,
+        visibleStep: 9,
+      },
+    },
+  ]);
+  assert.deepStrictEqual(calls.completions, [
+    {
+      step: 'post-login-phone-verification',
+      payload: {
+        phoneVerification: true,
+        postLoginPhoneVerification: true,
+        code: '112233',
+      },
+    },
+  ]);
+});
+
+test('post-login phone verification skips on OAuth consent and errors when disabled', async () => {
+  const completions = [];
+  const executor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      completions.push({ step, payload });
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getTabId: async () => 1,
+    phoneVerificationHelpers: {
+      completePhoneVerificationFlow: async () => {
+        throw new Error('OAuth consent should not call phone helper');
+      },
+    },
+    reuseOrCreateTab: async () => 1,
+    sendToContentScriptResilient: async () => ({ state: 'oauth_consent_page' }),
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await executor.executePostLoginPhoneVerification({
+    visibleStep: 9,
+    nodeId: 'post-login-phone-verification',
+    phoneVerificationEnabled: true,
+    oauthUrl: 'https://oauth.example/latest',
+  });
+
+  assert.deepStrictEqual(completions, [
+    {
+      step: 'post-login-phone-verification',
+      payload: {
+        directOAuthConsentPage: true,
+        phoneVerification: false,
+      },
+    },
+  ]);
+
+  const disabledExecutor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getTabId: async () => 1,
+    phoneVerificationHelpers: {
+      completePhoneVerificationFlow: async () => {
+        throw new Error('disabled phone verification should not call helper');
+      },
+    },
+    reuseOrCreateTab: async () => 1,
+    sendToContentScriptResilient: async () => ({
+      state: 'phone_verification_page',
+      url: 'https://auth.openai.com/phone-verification',
+    }),
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => disabledExecutor.executePostLoginPhoneVerification({
+      visibleStep: 9,
+      phoneVerificationEnabled: false,
+      oauthUrl: 'https://oauth.example/latest',
+    }),
+    /手机接码未开启/
+  );
+});
+
+test('step 8 defers add-email page to the dedicated bind-email node in phone mode', async () => {
   const calls = {
     contentMessages: [],
+    completions: [],
     resolvedStates: [],
     setStates: [],
     mailStates: [],
@@ -277,6 +425,9 @@ test('step 8 submits add-email before polling the email verification code', asyn
       },
     },
     CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async (step, payload) => {
+      calls.completions.push({ step, payload });
+    },
     confirmCustomVerificationStepBypass: async () => {},
     ensureStep8VerificationPageReady: async () => ({ state: 'add_email_page', url: 'https://auth.openai.com/add-email' }),
     getOAuthFlowRemainingMs: async () => 5000,
@@ -339,29 +490,320 @@ test('step 8 submits add-email before polling the email verification code', asyn
     oauthUrl: 'https://oauth.example/latest',
   });
 
-  assert.equal(calls.contentMessages.length, 1);
-  assert.equal(calls.resolvedStates.length, 1);
-  assert.equal(calls.resolveOptions.preserveAccountIdentity, true);
-  assert.equal(calls.persistCalls.length, 1);
-  assert.equal(calls.persistCalls[0].email, 'new.user@example.com');
-  assert.equal(calls.persistCalls[0].options.preserveAccountIdentity, true);
-  assert.equal(calls.persistCalls[0].options.source, 'step8_add_email');
-  assert.equal(calls.mailStates[0].email, 'new.user@example.com');
-  assert.equal(calls.resolvedVerification.state.email, 'new.user@example.com');
-  assert.equal(calls.resolvedVerification.options.targetEmail, 'new.user@example.com');
+  assert.equal(calls.contentMessages.length, 0);
+  assert.equal(calls.resolvedStates.length, 0);
+  assert.equal(calls.persistCalls.length, 0);
+  assert.equal(calls.mailStates.length, 0);
   assert.deepStrictEqual(calls.setStates, [
     {
-      step8VerificationTargetEmail: 'new.user@example.com',
+      step8VerificationTargetEmail: '',
+      loginVerificationRequestedAt: null,
+    },
+  ]);
+  assert.deepStrictEqual(calls.completions, [
+    {
+      step: 'fetch-login-code',
+      payload: {
+        loginVerificationRequestedAt: null,
+        skipLoginVerificationStep: true,
+        addEmailPage: true,
+      },
     },
   ]);
 });
 
-test('step 8 reruns step 7 with preserved phone login identity after add-email verification failure', async () => {
+test('bind-email submits add-email and requires an email verification page', async () => {
+  const calls = {
+    contentMessages: [],
+    completions: [],
+    persistCalls: [],
+    setStates: [],
+  };
+  let runtimeState = {
+    email: '',
+    password: 'secret',
+    oauthUrl: 'https://oauth.example/latest',
+  };
+
+  const executor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      calls.completions.push({ step, payload });
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ ...runtimeState }),
+    getTabId: async () => 1,
+    persistRegistrationEmailState: async (state, email, options) => {
+      calls.persistCalls.push({ state, email, options });
+      runtimeState = {
+        ...runtimeState,
+        email,
+      };
+    },
+    resolveSignupEmailForFlow: async (_state, options = {}) => {
+      assert.equal(options.preserveAccountIdentity, true);
+      return 'bind.user@example.com';
+    },
+    reuseOrCreateTab: async () => 1,
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'GET_LOGIN_AUTH_STATE') {
+        return { state: 'add_email_page', url: 'https://auth.openai.com/add-email' };
+      }
+      calls.contentMessages.push(message);
+      assert.equal(message.type, 'SUBMIT_ADD_EMAIL');
+      assert.equal(message.payload.email, 'bind.user@example.com');
+      return {
+        submitted: true,
+        displayedEmail: 'bind.user@example.com',
+        url: 'https://auth.openai.com/email-verification',
+      };
+    },
+    setState: async (payload) => {
+      calls.setStates.push(payload);
+      runtimeState = {
+        ...runtimeState,
+        ...payload,
+      };
+    },
+    throwIfStopped: () => {},
+  });
+
+  await executor.executeBindEmail({
+    visibleStep: 9,
+    nodeId: 'bind-email',
+    oauthUrl: 'https://oauth.example/latest',
+  });
+
+  assert.equal(calls.contentMessages.length, 1);
+  assert.equal(calls.persistCalls.length, 1);
+  assert.equal(calls.persistCalls[0].options.source, 'bind_email');
+  assert.deepStrictEqual(calls.completions, [
+    {
+      step: 'bind-email',
+      payload: {
+        bindEmailSubmitted: true,
+        email: 'bind.user@example.com',
+        step8VerificationTargetEmail: 'bind.user@example.com',
+      },
+    },
+  ]);
+});
+
+test('bind-email skips on OAuth consent and rejects direct OAuth after submit', async () => {
+  const completions = [];
+  const skipExecutor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      completions.push({ step, payload });
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getTabId: async () => 1,
+    reuseOrCreateTab: async () => 1,
+    sendToContentScriptResilient: async () => ({ state: 'oauth_consent_page' }),
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await skipExecutor.executeBindEmail({
+    visibleStep: 9,
+    nodeId: 'bind-email',
+    oauthUrl: 'https://oauth.example/latest',
+  });
+  assert.deepStrictEqual(completions, [
+    {
+      step: 'bind-email',
+      payload: {
+        directOAuthConsentPage: true,
+        bindEmailSubmitted: false,
+      },
+    },
+  ]);
+
+  const directOauthExecutor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ email: '', oauthUrl: 'https://oauth.example/latest' }),
+    getTabId: async () => 1,
+    resolveSignupEmailForFlow: async () => 'bind.user@example.com',
+    reuseOrCreateTab: async () => 1,
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'GET_LOGIN_AUTH_STATE') {
+        return { state: 'add_email_page', url: 'https://auth.openai.com/add-email' };
+      }
+      return {
+        submitted: true,
+        directOAuthConsentPage: true,
+        url: 'https://auth.openai.com/authorize',
+      };
+    },
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => directOauthExecutor.executeBindEmail({
+      visibleStep: 9,
+      oauthUrl: 'https://oauth.example/latest',
+    }),
+    /绑定邮箱提交后必须进入邮箱验证码页/
+  );
+});
+
+test('fetch-bind-email-code polls only after bind-email submitted', async () => {
+  const calls = {
+    resolveOptions: null,
+    setStates: [],
+  };
+  const realDateNow = Date.now;
+  Date.now = () => 222000;
+
+  const executor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    confirmCustomVerificationStepBypass: async () => {},
+    getOAuthFlowRemainingMs: async () => 9000,
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getMailConfig: () => ({
+      provider: 'qq',
+      label: 'QQ 邮箱',
+      source: 'mail-qq',
+      url: 'https://mail.qq.com',
+      navigateOnReuse: false,
+    }),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isTabAlive: async () => true,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    resolveVerificationStep: async (_step, _state, _mail, options) => {
+      calls.resolveOptions = options;
+    },
+    reuseOrCreateTab: async () => 1,
+    sendToContentScriptResilient: async () => ({
+      state: 'verification_page',
+      displayedEmail: 'bind.user@example.com',
+      url: 'https://auth.openai.com/email-verification',
+    }),
+    setState: async (payload) => {
+      calls.setStates.push(payload);
+    },
+    shouldUseCustomRegistrationEmail: () => false,
+    STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS: 25000,
+    throwIfStopped: () => {},
+  });
+
+  try {
+    await executor.executeFetchBindEmailCode({
+      visibleStep: 10,
+      nodeId: 'fetch-bind-email-code',
+      bindEmailSubmitted: true,
+      email: 'bind.user@example.com',
+      oauthUrl: 'https://oauth.example/latest',
+    });
+  } finally {
+    Date.now = realDateNow;
+  }
+
+  assert.equal(calls.resolveOptions.completionStep, 10);
+  assert.equal(calls.resolveOptions.sessionKey, '10:222000');
+  assert.equal(calls.resolveOptions.targetEmail, 'bind.user@example.com');
+  assert.deepStrictEqual(calls.setStates, [
+    {
+      step8VerificationTargetEmail: 'bind.user@example.com',
+    },
+  ]);
+});
+
+test('fetch-bind-email-code rejects unexpected pages after bind-email submitted', async () => {
+  const executor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getTabId: async () => 1,
+    reuseOrCreateTab: async () => 1,
+    sendToContentScriptResilient: async () => ({
+      state: 'oauth_consent_page',
+      url: 'https://auth.openai.com/authorize',
+    }),
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executeFetchBindEmailCode({
+      visibleStep: 10,
+      bindEmailSubmitted: true,
+      oauthUrl: 'https://oauth.example/latest',
+    }),
+    /绑定邮箱提交后不应直接进入 OAuth 授权页/
+  );
+
+  const notSubmittedCompletions = [];
+  const skipExecutor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      notSubmittedCompletions.push({ step, payload });
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getTabId: async () => 1,
+    reuseOrCreateTab: async () => 1,
+    sendToContentScriptResilient: async () => ({ state: 'oauth_consent_page' }),
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await skipExecutor.executeFetchBindEmailCode({
+    visibleStep: 10,
+    nodeId: 'fetch-bind-email-code',
+    bindEmailSubmitted: false,
+    oauthUrl: 'https://oauth.example/latest',
+  });
+  assert.deepStrictEqual(notSubmittedCompletions, [
+    {
+      step: 'fetch-bind-email-code',
+      payload: {
+        directOAuthConsentPage: true,
+        bindEmailCodeSkipped: true,
+      },
+    },
+  ]);
+});
+
+test('step 8 does not submit or recover add-email inside fetch-login-code', async () => {
   const calls = {
     ensureCalls: 0,
     resolveCalls: 0,
     rerunStates: [],
     contentMessages: [],
+    completions: [],
   };
   let runtimeState = {
     visibleStep: 8,
@@ -388,6 +830,9 @@ test('step 8 reruns step 7 with preserved phone login identity after add-email v
       },
     },
     CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async (step, payload) => {
+      calls.completions.push({ step, payload });
+    },
     confirmCustomVerificationStepBypass: async () => {},
     ensureStep8VerificationPageReady: async () => {
       calls.ensureCalls += 1;
@@ -463,16 +908,23 @@ test('step 8 reruns step 7 with preserved phone login identity after add-email v
 
   await executor.executeStep8({ ...runtimeState });
 
-  assert.equal(calls.contentMessages.length, 1);
-  assert.equal(calls.resolveCalls, 2);
-  assert.equal(calls.rerunStates.length, 1);
-  assert.equal(calls.rerunStates[0].email, 'new.user@example.com');
-  assert.equal(calls.rerunStates[0].accountIdentifierType, 'phone');
-  assert.equal(calls.rerunStates[0].accountIdentifier, '+447780579093');
-  assert.equal(calls.rerunStates[0].signupPhoneNumber, '+447780579093');
+  assert.equal(calls.ensureCalls, 1);
+  assert.equal(calls.contentMessages.length, 0);
+  assert.equal(calls.resolveCalls, 0);
+  assert.equal(calls.rerunStates.length, 0);
+  assert.deepStrictEqual(calls.completions, [
+    {
+      step: 'fetch-login-code',
+      payload: {
+        loginVerificationRequestedAt: null,
+        skipLoginVerificationStep: true,
+        addEmailPage: true,
+      },
+    },
+  ]);
 });
 
-test('step 8 add-email rereads persisted phone identity before rerunning step 7', async () => {
+test('step 8 rejects add-email page in email login mode', async () => {
   const calls = {
     resolveCalls: 0,
     rerunStates: [],
@@ -563,16 +1015,14 @@ test('step 8 add-email rereads persisted phone identity before rerunning step 7'
 
   await assert.rejects(
     () => executor.executeStep8({ ...runtimeState }),
-    /STEP8_RESTART_STEP7::/
+    /邮箱注册模式不应进入添加邮箱页/
   );
 
-  assert.equal(calls.resolveCalls, 2);
-  assert.equal(calls.rerunStates.length, 1);
-  assert.equal(calls.rerunStates[0].accountIdentifierType, 'phone');
-  assert.equal(calls.rerunStates[0].signupPhoneNumber, '+447780579093');
+  assert.equal(calls.resolveCalls, 0);
+  assert.equal(calls.rerunStates.length, 0);
 });
 
-test('step 8 email_in_use recovery preserves the previous registration baseline', async () => {
+test('step 8 does not run add-email email_in_use recovery in email login mode', async () => {
   const calls = {
     contentCalls: 0,
     setStates: [],
@@ -588,15 +1038,6 @@ test('step 8 email_in_use recovery preserves the previous registration baseline'
         },
       },
     },
-    buildRegistrationEmailStateUpdates: () => ({
-      email: null,
-      registrationEmailState: {
-        current: '',
-        previous: 'old.user@example.com',
-        source: 'step8_recovery',
-        updatedAt: 123,
-      },
-    }),
     CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
     confirmCustomVerificationStepBypass: async () => {},
     ensureStep8VerificationPageReady: async () => ({
@@ -653,30 +1094,24 @@ test('step 8 email_in_use recovery preserves the previous registration baseline'
     throwIfStopped: () => {},
   });
 
-  await executor.executeStep8({
-    email: 'old.user@example.com',
-    registrationEmailState: {
-      current: 'old.user@example.com',
-      previous: 'old.user@example.com',
-      source: 'generated:duck',
-      updatedAt: 1,
-    },
-    oauthUrl: 'https://auth.openai.com/add-email',
-    password: 'secret',
-    visibleStep: 8,
-  });
+  await assert.rejects(
+    () => executor.executeStep8({
+      email: 'old.user@example.com',
+      registrationEmailState: {
+        current: 'old.user@example.com',
+        previous: 'old.user@example.com',
+        source: 'generated:duck',
+        updatedAt: 1,
+      },
+      oauthUrl: 'https://auth.openai.com/add-email',
+      password: 'secret',
+      visibleStep: 8,
+    }),
+    /邮箱注册模式不应进入添加邮箱页/
+  );
 
-  assert.deepStrictEqual(calls.setStates[0], {
-    email: null,
-    registrationEmailState: {
-      current: '',
-      previous: 'old.user@example.com',
-      source: 'step8_recovery',
-      updatedAt: 123,
-    },
-    step8VerificationTargetEmail: '',
-    loginVerificationRequestedAt: null,
-  });
+  assert.equal(calls.contentCalls, 0);
+  assert.deepStrictEqual(calls.setStates, []);
 });
 
 test('Plus login-code step reuses step 8 verification logic but completes visible step 11', async () => {

@@ -112,7 +112,7 @@
     const definition = getProviderDefinition(providerId);
     const module = getProviderModule(providerId);
     if (!module || typeof module.createProvider !== 'function') {
-      throw new Error(`Phone SMS provider module is not loaded: ${definition.id}`);
+      throw new Error(`接码平台模块未加载：${definition.id}`);
     }
     return module.createProvider(deps);
   }

@@ -9596,6 +9596,9 @@ const AUTO_RUN_BACKGROUND_COMPLETED_STEP_KEYS = new Set([
   'plus-checkout-return',
   'oauth-login',
   'fetch-login-code',
+  'post-login-phone-verification',
+  'bind-email',
+  'fetch-bind-email-code',
   'confirm-oauth',
 ]);
 const STEP_COMPLETION_SIGNAL_STEP_KEYS = new Set([
@@ -10047,6 +10050,9 @@ async function waitForRunningStepsToFinish(payload = {}) {
 const AUTH_CHAIN_NODE_IDS = new Set([
   'oauth-login',
   'fetch-login-code',
+  'post-login-phone-verification',
+  'bind-email',
+  'fetch-bind-email-code',
   'confirm-oauth',
   'platform-verify',
 ]);
@@ -12243,7 +12249,6 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   resolveSignupMethod,
   reuseOrCreateTab,
   sendToContentScriptResilient,
-  buildRegistrationEmailStateUpdates,
   setState,
   shouldUseCustomRegistrationEmail,
   sleepWithStop,
@@ -12376,6 +12381,9 @@ const stepExecutorsByKey = {
   'plus-checkout-return': (state) => plusReturnConfirmExecutor.executePlusReturnConfirm(state),
   'oauth-login': (state) => step7Executor.executeStep7(state),
   'fetch-login-code': (state) => step8Executor.executeStep8(state),
+  'post-login-phone-verification': (state) => step8Executor.executePostLoginPhoneVerification(state),
+  'bind-email': (state) => step8Executor.executeBindEmail(state),
+  'fetch-bind-email-code': (state) => step8Executor.executeFetchBindEmailCode(state),
   'confirm-oauth': (state) => step9Executor.executeStep9(state),
   'platform-verify': (state) => executeStep10(state),
 };
@@ -13610,22 +13618,12 @@ async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS,
       throw new Error(`${CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX}${CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE}`);
     }
     if (pageState?.addPhonePage || pageState?.phoneVerificationPage) {
-      const latestState = await getState();
-      if (!Boolean(latestState?.phoneVerificationEnabled)) {
-        const urlPart = pageState?.url ? ` URL: ${pageState.url}` : '';
-        throw new Error(
-          pageState?.phoneVerificationPage
-            ? `步骤 ${visibleStep}：当前认证页进入手机验证码页，但未开启接码功能，无法继续自动授权。${urlPart}`.trim()
-            : `步骤 ${visibleStep}：当前认证页进入手机号页面，但未开启接码功能，无法继续自动授权。${urlPart}`.trim()
-        );
-      }
-      await phoneVerificationHelpers.completePhoneVerificationFlow(tabId, pageState, { visibleStep });
-      recovered = false;
-      await sleepWithStop(250);
-      continue;
-    }
-    if (pageState?.addPhonePage) {
-      throw new Error(`步骤 ${visibleStep}：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。`);
+      const urlPart = pageState?.url ? ` URL: ${pageState.url}` : '';
+      throw new Error(
+        pageState?.phoneVerificationPage
+          ? `步骤 ${visibleStep}：自动确认 OAuth 只处理 OAuth 授权页，当前仍在手机验证码页。${urlPart}`.trim()
+          : `步骤 ${visibleStep}：自动确认 OAuth 只处理 OAuth 授权页，当前仍在添加手机号页。${urlPart}`.trim()
+      );
     }
     if (pageState?.retryPage) {
       const retryUrl = String(pageState?.url || '').trim();
@@ -13913,7 +13911,8 @@ async function recoverOAuthLocalhostTimeout(details = {}) {
   const authLoginStep = typeof getAuthChainStartStepId === 'function'
     ? getAuthChainStartStepId(state || {})
     : FINAL_OAUTH_CHAIN_START_STEP;
-  const loginCodeStep = Number(visibleStep) >= 12 ? 11 : 8;
+  const authLoginNodeId = String(getNodeIdByStepForState(authLoginStep, state || {}) || 'oauth-login').trim();
+  const confirmNodeId = String(getNodeIdByStepForState(visibleStep, state || {}) || 'confirm-oauth').trim();
 
   await addLog(
     `检测到 OAuth localhost 回调等待窗口已过期，正在复核认证页并回到步骤 ${authLoginStep} 重拉授权链路。`,
@@ -13932,7 +13931,7 @@ async function recoverOAuthLocalhostTimeout(details = {}) {
     });
   } catch (inspectError) {
     await addLog(
-      `复核认证页状态失败（${getErrorMessage(inspectError)}），将先尝试按步骤 ${loginCodeStep} 收尾恢复。`,
+      `复核认证页状态失败（${getErrorMessage(inspectError)}），将按当前 OAuth 流程图重新执行授权前置节点。`,
       'warn',
       { step: visibleStep, stepKey: 'confirm-oauth' }
     );
@@ -13958,22 +13957,45 @@ async function recoverOAuthLocalhostTimeout(details = {}) {
   if (!step7Executor?.executeStep7 || !step8Executor?.executeStep8) {
     return null;
   }
+  const workflowNodeIds = getAutoRunWorkflowNodeIds(latestState);
+  const authStartIndex = workflowNodeIds.indexOf(authLoginNodeId);
+  const confirmIndex = workflowNodeIds.indexOf(confirmNodeId);
+  if (authStartIndex < 0 || confirmIndex < 0 || authStartIndex >= confirmIndex) {
+    return null;
+  }
+  const recoveryNodeIds = workflowNodeIds.slice(authStartIndex, confirmIndex);
+  const runRecoveryNode = async (nodeId) => {
+    const recoveryState = await getState();
+    const recoveryStep = getStepIdByNodeIdForState(nodeId, recoveryState);
+    const payload = {
+      ...recoveryState,
+      visibleStep: recoveryStep,
+      nodeId,
+    };
+    switch (nodeId) {
+      case 'oauth-login':
+        return step7Executor.executeStep7(payload);
+      case 'fetch-login-code':
+        return step8Executor.executeStep8(payload);
+      case 'post-login-phone-verification':
+        return step8Executor.executePostLoginPhoneVerification(payload);
+      case 'bind-email':
+        return step8Executor.executeBindEmail(payload);
+      case 'fetch-bind-email-code':
+        return step8Executor.executeFetchBindEmailCode(payload);
+      default:
+        throw new Error(`OAuth localhost 恢复不支持节点 ${nodeId}。`);
+    }
+  };
 
   await addLog(
-    `正在自动重开步骤 ${authLoginStep} -> ${loginCodeStep}，恢复到可继续捕获 localhost 回调的状态。`,
+    `正在自动重开 OAuth 前置节点：${recoveryNodeIds.join(' -> ')}。`,
     'warn',
     { step: visibleStep, stepKey: 'confirm-oauth' }
   );
-  await step7Executor.executeStep7({
-    ...latestState,
-    visibleStep: authLoginStep,
-  });
-
-  const stateAfterStep7 = await getState();
-  await step8Executor.executeStep8({
-    ...stateAfterStep7,
-    visibleStep: loginCodeStep,
-  });
+  for (const nodeId of recoveryNodeIds) {
+    await runRecoveryNode(nodeId);
+  }
 
   const recoveredState = await getState();
   const oauthUrl = String(recoveredState?.oauthUrl || state?.oauthUrl || '').trim();
@@ -13989,7 +14011,7 @@ async function recoverOAuthLocalhostTimeout(details = {}) {
   });
 
   await addLog(
-    `已恢复到步骤 ${authLoginStep} -> ${loginCodeStep} 收尾状态，并刷新 OAuth localhost 回调等待窗口，准备重试当前步骤。`,
+    `已恢复到自动确认 OAuth 前置状态，并刷新 OAuth localhost 回调等待窗口，准备重试当前步骤。`,
     'warn',
     { step: visibleStep, stepKey: 'confirm-oauth' }
   );

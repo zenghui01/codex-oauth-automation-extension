@@ -15,7 +15,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   const gpcSteps = api.getSteps({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' });
 
   assert.equal(Array.isArray(steps), true);
-  assert.equal(steps.length, 10);
+  assert.equal(steps.length, 11);
   assert.equal(steps.every((step) => step.flowId === 'openai'), true);
   assert.deepStrictEqual(
     steps.map((step) => step.order),
@@ -32,6 +32,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'wait-registration-success',
       'oauth-login',
       'fetch-login-code',
+      'post-login-phone-verification',
       'confirm-oauth',
       'platform-verify',
     ]
@@ -40,6 +41,23 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(steps[5].title, '等待注册成功');
   assert.equal(phoneSteps[1].title, '注册并输入手机号');
   assert.equal(phoneSteps[3].title, '获取手机验证码');
+  assert.deepStrictEqual(
+    phoneSteps.map((step) => step.key),
+    [
+      'open-chatgpt',
+      'submit-signup-email',
+      'fill-password',
+      'fetch-signup-code',
+      'fill-profile',
+      'wait-registration-success',
+      'oauth-login',
+      'fetch-login-code',
+      'bind-email',
+      'fetch-bind-email-code',
+      'confirm-oauth',
+      'platform-verify',
+    ]
+  );
 
   assert.deepStrictEqual(
     plusSteps.map((step) => step.key),
@@ -55,6 +73,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'plus-checkout-return',
       'oauth-login',
       'fetch-login-code',
+      'post-login-phone-verification',
       'confirm-oauth',
       'platform-verify',
     ]
@@ -64,11 +83,33 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(plusSteps.find((step) => step.key === 'paypal-approve')?.title, 'PayPal 登录与授权');
   assert.equal(plusPhoneSteps[1].title, '注册并输入手机号');
   assert.equal(plusPhoneSteps[3].title, '获取手机验证码');
+  assert.deepStrictEqual(
+    plusPhoneSteps.map((step) => step.key),
+    [
+      'open-chatgpt',
+      'submit-signup-email',
+      'fill-password',
+      'fetch-signup-code',
+      'fill-profile',
+      'plus-checkout-create',
+      'plus-checkout-billing',
+      'paypal-approve',
+      'plus-checkout-return',
+      'oauth-login',
+      'fetch-login-code',
+      'bind-email',
+      'fetch-bind-email-code',
+      'confirm-oauth',
+      'platform-verify',
+    ]
+  );
   assert.equal(goPaySteps.some((step) => step.key === 'paypal-approve'), false);
   assert.equal(api.getStepById(8, { plusModeEnabled: true, plusPaymentMethod: 'gopay' }), null);
   assert.equal(api.getPlusPaymentStepTitle({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), '');
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true }), 13);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true }), 14);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone' }), 15);
   assert.equal(api.hasFlow('openai'), true);
   assert.equal(api.hasFlow('site-a'), false);
   assert.deepStrictEqual(api.getRegisteredFlowIds(), ['openai']);
@@ -89,12 +130,13 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'gopay-subscription-confirm',
       'oauth-login',
       'fetch-login-code',
+      'post-login-phone-verification',
       'confirm-oauth',
       'platform-verify',
     ]
   );
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), 13);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), 14);
   assert.equal(goPaySteps[5].title, '打开 GoPay 订阅页');
   assert.equal(goPaySteps[6].title, '等待 GoPay 订阅确认');
 
@@ -110,12 +152,13 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'plus-checkout-billing',
       'oauth-login',
       'fetch-login-code',
+      'post-login-phone-verification',
       'confirm-oauth',
       'platform-verify',
     ]
   );
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), 13);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), 14);
   assert.equal(gpcSteps[5].title, '创建 GPC 订单');
   assert.equal(gpcSteps[6].title, '等待 GPC 任务完成');
 });

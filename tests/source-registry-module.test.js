@@ -54,6 +54,9 @@ test('shared source registry exposes canonical source, alias, detection, and rea
   assert.equal(registry.shouldReportReadyForFrame('unknown-source', false), false);
   assert.equal(registry.getCleanupOwnerSource('oauth-localhost-callback'), 'openai-auth');
   assert.equal(registry.driverAcceptsCommand('openai-auth', 'submit-signup-email'), true);
+  assert.equal(registry.driverAcceptsCommand('openai-auth', 'post-login-phone-verification'), true);
+  assert.equal(registry.driverAcceptsCommand('openai-auth', 'bind-email'), true);
+  assert.equal(registry.driverAcceptsCommand('openai-auth', 'fetch-bind-email-code'), true);
   assert.equal(registry.driverAcceptsCommand('content/platform-panel', 'platform-verify'), true);
   assert.equal(registry.driverAcceptsCommand('openai-auth', 'platform-verify'), false);
 });

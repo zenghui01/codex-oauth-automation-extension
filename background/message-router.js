@@ -263,11 +263,13 @@
       6: 'wait-registration-success',
       7: 'oauth-login',
       8: 'fetch-login-code',
-      9: 'confirm-oauth',
-      10: 'platform-verify',
+      9: 'post-login-phone-verification',
+      10: 'confirm-oauth',
       11: 'fetch-login-code',
-      12: 'confirm-oauth',
-      13: 'platform-verify',
+      12: 'post-login-phone-verification',
+      13: 'confirm-oauth',
+      14: 'platform-verify',
+      15: 'platform-verify',
     });
 
     function getStepKeyForState(step, state = {}) {
@@ -643,6 +645,42 @@
             lastEmailTimestamp: payload.emailTimestamp || null,
           }),
           loginVerificationRequestedAt: null,
+        });
+        return;
+      }
+
+      if (stepKey === 'post-login-phone-verification') {
+        await setState({
+          currentPhoneVerificationCode: '',
+          signupPhoneVerificationRequestedAt: null,
+          signupPhoneVerificationPurpose: '',
+        });
+        return;
+      }
+
+      if (stepKey === 'bind-email') {
+        const updates = {};
+        if (payload.bindEmailSubmitted !== undefined) {
+          updates.bindEmailSubmitted = Boolean(payload.bindEmailSubmitted);
+        }
+        if (payload.email !== undefined) {
+          updates.email = payload.email || null;
+        }
+        if (payload.step8VerificationTargetEmail !== undefined) {
+          updates.step8VerificationTargetEmail = payload.step8VerificationTargetEmail || '';
+        }
+        if (Object.keys(updates).length) {
+          await setState(updates);
+        }
+        return;
+      }
+
+      if (stepKey === 'fetch-bind-email-code') {
+        await setState({
+          lastEmailTimestamp: payload.emailTimestamp || null,
+          loginVerificationRequestedAt: null,
+          step8VerificationTargetEmail: '',
+          bindEmailSubmitted: false,
         });
         return;
       }

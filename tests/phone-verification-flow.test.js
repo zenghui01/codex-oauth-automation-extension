@@ -1634,7 +1634,7 @@ test('phone verification helper fails fast when HeroSMS country list is empty', 
       heroSmsCountryId: 0,
       heroSmsCountryFallback: [],
     }),
-    /HeroSMS countries are empty/i
+    /HeroSMS 未选择国家/
   );
 });
 
@@ -1968,7 +1968,7 @@ test('phone verification helper rejects HeroSMS WRONG_MAX_PRICE below configured
 
   await assert.rejects(
     helpers.requestPhoneActivation({ heroSmsApiKey: 'demo-key', heroSmsMinPrice: '0.07' }),
-    /below configured minPrice=0\.07/i
+    /低于当前配置的最低购买价 0\.07/
   );
 
   const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
@@ -2002,7 +2002,7 @@ test('phone verification helper rejects reversed price range before fetching pri
       heroSmsMinPrice: '0.2',
       heroSmsMaxPrice: '0.1',
     }),
-    /price range is invalid/i
+    /价格区间无效/
   );
   assert.equal(fetchCalled, false);
 });
@@ -2039,7 +2039,7 @@ test('phone verification helper stops when WRONG_MAX_PRICE exceeds configured ma
 
   await assert.rejects(
     helpers.requestPhoneActivation({ heroSmsApiKey: 'demo-key', heroSmsMaxPrice: '0.05' }),
-    /exceeds configured maxPrice=0\.05/i
+    /超过当前配置的价格上限 0\.05/
   );
 
   const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
@@ -2412,7 +2412,7 @@ test('phone verification helper rejects 5sim maxPrice with custom operator befor
       fiveSimMaxPrice: '0.1',
       heroSmsActivationRetryRounds: 1,
     }),
-    /maxPrice only works when operator is "any"/
+    /价格上限仅支持运营商为 "any"/
   );
   assert.deepStrictEqual(requests, []);
 });
@@ -8105,14 +8105,14 @@ test('phone verification helper logs no-supply diagnostics with consecutive stre
       phoneVerificationPage: false,
       url: 'https://auth.openai.com/add-phone',
     }),
-    /all provider candidates failed to acquire number/i
+    /所有接码平台候选均未获取到手机号/
   );
 
   await runOnce();
   await runOnce();
 
   const diagnosticsLogs = logs
-    .filter((entry) => String(entry.message || '').includes('diagnostics: 无号连续失败'));
+    .filter((entry) => String(entry.message || '').includes('步骤 9 诊断：无号连续失败'));
 
   assert.equal(diagnosticsLogs.length >= 2, true);
   assert.equal(diagnosticsLogs.every((entry) => entry.options?.step === 9), true);
@@ -8120,15 +8120,15 @@ test('phone verification helper logs no-supply diagnostics with consecutive stre
   assert.equal(diagnosticsLogs.some((entry) => entry.message.includes('无号连续失败 1 次')), true);
   assert.equal(diagnosticsLogs.some((entry) => entry.message.includes('无号连续失败 2 次')), true);
   assert.equal(
-    diagnosticsLogs.some((entry) => entry.message.includes('priceRange=0.04~0.06')),
+    diagnosticsLogs.some((entry) => entry.message.includes('价格区间=0.04~0.06')),
     true
   );
   assert.equal(
-    diagnosticsLogs.some((entry) => entry.message.includes('minPrice=0.04')),
+    diagnosticsLogs.some((entry) => entry.message.includes('最低价=0.04')),
     true
   );
   assert.equal(
-    diagnosticsLogs.some((entry) => entry.message.includes('maxPrice=0.06')),
+    diagnosticsLogs.some((entry) => entry.message.includes('最高价=0.06')),
     true
   );
   assert.equal(
@@ -8137,6 +8137,63 @@ test('phone verification helper logs no-supply diagnostics with consecutive stre
   );
   assert.equal(currentState.phoneNoSupplyFailureStreak, 2);
   assert.equal(requests.some((entry) => entry.searchParams.get('action') === 'getNumber'), true);
+});
+
+test('phone verification helper localizes HeroSMS BAD_KEY acquisition failure', async () => {
+  let currentState = {
+    heroSmsApiKey: 'bad-key',
+    heroSmsCountryId: 52,
+    heroSmsCountryLabel: 'Thailand',
+    heroSmsCountryFallback: [],
+    currentPhoneActivation: null,
+    reusablePhoneActivation: null,
+    phoneVerificationReplacementLimit: 1,
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const action = new URL(url).searchParams.get('action');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => buildHeroSmsPricesPayload({ country: '52', cost: 0.05, count: 20 }),
+        };
+      }
+      if (action === 'getNumber' || action === 'getNumberV2') {
+        return {
+          ok: true,
+          text: async () => 'BAD_KEY',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async (_source, message) => {
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.completePhoneVerificationFlow(1, {
+      addPhonePage: true,
+      phoneVerificationPage: false,
+      url: 'https://auth.openai.com/add-phone',
+    }),
+    (error) => {
+      assert.match(error.message, /步骤 9：所有接码平台候选均未获取到手机号/);
+      assert.match(error.message, /HeroSMS：获取手机号失败：API Key 无效（BAD_KEY）/);
+      assert.doesNotMatch(error.message, /all provider candidates failed|failed to acquire number|HeroSMS getNumber failed/i);
+      return true;
+    }
+  );
 });
 
 test('phone verification helper routes 5sim buy, check, and finish by current activation provider', async () => {

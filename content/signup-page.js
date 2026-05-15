@@ -89,8 +89,10 @@ function resolveCommandNodeId(message = {}) {
   const visibleStep = Number(message.payload?.visibleStep || message.step) || 0;
   if (visibleStep === 4) return 'fetch-signup-code';
   if (visibleStep === 8 || visibleStep === 11) return 'fetch-login-code';
-  if (visibleStep === 9 || visibleStep === 12) return 'confirm-oauth';
-  if (visibleStep === 7 || visibleStep === 10) return 'oauth-login';
+  if (visibleStep === 9 || visibleStep === 12) return 'post-login-phone-verification';
+  if (visibleStep === 10 || visibleStep === 13) return 'confirm-oauth';
+  if (visibleStep === 14 || visibleStep === 15) return 'platform-verify';
+  if (visibleStep === 7) return 'oauth-login';
   if (visibleStep === 5) return 'fill-profile';
   if (visibleStep === 3) return 'fill-password';
   if (visibleStep === 2) return 'submit-signup-email';

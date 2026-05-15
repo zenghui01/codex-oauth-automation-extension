@@ -1251,7 +1251,7 @@
       }
       const data = await response.json();
       if (data?.status !== 'ok') {
-        throw new Error(data?.message || data?.status || 'unknown response');
+        throw new Error(data?.message || data?.status || '未知响应');
       }
       return buildDirectAddressSeed(countryCode, data.address || {}, fallbackSeed);
     }

@@ -76,7 +76,7 @@
 
     const isRetryableVerificationTransportError = typeof deps.isRetryableContentScriptTransportError === 'function'
       ? deps.isRetryableContentScriptTransportError
-      : ((error) => /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|did not respond in \d+s/i.test(
+      : ((error) => /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|did not respond in \d+s/i.test(
         String(typeof error === 'string' ? error : error?.message || '')
       ));
 

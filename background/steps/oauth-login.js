@@ -19,7 +19,6 @@
       isStep6RecoverableResult,
       isStep6SuccessResult,
       getTabId,
-      phoneVerificationHelpers = null,
       refreshOAuthUrlBeforeStep6,
       reuseOrCreateTab,
       sendToContentScriptResilient,
@@ -103,40 +102,101 @@
       return match ? match[0] : 'https://auth.openai.com/add-phone';
     }
 
-    async function completeStep7AddPhoneHandoff(state = {}, err, completionStep) {
-      if (!state?.phoneVerificationEnabled) {
+    function getStep7ResultState(result = {}) {
+      return String(result?.state || '').trim();
+    }
+
+    function isStep7OauthConsentResult(result = {}) {
+      return Boolean(result?.directOAuthConsentPage)
+        || getStep7ResultState(result) === 'oauth_consent_page';
+    }
+
+    function isStep7AddEmailResult(result = {}) {
+      return Boolean(result?.addEmailPage) || getStep7ResultState(result) === 'add_email_page';
+    }
+
+    function isStep7AddPhoneResult(result = {}) {
+      return Boolean(result?.addPhonePage) || getStep7ResultState(result) === 'add_phone_page';
+    }
+
+    function isStep7PhoneVerificationResult(result = {}) {
+      return Boolean(result?.phoneVerificationPage) || getStep7ResultState(result) === 'phone_verification_page';
+    }
+
+    function isStep7PlainVerificationResult(result = {}) {
+      return getStep7ResultState(result) === 'verification_page' && !isStep7PhoneVerificationResult(result);
+    }
+
+    function buildStep7CompletionPayload(result = {}, currentState = {}, currentIdentifierType = '', currentPhoneNumber = '') {
+      const phoneSignupMode = currentIdentifierType === 'phone';
+      const payload = {
+        loginVerificationRequestedAt: result.loginVerificationRequestedAt || null,
+      };
+
+      if (currentIdentifierType === 'phone') {
+        payload.accountIdentifierType = 'phone';
+        payload.accountIdentifier = currentPhoneNumber;
+        payload.signupPhoneNumber = currentPhoneNumber;
+        payload.signupPhoneCompletedActivation = currentState?.signupPhoneCompletedActivation || null;
+        payload.signupPhoneActivation = currentState?.signupPhoneActivation || null;
+      }
+
+      if (isStep7OauthConsentResult(result)) {
+        payload.skipLoginVerificationStep = true;
+        payload.directOAuthConsentPage = true;
+        return payload;
+      }
+
+      if (phoneSignupMode) {
+        if (isStep7AddPhoneResult(result)) {
+          throw new Error(`步骤 ${completionStepForState(currentState)}：手机号注册模式 OAuth 登录不应进入添加手机号页。URL: ${result?.url || ''}`.trim());
+        }
+        if (isStep7AddEmailResult(result)) {
+          payload.skipLoginVerificationStep = true;
+          payload.addEmailPage = true;
+          return payload;
+        }
+        if (isStep7PhoneVerificationResult(result)) {
+          return payload;
+        }
+        if (isStep7PlainVerificationResult(result)) {
+          throw new Error(`步骤 ${completionStepForState(currentState)}：手机号注册模式 OAuth 登录进入了普通邮箱登录验证码页，当前流程不会回落到邮箱验证码。URL: ${result?.url || ''}`.trim());
+        }
+        throw new Error(`步骤 ${completionStepForState(currentState)}：手机号注册模式 OAuth 登录进入了不允许的页面：${getLoginAuthStateLabel(result.state)}。URL: ${result?.url || ''}`.trim());
+      }
+
+      if (isStep7AddEmailResult(result)) {
+        throw new Error(`步骤 ${completionStepForState(currentState)}：邮箱注册模式 OAuth 登录不应进入添加邮箱页。URL: ${result?.url || ''}`.trim());
+      }
+      if (isStep7AddPhoneResult(result) || isStep7PhoneVerificationResult(result)) {
+        payload.skipLoginVerificationStep = true;
+        payload.addPhonePage = isStep7AddPhoneResult(result);
+        payload.phoneVerificationPage = isStep7PhoneVerificationResult(result);
+        return payload;
+      }
+      if (isStep7PlainVerificationResult(result)) {
+        return payload;
+      }
+
+      throw new Error(`步骤 ${completionStepForState(currentState)}：邮箱注册模式 OAuth 登录进入了不允许的页面：${getLoginAuthStateLabel(result.state)}。URL: ${result?.url || ''}`.trim());
+    }
+
+    function completionStepForState(state = {}) {
+      const visibleStep = Math.floor(Number(state?.visibleStep) || 0);
+      return visibleStep > 0 ? visibleStep : 7;
+    }
+
+    async function completeStep7PostLoginPhoneHandoff(state = {}, err, completionStep) {
+      if (normalizeStep7SignupMethod(state?.resolvedSignupMethod || state?.signupMethod) === 'phone') {
         throw new Error(
-          `步骤 ${completionStep}：登录提交后页面进入手机号页面，必须先启用接码/phone verification 后才能继续。URL: ${extractAddPhoneUrl(err)}`
+          `步骤 ${completionStep}：手机号注册模式 OAuth 登录进入了添加手机号页，当前流程不允许在手机号注册模式补手机号。URL: ${extractAddPhoneUrl(err)}`
         );
       }
-      if (typeof phoneVerificationHelpers?.completePhoneVerificationFlow !== 'function') {
-        throw new Error(`步骤 ${completionStep}：手机号验证流程不可用，接码模块尚未初始化。`);
-      }
-      if (typeof getTabId !== 'function') {
-        throw new Error(`步骤 ${completionStep}：无法定位认证页面标签页，不能继续手机号验证。`);
-      }
-
-      const signupTabId = await getTabId('signup-page');
-      if (!Number.isInteger(signupTabId)) {
-        throw new Error(`步骤 ${completionStep}：认证页面标签页已关闭，无法继续手机号验证。`);
-      }
-
-      const pageState = {
-        addPhonePage: true,
-        phoneVerificationPage: false,
-        state: 'add_phone_page',
-        url: extractAddPhoneUrl(err),
-      };
-      await phoneVerificationHelpers.completePhoneVerificationFlow(signupTabId, pageState, {
-        step: completionStep,
-        visibleStep: completionStep,
-      });
       await completeNodeFromBackground(state?.nodeId || 'oauth-login', {
         loginVerificationRequestedAt: null,
         skipLoginVerificationStep: true,
-        directOAuthConsentPage: true,
-        phoneVerification: true,
-        loginPhoneVerification: true,
+        addPhonePage: true,
+        directOAuthConsentPage: false,
       });
     }
 
@@ -261,22 +321,12 @@
           }
 
           if (isStep6SuccessResult(result)) {
-            const completionPayload = {
-              loginVerificationRequestedAt: result.loginVerificationRequestedAt || null,
-            };
-            if (currentIdentifierType === 'phone') {
-              completionPayload.accountIdentifierType = 'phone';
-              completionPayload.accountIdentifier = currentPhoneNumber;
-              completionPayload.signupPhoneNumber = currentPhoneNumber;
-              completionPayload.signupPhoneCompletedActivation = currentState?.signupPhoneCompletedActivation || null;
-              completionPayload.signupPhoneActivation = currentState?.signupPhoneActivation || null;
-            }
-            if (Object.prototype.hasOwnProperty.call(result || {}, 'skipLoginVerificationStep')) {
-              completionPayload.skipLoginVerificationStep = Boolean(result.skipLoginVerificationStep);
-            }
-            if (Object.prototype.hasOwnProperty.call(result || {}, 'directOAuthConsentPage')) {
-              completionPayload.directOAuthConsentPage = Boolean(result.directOAuthConsentPage);
-            }
+            const completionPayload = buildStep7CompletionPayload(
+              result,
+              { ...(currentState || {}), visibleStep: completionStep },
+              currentIdentifierType,
+              currentPhoneNumber
+            );
 
             await completeNodeFromBackground(state?.nodeId || 'oauth-login', completionPayload);
             return;
@@ -295,7 +345,7 @@
             const latestAddPhoneState = typeof getState === 'function'
               ? await getState().catch(() => state)
               : state;
-            await completeStep7AddPhoneHandoff(
+            await completeStep7PostLoginPhoneHandoff(
               { ...(state || {}), ...(latestAddPhoneState || {}) },
               err,
               completionStep

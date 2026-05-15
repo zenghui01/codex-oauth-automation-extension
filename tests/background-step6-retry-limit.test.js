@@ -137,7 +137,7 @@ test('step 7 retries up to configured limit and then fails', async () => {
   assert.equal(events.completed, 0);
 });
 
-test('step 7 exits internal retry loop immediately when add-phone is detected', async () => {
+test('step 7 hands add-phone to the dedicated post-login phone node without internal retry', async () => {
   const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
   const globalScope = {};
   const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
@@ -145,7 +145,7 @@ test('step 7 exits internal retry loop immediately when add-phone is detected', 
   const events = {
     refreshCalls: 0,
     sendCalls: 0,
-    completed: 0,
+    completions: [],
     logs: [],
   };
 
@@ -153,8 +153,8 @@ test('step 7 exits internal retry loop immediately when add-phone is detected', 
     addLog: async (message, level = 'info') => {
       events.logs.push({ message, level });
     },
-    completeNodeFromBackground: async () => {
-      events.completed += 1;
+    completeNodeFromBackground: async (step, payload) => {
+      events.completions.push({ step, payload });
     },
     getErrorMessage: (error) => error?.message || String(error || ''),
     getLoginAuthStateLabel: (state) => state || 'unknown',
@@ -174,21 +174,28 @@ test('step 7 exits internal retry loop immediately when add-phone is detected', 
     throwIfStopped: () => {},
   });
 
-  await assert.rejects(
-    () => executor.executeStep7({ email: 'user@example.com', password: 'secret' }),
-    /add-phone/
-  );
+  await executor.executeStep7({ email: 'user@example.com', password: 'secret' });
 
   assert.equal(events.refreshCalls, 1, 'add-phone should stop further OAuth refresh attempts');
   assert.equal(events.sendCalls, 1, 'add-phone should stop after the first failed login attempt');
-  assert.equal(events.completed, 0);
+  assert.deepStrictEqual(events.completions, [
+    {
+      step: 'oauth-login',
+      payload: {
+        loginVerificationRequestedAt: null,
+        skipLoginVerificationStep: true,
+        addPhonePage: true,
+        directOAuthConsentPage: false,
+      },
+    },
+  ]);
   assert.ok(
     !events.logs.some(({ message }) => /准备重试/.test(message)),
     'add-phone failure should not be logged as an internal retryable attempt'
   );
 });
 
-test('step 7 hands direct add-phone to shared phone verification when enabled', async () => {
+test('step 7 no longer runs shared phone verification inside oauth-login', async () => {
   const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
   const globalScope = {};
   const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
@@ -239,36 +246,21 @@ test('step 7 hands direct add-phone to shared phone verification when enabled', 
   });
 
   assert.equal(events.refreshCalls, 1);
-  assert.deepStrictEqual(events.phoneCalls, [
-    {
-      tabId: 91,
-      pageState: {
-        addPhonePage: true,
-        phoneVerificationPage: false,
-        state: 'add_phone_page',
-        url: 'https://auth.openai.com/add-phone',
-      },
-      options: {
-        step: 7,
-        visibleStep: 7,
-      },
-    },
-  ]);
+  assert.deepStrictEqual(events.phoneCalls, []);
   assert.deepStrictEqual(events.completions, [
     {
       step: 'oauth-login',
       payload: {
         loginVerificationRequestedAt: null,
         skipLoginVerificationStep: true,
-        directOAuthConsentPage: true,
-        phoneVerification: true,
-        loginPhoneVerification: true,
+        addPhonePage: true,
+        directOAuthConsentPage: false,
       },
     },
   ]);
 });
 
-test('step 7 direct add-phone stays fatal when phone verification is disabled', async () => {
+test('step 7 add-phone handoff does not depend on phone verification being enabled', async () => {
   const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
   const globalScope = {};
   const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
@@ -304,15 +296,12 @@ test('step 7 direct add-phone stays fatal when phone verification is disabled', 
     throwIfStopped: () => {},
   });
 
-  await assert.rejects(
-    () => executor.executeStep7({ email: 'user@example.com', password: 'secret', phoneVerificationEnabled: false }),
-    /手机号页面.*接码|phone verification/i
-  );
+  await executor.executeStep7({ email: 'user@example.com', password: 'secret', phoneVerificationEnabled: false });
   assert.equal(events.phoneCalls, 0);
-  assert.equal(events.completions, 0);
+  assert.equal(events.completions, 1);
 });
 
-test('step 7 propagates fatal errors from shared add-phone verification', async () => {
+test('step 7 ignores obsolete shared add-phone verifier during handoff', async () => {
   const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
   const globalScope = {};
   const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
@@ -348,12 +337,9 @@ test('step 7 propagates fatal errors from shared add-phone verification', async 
     throwIfStopped: () => {},
   });
 
-  await assert.rejects(
-    () => executor.executeStep7({ email: 'user@example.com', password: 'secret', phoneVerificationEnabled: true }),
-    /没有可用手机号/
-  );
-  assert.equal(events.phoneCalls, 1);
-  assert.equal(events.completions, 0);
+  await executor.executeStep7({ email: 'user@example.com', password: 'secret', phoneVerificationEnabled: true });
+  assert.equal(events.phoneCalls, 0);
+  assert.equal(events.completions, 1);
 });
 
 test('step 7 starts a new oauth timeout window for each refreshed oauth url', async () => {
@@ -382,6 +368,7 @@ test('step 7 starts a new oauth timeout window for each refreshed oauth url', as
     reuseOrCreateTab: async () => {},
     sendToContentScriptResilient: async (_source, _message, options) => ({
       step6Outcome: 'success',
+      state: 'verification_page',
       usedTimeoutMs: options.timeoutMs,
     }),
     startOAuthFlowTimeoutWindow: async (payload) => {
